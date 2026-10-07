@@ -14,7 +14,7 @@ BUILD="$(date +%Y%m%d%H%M)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-echo "==> Building $BUILD…"
+echo "==> Building ${BUILD}…"
 xcodebuild -project "$ROOT/Otto.xcodeproj" -scheme Otto -configuration Release \
   -destination 'generic/platform=iOS' -derivedDataPath "$WORK/dd" \
   CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION="$BUILD" build -quiet
