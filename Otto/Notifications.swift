@@ -36,6 +36,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func requestPermission() {
+        #if DEBUG
+        // `-noNotificationPrompt`: keep the system alert off simulator screenshots.
+        if ProcessInfo.processInfo.arguments.contains("-noNotificationPrompt") { return }
+        #endif
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 

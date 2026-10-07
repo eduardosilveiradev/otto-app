@@ -55,7 +55,7 @@ final class OttoStore {
     @ObservationIgnored private var typingTimeout: Task<Void, Never>?
     /// Off for the first load so the saved thread appears at once instead of popping in.
     var animated = false
-    /// Otto sleeps while the server is unreachable or inside quiet hours.
+    /// Otto sleeps while the server is unreachable.
     var asleep = false
     var connected = false
     /// The message a swipe picked to answer; the composer shows it until you send or cancel.
@@ -98,19 +98,7 @@ final class OttoStore {
         try? JSONEncoder().encode(messages).write(to: file, options: .atomic)
     }
 
-    /// Quiet hours as minutes after midnight (Settings writes these). Defaults match
-    /// the server's 23:30–08:00; they don't sync from it.
-    static var quietStart: Int { UserDefaults.standard.object(forKey: "quietStart") as? Int ?? 23 * 60 + 30 }
-    static var quietEnd: Int { UserDefaults.standard.object(forKey: "quietEnd") as? Int ?? 8 * 60 }
-
-    static func inQuietHours(_ now: Date = .now) -> Bool {
-        let c = Calendar.current.dateComponents([.hour, .minute], from: now)
-        let m = c.hour! * 60 + c.minute!
-        let (s, e) = (quietStart, quietEnd)
-        return s <= e ? (m >= s && m < e) : (m >= s || m < e)   // a window may wrap midnight
-    }
-
-    /// isLive isn't observable and quiet hours move with the clock, so re-read both every second.
+    /// isLive isn't observable, so re-read it every second.
     private func tick() async {
         var seen = backend.connections
         while !Task.isCancelled {
@@ -123,8 +111,7 @@ final class OttoStore {
                 Task { await resendPending() }
             }
             if live != connected { connected = live }
-            let sleep = !live || Self.inQuietHours()
-            if sleep != asleep { asleep = sleep }
+            if !live != asleep { asleep = !live }
             try? await Task.sleep(for: .seconds(1))
         }
     }
@@ -138,7 +125,7 @@ final class OttoStore {
             messages = (0..<8).map { Message(from: $0 % 2 == 0 ? .me : .otto, text: $0 == 7 ? "LAST " + long : long) }
         }
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
-        if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = "Reading ChatView.swift" }
+        if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift" }
         #endif
         // Anything the server has that's newer than what's saved here, e.g. replies
         // that landed while the app was closed.

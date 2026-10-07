@@ -740,7 +740,6 @@ private struct EmptyChat: View {
     
     private var line: String {
         if !connected { return "Can't reach the server. What you send goes out when it's back." }
-        if asleep { return "Asleep for quiet hours. Messages wait till morning." }
         return "Say hi. Reminders, mail, plans: I'll keep track of the rest."
     }
     var body: some View {

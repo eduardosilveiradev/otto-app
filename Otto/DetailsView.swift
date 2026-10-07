@@ -12,9 +12,6 @@ struct DetailsView: View {
     @State private var speakReplies = true
     /// Keepalive: instant notifications for some battery. Read by Keepalive.enabled.
     @AppStorage("stayAwake") private var stayAwake = true
-    // Minutes after midnight; OttoStore reads the same keys to decide when Otto sleeps.
-    @AppStorage("quietStart") private var quietStart = 23 * 60 + 30
-    @AppStorage("quietEnd") private var quietEnd = 8 * 60
     @State private var snoozedUntil: Date?
     @State private var done: Set<Loop.ID> = []
 
@@ -28,8 +25,7 @@ struct DetailsView: View {
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
                             Text(store.backend is MockBackend ? "mock data"
-                                 : !store.connected ? "asleep — can't reach the server"
-                                 : store.asleep ? "asleep — quiet hours" : "connected")
+                                 : !store.connected ? "asleep — can't reach the server" : "connected")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
@@ -51,8 +47,6 @@ struct DetailsView: View {
                     }
                     Toggle("Speak replies when I speak", isOn: $speakReplies)
                     Toggle("Stay connected in background", isOn: $stayAwake)
-                    DatePicker("Quiet from", selection: minutes($quietStart), displayedComponents: .hourAndMinute)
-                    DatePicker("Quiet until", selection: minutes($quietEnd), displayedComponents: .hourAndMinute)
                 }
 
                 Section {
@@ -97,12 +91,5 @@ struct DetailsView: View {
                 }
             }
         }
-    }
-
-    /// A minutes-after-midnight setting as the Date a DatePicker wants.
-    private func minutes(_ m: Binding<Int>) -> Binding<Date> {
-        Binding(
-            get: { Calendar.current.startOfDay(for: .now).addingTimeInterval(Double(m.wrappedValue) * 60) },
-            set: { let c = Calendar.current.dateComponents([.hour, .minute], from: $0); m.wrappedValue = c.hour! * 60 + c.minute! })
     }
 }
