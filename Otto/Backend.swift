@@ -47,6 +47,16 @@ struct RemoteFile: Codable, Hashable {
     let kind: String
 }
 
+/// The reply in the works, step by step: what a tap on the typing bubble shows.
+struct LiveTask: Equatable {
+    struct Step: Equatable { let label: String; let date: Date }
+    let id: String
+    var steps: [Step]
+    /// The latest screenshot Otto took for it, a small JPEG.
+    var screenshot: Data?
+    var done: Bool
+}
+
 struct CalEvent: Identifiable { let id = UUID(); let title: String; let start: Date; let minutes: Int }
 struct MailItem: Identifiable { let id = UUID(); let from: String; let subject: String }
 struct Loop: Identifiable { let id = UUID(); let title: String; let due: Date? }
@@ -77,6 +87,8 @@ protocol OttoBackend: AnyObject {
     var reactions: AsyncStream<(String, String)> { get }
     /// What Otto is doing right now ("Reading ChatView.swift"), while a reply is on its way.
     var statuses: AsyncStream<String> { get }
+    /// Every step of the reply in the works so far, again on each new one.
+    var steps: AsyncStream<LiveTask> { get }
     /// wireIDs of your messages Otto has just taken in.
     var reads: AsyncStream<[String]> { get }
     func history() async -> [Message]
@@ -101,6 +113,7 @@ final class MockBackend: OttoBackend {
     let incoming: AsyncStream<Message>
     let reactions = AsyncStream<(String, String)> { _ in }
     let statuses = AsyncStream<String> { _ in }
+    let steps = AsyncStream<LiveTask> { _ in }
     let reads = AsyncStream<[String]> { _ in }
     private let out: AsyncStream<Message>.Continuation
 

@@ -9,6 +9,7 @@ struct ChatView: View {
     @State private var showDetails = false
     @State private var showCall = false
     @State private var webCall = false
+    @State private var showSteps = false
     /// Otto's phone line (the Vapi assistant). Set in details; dialled with the phone app.
     @AppStorage("callNumber") private var callNumber = ""
     @Environment(\.openURL) private var openURL
@@ -54,7 +55,9 @@ struct ChatView: View {
                                 removal: .opacity))
                     }
                     if store.ottoTyping {
-                        Typing(status: store.ottoStatus).padding(.top, 10).id("typing")
+                        Typing(status: store.ottoStatus,
+                               onTap: store.liveTask.map { !$0.done && !$0.steps.isEmpty } == true ? { showSteps = true } : nil)
+                            .padding(.top, 10).id("typing")
                             .transition(.scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity))
                     }
                 }
@@ -108,6 +111,7 @@ struct ChatView: View {
                 .allowsHitTesting(false)
         }
         .sheet(isPresented: $showDetails) { DetailsView() }
+        .sheet(isPresented: $showSteps) { StepsSheet() }
         .fullScreenCover(isPresented: $webCall) { CallView() }
         .alert("Calling Otto", isPresented: $showCall) {
             Button("OK", role: .cancel) {}
@@ -699,8 +703,21 @@ private struct Tapback: View {
 private struct Typing: View {
     /// What Otto is doing, shown beside the dots; nil is just the dots.
     let status: String?
+    /// Set once there are steps to show; the bubble then opens them.
+    let onTap: (() -> Void)?
     @State private var phase = 0
     var body: some View {
+        if let onTap {
+            Button(action: onTap) { bubble }
+                .buttonStyle(.plain)
+                .accessibilityLabel(status.map { "Otto is working: \($0)" } ?? "Otto is working")
+                .accessibilityHint("Shows each step")
+        } else {
+            bubble
+        }
+    }
+
+    private var bubble: some View {
         HStack(spacing: 8) {
             HStack(spacing: 4) {
                 ForEach(0..<3, id: \.self) { i in
@@ -715,8 +732,13 @@ private struct Typing: View {
                     .id(status)
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
+            if onTap != nil {
+                Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
+                    .transition(.opacity)
+            }
         }
         .animation(.snappy(duration: 0.25), value: status)
+        .animation(.snappy(duration: 0.25), value: onTap != nil)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14).padding(.vertical, 12)
         .background(BubbleShape(mine: false, tail: true).fill(Color(.systemGray5)))
@@ -728,6 +750,66 @@ private struct Typing: View {
                 withAnimation { phase = (phase + 1) % 3 }
             }
         }
+    }
+}
+
+/// What the typing bubble opens: each step of the reply in the works, newest at the
+/// bottom, under the latest screenshot if Otto took one. Stays up after the reply lands.
+private struct StepsSheet: View {
+    @Environment(OttoStore.self) private var store
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let task = store.liveTask {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(Array(task.steps.enumerated()), id: \.offset) { i, step in
+                                let current = !task.done && i == task.steps.count - 1
+                                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                    Image(systemName: current ? "circle.dotted" : "checkmark.circle.fill")
+                                        .foregroundStyle(current ? Color.orange : Color.secondary)
+                                        .symbolEffect(.pulse, isActive: current)
+                                        .accessibilityHidden(true)
+                                    Text(step.label).font(.body)
+                                        .foregroundStyle(current ? .primary : .secondary)
+                                    Spacer(minLength: 8)
+                                    Text(step.date, format: .dateTime.hour().minute().second())
+                                        .font(.caption).monospacedDigit().foregroundStyle(.tertiary)
+                                }
+                                .accessibilityElement(children: .combine)
+                            }
+                            if task.done {
+                                Label("Done", systemImage: "checkmark")
+                                    .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                                    .padding(.top, 4)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                    }
+                    .defaultScrollAnchor(.bottom)
+                    .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                    .animation(.snappy, value: task.steps.count)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if let data = task.screenshot, let img = UIImage(data: data) {
+                            Image(uiImage: img).resizable().scaledToFit()
+                                .frame(maxHeight: 220)
+                                .clipShape(.rect(cornerRadius: 12, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(.separator)))
+                                .padding(.horizontal).padding(.top, 8)
+                                .accessibilityLabel("Otto's latest screenshot")
+                        }
+                    }
+                } else {
+                    ContentUnavailableView("Nothing running", systemImage: "ellipsis")
+                }
+            }
+            .navigationTitle(store.liveTask?.done == true ? "Done" : "Working on it")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }
 

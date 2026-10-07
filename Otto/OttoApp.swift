@@ -44,6 +44,8 @@ final class OttoStore {
     }
     /// The live line inside the dots bubble: the tool Otto is running right now.
     var ottoStatus: String?
+    /// Every step of the reply in the works (or the last one); tapping the dots shows it.
+    var liveTask: LiveTask?
 
     private func armTypingTimeout() {
         typingTimeout?.cancel()
@@ -138,7 +140,12 @@ final class OttoStore {
             messages = (0..<8).map { Message(from: $0 % 2 == 0 ? .me : .otto, text: $0 == 7 ? "LAST " + long : long) }
         }
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
-        if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = "Reading ChatView.swift" }
+        if ProcessInfo.processInfo.arguments.contains("-thinking") {
+            ottoTyping = true; ottoStatus = "Reading ChatView.swift"
+            liveTask = LiveTask(id: "demo", steps: [.init(label: "Checking mail", date: .now.addingTimeInterval(-9)),
+                                                    .init(label: "Remembering", date: .now.addingTimeInterval(-4)),
+                                                    .init(label: "Reading ChatView.swift", date: .now)], done: false)
+        }
         #endif
         // Anything the server has that's newer than what's saved here, e.g. replies
         // that landed while the app was closed.
@@ -156,6 +163,14 @@ final class OttoStore {
                 ottoTyping = true
                 ottoStatus = text
                 armTypingTimeout()
+            }
+        }
+        Task {
+            for await t in backend.steps {
+                var t = t
+                // The screenshot rides only the frame after it changes; keep the last one.
+                if t.screenshot == nil, liveTask?.id == t.id { t.screenshot = liveTask?.screenshot }
+                liveTask = t
             }
         }
         Task {

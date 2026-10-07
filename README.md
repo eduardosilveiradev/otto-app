@@ -16,7 +16,8 @@ what Otto knows about your day.
 - Text, photos and voice notes to Otto; Otto's replies, photos, files and
   spoken replies back
 - Swipe to reply, long-press for tapbacks, double-tap for a quick ❤️
-- A live status line in the typing bubble while Otto works, and
+- A live status line in the typing bubble while Otto works (tap it for every
+  step so far, and the latest screenshot if Otto took one), and
   Delivered / Read receipts
 - Otto's one-tap buttons
 - The day at a glance: calendar, inbox, open loops, armed triggers
