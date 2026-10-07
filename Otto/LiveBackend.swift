@@ -214,6 +214,8 @@ final class LiveBackend: OttoBackend {
         }
     }
 
+    func release() async -> Release? { await get("app/update") }
+
     // MARK: HTTP
 
     private func get<T: Decodable>(_ path: String) async -> T? {

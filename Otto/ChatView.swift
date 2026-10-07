@@ -114,9 +114,26 @@ struct ChatView: View {
         } message: { Text("Add Otto's phone number in details (tap Otto's name).") }
     }
 
+    static func sideStoreInstall(_ ipa: String) -> URL? {
+        var c = URLComponents()
+        c.scheme = "sidestore"; c.host = "install"
+        c.queryItems = [URLQueryItem(name: "url", value: ipa)]
+        return c.url
+    }
+
     private var header: some View {
         ZStack {
             HStack {
+                if let u = store.update, let link = Self.sideStoreInstall(u.ipa) {
+                    // SideStore downloads, re-signs and installs; it asks before replacing the app.
+                    Button { openURL(link) } label: {
+                        Label("Update", systemImage: "arrow.down.circle.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 12).frame(height: 40)
+                            .glassEffect(.regular.interactive(), in: .capsule)
+                    }
+                    .tint(.accentColor)
+                }
                 Spacer()
                 Button {
                     // Web call (free, over the internet) when Vapi is set up; the phone line otherwise.

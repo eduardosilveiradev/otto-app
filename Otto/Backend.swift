@@ -52,6 +52,14 @@ struct MailItem: Identifiable { let id = UUID(); let from: String; let subject: 
 struct Loop: Identifiable { let id = UUID(); let title: String; let due: Date? }
 struct Trigger: Identifiable { let id = UUID(); let title: String; let next: Date }
 
+/// A build the Mac is offering (`GET /app/update`). `ipa` is a public link SideStore can fetch.
+struct Release: Decodable {
+    let version: String
+    let build: String
+    let ipa: String
+    let source: String
+}
+
 struct Brief {
     var asOf: Date
     var events: [CalEvent]
@@ -90,6 +98,11 @@ protocol OttoBackend: AnyObject {
     /// A file Otto sent (RemoteFile.id). Nil when it's gone, e.g. after a server restart.
     func file(_ id: String) async -> Data?
     func brief() async -> Brief
+    func release() async -> Release?
+}
+
+extension OttoBackend {
+    func release() async -> Release? { nil }
 }
 
 // MARK: - Mock

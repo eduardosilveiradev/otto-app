@@ -34,6 +34,8 @@ final class OttoStore {
     var foreground = true
     var messages: [Message] = [] { didSet { save() } }
     var brief: Brief?
+    /// A newer build than this one, when the Mac has published it.
+    var update: Release?
     /// Dots under the thread while a reply is on its way. Otto may also say nothing at all,
     /// so they give up after three minutes; a real answer can take that long, rarely longer.
     var ottoTyping = false {
@@ -94,6 +96,18 @@ final class OttoStore {
         return history.filter { !known.contains($0.wireID) && $0.date > last.addingTimeInterval(1) }
     }
 
+    private func checkForUpdate() async {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-fakeUpdate") {
+            update = Release(version: "0.1", build: "999", ipa: "https://example.invalid/Otto.ipa", source: "")
+            return
+        }
+        #endif
+        let mine = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+        guard let r = await backend.release(), r.build.compare(mine, options: .numeric) == .orderedDescending else { return }
+        update = r
+    }
+
     private func save() {
         try? JSONEncoder().encode(messages).write(to: file, options: .atomic)
     }
@@ -137,6 +151,7 @@ final class OttoStore {
         animated = true
         Task { await resendPending() }
         brief = await backend.brief()
+        Task { await checkForUpdate() }
         Task {
             // Each step is proof Otto is still at it, so it also restarts the timeout.
             for await text in backend.statuses {
