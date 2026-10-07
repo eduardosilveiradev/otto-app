@@ -32,6 +32,7 @@ cp -R "$APP" "$WORK/ipa/Payload/"
 # Copy, then rename: the server may be serving the old one right now.
 cp "$WORK/ipa/Otto.ipa" "$OUT/Otto.ipa.tmp" && mv "$OUT/Otto.ipa.tmp" "$OUT/Otto.ipa"
 cp "$WORK/ipa/Otto.ipa" "$ROOT/build/Otto.ipa" 2>/dev/null || true
+cp "$ROOT/Otto/Assets.xcassets/AppIcon.appiconset/icon-1024.png" "$OUT/icon.png"   # SideStore requires an icon
 printf '{"version":"%s","build":"%s","date":"%s","size":%s}\n' \
   "$VERSION" "$BUILD" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(stat -f%z "$OUT/Otto.ipa")" > "$OUT/release.json"
 
