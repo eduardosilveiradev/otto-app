@@ -481,6 +481,7 @@ private struct Row: View {
     let receipt: Bool?
     let onTap: (ActionButton) -> Void
     @State private var swipe: CGFloat = 0
+    @State private var selecting = false
     private var mine: Bool { message.from == .me }
     private static let tapbacks = ["❤️", "👍", "👎", "😂", "‼️", "❓"]
     /// How far a swipe has to pull before letting go means "reply".
@@ -520,6 +521,12 @@ private struct Row: View {
                     .controlGroupStyle(.palette)
                     Button("Reply", systemImage: "arrowshape.turn.up.left") { store.replyingTo = message.id }
                     Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
+                    Button("Select Text", systemImage: "selection.pin.in.out") { selecting = true }
+                }
+                .sheet(isPresented: $selecting) {
+                    SelectableText(text: message.text)
+                        .presentationDetents([.medium, .large])
+                        .presentationDragIndicator(.visible)
                 }
                 .overlay(alignment: mine ? .topLeading : .topTrailing) {
                     if let r = message.reaction { Tapback(emoji: r, mine: mine) }
@@ -929,5 +936,27 @@ final class KeyboardDock: UIViewController {
         // drag-to-dismiss calls it every frame outside any block. ChatView animates the former.
         ui.insetAnimated = UIView.inheritedAnimationDuration > 0
         ui.bottomInset = covered
+    }
+}
+
+
+/// A message's text with real selection handles, for copying part of it.
+/// SwiftUI's `.textSelection` only offers the whole string on iOS.
+private struct SelectableText: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let v = UITextView()
+        v.isEditable = false
+        v.isSelectable = true
+        v.font = .systemFont(ofSize: 17)
+        v.textContainerInset = UIEdgeInsets(top: 28, left: 16, bottom: 16, right: 16)
+        v.dataDetectorTypes = [.link, .phoneNumber]
+        v.text = text
+        return v
+    }
+
+    func updateUIView(_ v: UITextView, context: Context) {
+        if v.text != text { v.text = text }
     }
 }
