@@ -20,6 +20,11 @@ xcodebuild -project "$ROOT/Otto.xcodeproj" -scheme Otto -configuration Release \
   CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION="$BUILD" build -quiet
 
 APP="$WORK/dd/Build/Products/Release-iphoneos/Otto.app"
+# An unsigned build carries no entitlements, and SideStore reads them off the signature to
+# know which app group to register for the app and its share extension. Sign ad hoc with
+# them, extension first; SideStore re-signs both for real on the phone.
+codesign -f -s - --entitlements "$ROOT/OttoShare.entitlements" "$APP/PlugIns/OttoShare.appex"
+codesign -f -s - --entitlements "$ROOT/Otto.entitlements" "$APP"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Info.plist")"
 mkdir -p "$WORK/ipa/Payload" "$OUT"
 cp -R "$APP" "$WORK/ipa/Payload/"

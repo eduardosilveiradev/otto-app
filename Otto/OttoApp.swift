@@ -16,6 +16,7 @@ struct OttoApp: App {
         }
         .onChange(of: phase) { _, p in
             store.foreground = p == .active
+            if p == .active { store.sendShared() }
             if p == .background { Notifier.scheduleRefresh() }
             Grace.update(background: p == .background)
             Keepalive.update(background: p == .background)
@@ -150,6 +151,8 @@ final class OttoStore {
         if !fresh.isEmpty { messages += fresh }
         animated = true
         Task { await resendPending() }
+        sendShared()
+        ShareOutbox.observe(ShareOutbox.ping) { [weak self] in MainActor.assumeIsolated { self?.sendShared() } }
         brief = await backend.brief()
         Task { await checkForUpdate() }
         Task {
@@ -216,6 +219,19 @@ final class OttoStore {
             ottoTyping = true
             ottoStatus = nil   // a new message starts a new reply; the last one's step is stale
         }
+    }
+
+    /// Whatever the share extension left (see ShareOutbox), sent as if typed here. Runs at
+    /// launch, on coming to the front, and the moment the extension pings a running app.
+    func sendShared() {
+        let draft = replyingTo
+        replyingTo = nil   // a share is its own message, not an answer to the one being replied to
+        let n = ShareOutbox.drain { text, jpeg in
+            if let jpeg, let image = UIImage(data: jpeg) { sendPhoto(image, caption: text) }
+            else if !text.isEmpty { send(text) }
+        }
+        replyingTo = draft
+        if n > 0 { ShareOutbox.post(ShareOutbox.ack) }
     }
 
     /// Everything still unsent, oldest first. Runs at launch and on every reconnect.
