@@ -482,7 +482,22 @@ private struct Row: View {
     let onTap: (ActionButton) -> Void
     @State private var swipe: CGFloat = 0
     @State private var selecting = false
+    @State private var link: URL?
+    @State private var sharing: URL?
+    @Environment(\.openURL) private var openURL
     private var mine: Bool { message.from == .me }
+
+    /// The text with its URLs marked as links (underlined, so they read on either bubble colour).
+    static func linked(_ s: String) -> AttributedString {
+        var a = AttributedString(s)
+        guard let d = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return a }
+        for m in d.matches(in: s, range: NSRange(s.startIndex..., in: s)) {
+            guard let url = m.url, let r = Range(m.range, in: s), let ar = Range(r, in: a) else { continue }
+            a[ar].link = url
+            a[ar].underlineStyle = .single
+        }
+        return a
+    }
     private static let tapbacks = ["❤️", "👍", "👎", "😂", "‼️", "❓"]
     /// How far a swipe has to pull before letting go means "reply".
     private static let replyAt: CGFloat = 60
@@ -503,8 +518,19 @@ private struct Row: View {
             ForEach(message.files ?? [], id: \.id) { RemoteFileView(file: $0) }
             if let audio = message.audio { AudioChip(file: audio) }
             if message.image == nil || !message.text.isEmpty {
-            (message.isVoice && message.audio == nil ? Text("\(Image(systemName: "waveform")) \(message.text.isEmpty ? "Voice message" : message.text)") : Text(message.text))
+            (message.isVoice && message.audio == nil ? Text("\(Image(systemName: "waveform")) \(message.text.isEmpty ? "Voice message" : message.text)") : Text(Self.linked(message.text)))
                 .font(.system(size: 17))
+                .tint(mine ? .white : .blue)
+                // A tapped link asks what to do with it rather than leaving the app.
+                .environment(\.openURL, OpenURLAction { url in link = url; return .handled })
+                .confirmationDialog(link?.absoluteString ?? "", isPresented: Binding(get: { link != nil }, set: { if !$0 { link = nil } }), titleVisibility: .visible) {
+                    if let url = link {
+                        Button("Open") { openURL(url) }
+                        Button("Copy") { UIPasteboard.general.url = url }
+                        Button("Share…") { sharing = url }
+                    }
+                }
+                .sheet(item: $sharing) { ShareSheet(items: [$0]).presentationDetents([.medium, .large]) }
                 .padding(.horizontal, 12).padding(.vertical, 7)
                 .foregroundStyle(mine ? .white : .primary)
                 .background(BubbleShape(mine: mine, tail: tail).fill(mine ? Color.blue : Color(.systemGray5)))
@@ -522,6 +548,13 @@ private struct Row: View {
                     Button("Reply", systemImage: "arrowshape.turn.up.left") { store.replyingTo = message.id }
                     Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
                     Button("Select Text", systemImage: "selection.pin.in.out") { selecting = true }
+                    // The same choices a tapped link gets, for the first link in the message.
+                    if let url = Self.linked(message.text).runs.lazy.compactMap(\.link).first {
+                        Divider()
+                        Button("Open Link", systemImage: "safari") { openURL(url) }
+                        Button("Copy Link", systemImage: "link") { UIPasteboard.general.url = url }
+                        Button("Share Link…", systemImage: "square.and.arrow.up") { sharing = url }
+                    }
                 }
                 .sheet(isPresented: $selecting) {
                     SelectableText(text: message.text)
@@ -939,6 +972,17 @@ final class KeyboardDock: UIViewController {
     }
 }
 
+
+extension URL: @retroactive Identifiable { public var id: String { absoluteString } }
+
+/// The system share sheet.
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
 
 /// A message's text with real selection handles, for copying part of it.
 /// SwiftUI's `.textSelection` only offers the whole string on iOS.
