@@ -5,11 +5,12 @@ struct DetailsView: View {
     @Environment(OttoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     // Server URL and token persist (LiveBackend.fromDefaults reads them at launch).
-    // speakReplies and `done` are still local only: nothing reads them yet.
+    // Speak-replies, snooze and closed loops live on the Mac.
     @AppStorage("serverURL") private var server = ""
     @AppStorage("serverToken") private var token = ""
     @AppStorage("callNumber") private var callNumber = ""
-    @State private var speakReplies = true
+    /// Nil until the Mac has said; the switch shows on and stays put until then.
+    @State private var speakReplies: Bool?
     /// Keepalive: instant notifications for some battery. Read by Keepalive.enabled.
     @AppStorage("stayAwake") private var stayAwake = true
     @State private var done: Set<Loop.ID> = []
@@ -44,7 +45,13 @@ struct DetailsView: View {
                             }
                         }
                     }
-                    Toggle("Speak replies when I speak", isOn: $speakReplies)
+                    Toggle("Speak replies when I speak", isOn: Binding(
+                        get: { speakReplies ?? true },
+                        set: { on in
+                            speakReplies = on
+                            Task { speakReplies = await store.backend.speakReplies(set: on) ?? !on }
+                        }))
+                        .disabled(speakReplies == nil)
                     Toggle("Stay connected in background", isOn: $stayAwake)
                 }
 
@@ -58,7 +65,11 @@ struct DetailsView: View {
                 }
             }
             .refreshable { await store.refreshBrief(); await store.setSnooze(nil) }
-            .task { await store.setSnooze(nil) }
+            .task {
+                async let s: Void = store.setSnooze(nil)
+                speakReplies = await store.backend.speakReplies(set: nil)
+                await s
+            }
             .toolbar { Button("Done") { dismiss() } }
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -124,7 +135,11 @@ struct DetailsView: View {
             Section("Open loops") {
                 ForEach(b.loops) { l in
                     let closed = done.contains(l.id)
-                    Button { done.formSymmetricDifference([l.id]) } label: {
+                    Button {
+                        // Shown at once, put back if the Mac doesn't take it.
+                        done.formSymmetricDifference([l.id])
+                        Task { if !(await store.backend.setLoop(l.id, done: !closed)) { done.formSymmetricDifference([l.id]) } }
+                    } label: {
                         HStack(spacing: 12) {
                             Image(systemName: closed ? "checkmark" : l.title.contains("€") ? "eurosign" : "arrow.turn.up.left")
                                 .font(.system(size: 12, weight: .semibold))
@@ -132,7 +147,7 @@ struct DetailsView: View {
                                 .frame(width: 26, height: 26)
                                 .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 7, style: .continuous))
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(l.title).strikethrough(closed)
+                                Text(l.title).strikethrough(closed).lineLimit(2)
                                     .foregroundStyle(closed ? .secondary : .primary)
                                 if let due = l.due, !closed {
                                     Text("due \(due.formatted(.dateTime.weekday(.wide)))")

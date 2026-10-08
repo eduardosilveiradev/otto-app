@@ -136,7 +136,7 @@ final class LiveBackend: OttoBackend {
             },
             inbox: (b.inbox ?? []).map { MailItem(from: $0.from, subject: $0.subject) },
             bulk: b.bulk,
-            loops: b.loops.map { Loop(title: $0.title, due: $0.due.flatMap(Self.date)) },
+            loops: b.loops.map { Loop(id: $0.id ?? UUID().uuidString, title: $0.title, due: $0.due.flatMap(Self.date)) },
             triggers: b.triggers.compactMap { t in Self.date(t.next).map { Trigger(title: t.title, next: $0) } }
         )
     }
@@ -220,6 +220,22 @@ final class LiveBackend: OttoBackend {
 
     func release() async -> Release? { await get("app/update") }
 
+    func setLoop(_ id: String, done: Bool) async -> Bool {
+        guard let body = try? JSONSerialization.data(withJSONObject: ["id": id, "done": done]) else { return false }
+        return await post("app/loop", body) != nil
+    }
+
+    func speakReplies(set: Bool?) async -> Bool? {
+        struct Settings: Decodable { let speakReplies: Bool }
+        if let set {
+            guard let body = try? JSONSerialization.data(withJSONObject: ["speakReplies": set]),
+                  let data = await post("app/settings", body) else { return nil }
+            return (try? JSONDecoder().decode(Settings.self, from: data))?.speakReplies
+        }
+        let s: Settings? = await get("app/settings")
+        return s?.speakReplies
+    }
+
     func snooze(_ change: SnoozeChange?) async -> Snooze? {
         var req = URLRequest(url: base.appendingPathComponent("app/snooze"))
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -277,7 +293,7 @@ final class LiveBackend: OttoBackend {
     private struct WireBrief: Decodable {
         struct Event: Decodable { let title: String; let start: String; let minutes: Int }
         struct Mail: Decodable { let from: String; let subject: String }
-        struct LoopItem: Decodable { let title: String; let due: String? }
+        struct LoopItem: Decodable { let id: String?; let title: String; let due: String? }
         struct Armed: Decodable { let title: String; let next: String }
         let asOf: String
         let events: [Event]?

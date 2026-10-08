@@ -49,7 +49,8 @@ struct RemoteFile: Codable, Hashable {
 
 struct CalEvent: Identifiable { let id = UUID(); let title: String; let start: Date; let minutes: Int }
 struct MailItem: Identifiable { let id = UUID(); let from: String; let subject: String }
-struct Loop: Identifiable { let id = UUID(); let title: String; let due: Date? }
+/// `id` is the server's note id, which closing one needs.
+struct Loop: Identifiable { var id = UUID().uuidString; let title: String; let due: Date? }
 struct Trigger: Identifiable { let id = UUID(); let title: String; let next: Date }
 
 /// The hold on Otto's non-urgent messages (`/app/snooze`). `until` is nil when there's none.
@@ -124,11 +125,17 @@ protocol OttoBackend: AnyObject {
     func release() async -> Release?
     /// Reads the snooze (nil), snoozes or extends it by `.minutes`, or ends it and delivers what it held.
     func snooze(_ change: SnoozeChange?) async -> Snooze?
+    /// Closes an open loop, or reopens it. False when the Mac didn't take it.
+    func setLoop(_ id: String, done: Bool) async -> Bool
+    /// "Speak replies when I speak", which lives on the Mac. `set` nil just reads it.
+    func speakReplies(set: Bool?) async -> Bool?
 }
 
 extension OttoBackend {
     func release() async -> Release? { nil }
     func snooze(_ change: SnoozeChange?) async -> Snooze? { nil }
+    func setLoop(_ id: String, done: Bool) async -> Bool { !isLive }
+    func speakReplies(set: Bool?) async -> Bool? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
 }
 
