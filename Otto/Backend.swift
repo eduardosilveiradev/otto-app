@@ -52,6 +52,27 @@ struct MailItem: Identifiable { let id = UUID(); let from: String; let subject: 
 struct Loop: Identifiable { let id = UUID(); let title: String; let due: Date? }
 struct Trigger: Identifiable { let id = UUID(); let title: String; let next: Date }
 
+/// The hold on Otto's non-urgent messages (`/app/snooze`). `until` is nil when there's none.
+struct Snooze: Decodable {
+    struct Held: Decodable, Hashable { let text: String; let at: Date }
+    var until: Date?
+    var since: Date?
+    var held: [Held]
+
+    /// The server's dates are ISO 8601 with milliseconds, which `.iso8601` won't read.
+    static let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .custom { dec in
+            let s = try dec.singleValueContainer().decode(String.self)
+            if let date = try? Date(s, strategy: .iso8601.year().month().day().time(includingFractionalSeconds: true)) ?? Date(s, strategy: .iso8601) { return date }
+            throw DecodingError.dataCorrupted(.init(codingPath: dec.codingPath, debugDescription: "not a date: \(s)"))
+        }
+        return d
+    }()
+}
+
+enum SnoozeChange { case minutes(Int), clear }
+
 /// A build the Mac is offering (`GET /app/update`). `ipa` is a public link SideStore can fetch.
 struct Release: Decodable {
     let version: String
@@ -101,10 +122,13 @@ protocol OttoBackend: AnyObject {
     func file(_ id: String) async -> Data?
     func brief() async -> Brief
     func release() async -> Release?
+    /// Reads the snooze (nil), snoozes or extends it by `.minutes`, or ends it and delivers what it held.
+    func snooze(_ change: SnoozeChange?) async -> Snooze?
 }
 
 extension OttoBackend {
     func release() async -> Release? { nil }
+    func snooze(_ change: SnoozeChange?) async -> Snooze? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
 }
 
@@ -149,6 +173,25 @@ final class MockBackend: OttoBackend {
     func sendVoice(_ m4a: Data, id: String) async -> String {
         out.yield(Message(from: .otto, text: "(mock) heard you"))
         return "(mock transcript)"
+    }
+
+    /// `-snoozed` starts it snoozed, for the card.
+    private var snoozed: Snooze? = ProcessInfo.processInfo.arguments.contains("-snoozed")
+        ? Snooze(until: .now.addingTimeInterval(1800), since: .now.addingTimeInterval(-1800),
+                 held: [.init(text: "Marco read your message", at: .now.addingTimeInterval(-1500)),
+                        .init(text: "A Figma newsletter", at: .now.addingTimeInterval(-900)),
+                        .init(text: "Enel bill, €112, due Friday", at: .now.addingTimeInterval(-300))])
+        : nil
+
+    func snooze(_ change: SnoozeChange?) async -> Snooze? {
+        switch change {
+        case nil: break
+        case .clear?: snoozed = nil
+        case .minutes(let m)?:
+            let from = snoozed?.until ?? .now
+            snoozed = Snooze(until: from.addingTimeInterval(Double(m) * 60), since: snoozed?.since ?? .now, held: snoozed?.held ?? [])
+        }
+        return snoozed ?? Snooze(until: nil, since: nil, held: [])
     }
 
     func brief() async -> Brief {

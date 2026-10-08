@@ -220,6 +220,23 @@ final class LiveBackend: OttoBackend {
 
     func release() async -> Release? { await get("app/update") }
 
+    func snooze(_ change: SnoozeChange?) async -> Snooze? {
+        var req = URLRequest(url: base.appendingPathComponent("app/snooze"))
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let change {
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: Any] = switch change {
+            case .minutes(let m): ["minutes": m]
+            case .clear: ["clear": true]
+            }
+            req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
+        guard let (data, resp) = try? await session.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return try? Snooze.decoder.decode(Snooze.self, from: data)
+    }
+
     // MARK: HTTP
 
     private func get<T: Decodable>(_ path: String) async -> T? {

@@ -12,7 +12,6 @@ struct DetailsView: View {
     @State private var speakReplies = true
     /// Keepalive: instant notifications for some battery. Read by Keepalive.enabled.
     @AppStorage("stayAwake") private var stayAwake = true
-    @State private var snoozedUntil: Date?
     @State private var done: Set<Loop.ID> = []
 
     var body: some View {
@@ -33,15 +32,15 @@ struct DetailsView: View {
                     .listRowBackground(Color.clear)
                 }
 
+                if let s = store.snooze, let until = s.until, until > .now { snoozed(s, until: until) }
+
                 if let b = store.brief { today(b) }
 
                 Section {
-                    if let until = snoozedUntil {
-                        Button("Snoozed until \(until.formatted(date: .omitted, time: .shortened)) — wake") { snoozedUntil = nil }
-                    } else {
+                    if store.snooze?.until.map({ $0 > .now }) != true {
                         Menu("Snooze notifications") {
                             ForEach([1, 2, 4], id: \.self) { h in
-                                Button("\(h) hour\(h == 1 ? "" : "s")") { snoozedUntil = .now.addingTimeInterval(Double(h) * 3600) }
+                                Button("\(h) hour\(h == 1 ? "" : "s")") { Task { await store.setSnooze(.minutes(h * 60)) } }
                             }
                         }
                     }
@@ -58,9 +57,56 @@ struct DetailsView: View {
                     Text("Over Tailscale. Quit and reopen the app after changing these.")
                 }
             }
-            .refreshable { await store.refreshBrief() }
+            .refreshable { await store.refreshBrief(); await store.setSnooze(nil) }
+            .task { await store.setSnooze(nil) }
             .toolbar { Button("Done") { dismiss() } }
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    /// The clock while Otto is holding things back, how far through the hold, and what's waiting.
+    @ViewBuilder private func snoozed(_ s: Snooze, until: Date) -> some View {
+        Section {
+            TimelineView(.periodic(from: .now, by: 1)) { tl in
+                let start = s.since ?? tl.date
+                let span = until.timeIntervalSince(start)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(tl.date, format: .dateTime.hour().minute())
+                            .font(.system(size: 44, weight: .light).monospacedDigit())
+                        Spacer()
+                        Text("Snoozed until \(until.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Color(.tertiarySystemFill), in: .capsule)
+                    }
+                    ProgressView(value: span > 0 ? min(1, max(0, tl.date.timeIntervalSince(start) / span)) : 1)
+                        .tint(.orange)
+                    HStack(spacing: 10) {
+                        Button { Task { await store.setSnooze(.clear) } } label: {
+                            Text("Hand them over now").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent).tint(Color(.label)).foregroundStyle(Color(.systemBackground))
+                        Button { Task { await store.setSnooze(.minutes(60)) } } label: {
+                            Text("Another hour").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered).tint(.secondary).foregroundStyle(.primary)
+                    }
+                    .font(.subheadline.weight(.medium))
+                }
+                .padding(.vertical, 6)
+            }
+        }
+        if !s.held.isEmpty {
+            Section("Held for later · \(s.held.count)") {
+                ForEach(s.held, id: \.self) { h in
+                    LabeledContent {
+                        Text(h.at, format: .dateTime.hour().minute())
+                    } label: {
+                        Text(h.text).lineLimit(1)
+                    }
+                }
+            }
         }
     }
 

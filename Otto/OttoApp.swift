@@ -35,6 +35,7 @@ final class OttoStore {
     var foreground = true
     var messages: [Message] = [] { didSet { save() } }
     var brief: Brief?
+    var snooze: Snooze?
     /// A newer build than this one, when the Mac has published it.
     var update: Release?
     /// Dots under the thread while a reply is on its way. Otto may also say nothing at all,
@@ -312,4 +313,9 @@ final class OttoStore {
     }
 
     func refreshBrief() async { brief = await backend.brief() }
+
+    /// Nil just reads it. Keeps the last known state when the Mac can't be reached.
+    func setSnooze(_ change: SnoozeChange?) async {
+        if let s = await backend.snooze(change) { snooze = s }
+    }
 }
