@@ -143,6 +143,19 @@ final class OttoStore {
             let long = String(repeating: "this is a long message that should wrap onto several lines. ", count: 6)
             messages = (0..<8).map { Message(from: $0 % 2 == 0 ? .me : .otto, text: $0 == 7 ? "LAST https://www.ovs.it " + long : long) }
         }
+        // `-demoThread`: the conversation the website shows, for screen recordings.
+        if ProcessInfo.processInfo.arguments.contains("-demoThread") {
+            messages = [
+                Message(from: .otto, text: "morning. design review at 14:00, then you're free until 16:30. enel bill, €112, due friday. and it's thursday, so: the boiler"),
+                Message(from: .me, text: "can you tell the landlord tuesday morning works for the boiler guy", read: true),
+                Message(from: .otto, text: "draft:\n\"Hi, Tuesday morning works for the boiler service. I'll be home from 9. Thanks!\"",
+                        buttons: [ActionButton(label: "send ✓", data: "send"), ActionButton(label: "discard", data: "discard")]),
+                Message(from: .me, text: "remind me to call the plumber when I'm home, and is tuesday free for the dentist", isVoice: true, read: true),
+                Message(from: .otto, text: "plumber reminder set for when you're home. tuesday after 16:00 is free.", isVoice: true,
+                        audio: RemoteFile(id: "demo-voice", name: "reply.m4a", kind: "audio")),
+                Message(from: .me, text: "whats a good place for dinner near the office thats not pizza", read: true),
+            ]
+        }
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
         if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift" }
         #endif
@@ -267,8 +280,10 @@ final class OttoStore {
     /// The bubble shows up at once; the transcript fills it in when the server has it.
     func sendVoice(_ file: URL) {
         guard let audio = try? Data(contentsOf: file) else { return }
-        try? FileManager.default.removeItem(at: file)
         let m = Message(from: .me, text: "", isVoice: true)
+        // Kept so the note plays back from the thread.
+        try? FileManager.default.removeItem(at: VoiceStore.url(m.id))
+        try? FileManager.default.moveItem(at: file, to: VoiceStore.url(m.id))
         messages.append(m)
         ottoTyping = true
         Task {

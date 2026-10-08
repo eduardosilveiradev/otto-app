@@ -77,17 +77,31 @@ struct DetailsView: View {
         if !b.loops.isEmpty {
             Section("Open loops") {
                 ForEach(b.loops) { l in
+                    let closed = done.contains(l.id)
                     Button { done.formSymmetricDifference([l.id]) } label: {
-                        HStack {
-                            Image(systemName: done.contains(l.id) ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(done.contains(l.id) ? Color.blue : .secondary)
-                            Text(l.title).foregroundStyle(done.contains(l.id) ? .secondary : .primary)
-                            Spacer()
-                            if let due = l.due {
-                                Text(due, format: .dateTime.weekday()).foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            Image(systemName: closed ? "checkmark" : l.title.contains("€") ? "eurosign" : "arrow.turn.up.left")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 26, height: 26)
+                                .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 7, style: .continuous))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(l.title).strikethrough(closed)
+                                    .foregroundStyle(closed ? .secondary : .primary)
+                                if let due = l.due, !closed {
+                                    Text("due \(due.formatted(.dateTime.weekday(.wide)))")
+                                        .font(.footnote).foregroundStyle(.secondary)
+                                }
                             }
+                            Spacer()
+                            Text(closed ? "Closed" : "Open")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(closed ? Color.secondary : Color.orange)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(closed ? Color(.tertiarySystemFill) : Color.orange.opacity(0.15), in: .capsule)
                         }
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }

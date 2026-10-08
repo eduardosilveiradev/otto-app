@@ -6,7 +6,7 @@ import QuickLook
 /// The whole app is one Messages-style conversation. Tapping Otto's name opens details.
 struct ChatView: View {
     @Environment(OttoStore.self) private var store
-    @State private var showDetails = false
+    @State private var showDetails = ProcessInfo.processInfo.arguments.contains("-details")
     @State private var showCall = false
     @State private var webCall = false
     /// Otto's phone line (the Vapi assistant). Set in details; dialled with the phone app.
@@ -520,6 +520,37 @@ private struct Row: View {
         }
         return a
     }
+    /// What goes in the bubble: a draft card, a voice note, or the text.
+    @ViewBuilder private var content: some View {
+        if let d = Self.draft(message) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(d.head).font(.system(size: 15, weight: .semibold))
+                Text(Self.linked(d.body))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Color(.systemGray6), in: .rect(cornerRadius: 12, style: .continuous))
+            }
+            .padding(.vertical, 3)
+        } else if message.isVoice || message.audio != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                VoiceRow(message: message, mine: mine)
+                if !mine, !message.text.isEmpty { Text(Self.linked(message.text)).font(.system(size: 13)).foregroundStyle(.secondary) }
+            }
+        } else {
+            Text(Self.linked(message.text))
+        }
+    }
+
+    /// Otto's "draft:" messages: the first line is the heading, the rest the words that would go out.
+    static func draft(_ m: Message) -> (head: String, body: String)? {
+        guard m.from == .otto, let nl = m.text.firstIndex(of: "\n") else { return nil }
+        let head = m.text[..<nl].trimmingCharacters(in: .whitespaces)
+        guard head.lowercased().hasPrefix("draft"), head.hasSuffix(":") else { return nil }
+        var body = m.text[m.text.index(after: nl)...].trimmingCharacters(in: .whitespacesAndNewlines)
+        if body.count > 1, body.first == "\"", body.last == "\"" { body = String(body.dropFirst().dropLast()) }
+        return (head, body)
+    }
+
     private static let tapbacks = ["❤️", "👍", "👎", "😂", "‼️", "❓"]
     /// How far a swipe has to pull before letting go means "reply".
     private static let replyAt: CGFloat = 60
@@ -538,9 +569,8 @@ private struct Row: View {
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
             }
             ForEach(message.files ?? [], id: \.id) { RemoteFileView(file: $0) }
-            if let audio = message.audio { AudioChip(file: audio) }
             if message.image == nil || !message.text.isEmpty {
-            (message.isVoice && message.audio == nil ? Text("\(Image(systemName: "waveform")) \(message.text.isEmpty ? "Voice message" : message.text)") : Text(Self.linked(message.text)))
+            content
                 .font(.system(size: 17))
                 .tint(mine ? .white : .blue)
                 // A tapped link asks what to do with it rather than leaving the app.
@@ -587,6 +617,11 @@ private struct Row: View {
                     if let r = message.reaction { Tapback(emoji: r, mine: mine) }
                 }
                 .padding(.top, message.reaction == nil ? 0 : 14)
+            }
+            // What you said, under your voice note; Otto's sits inside its bubble.
+            if mine, message.isVoice, !message.text.isEmpty {
+                Text(message.text).font(.system(size: 13)).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing).padding(.trailing, 4)
             }
 
             // Otto's buttons read as suggested replies: plain blue text, no chrome.
@@ -692,24 +727,75 @@ private struct RemoteFileView: View {
     }
 }
 
-/// Otto's spoken reply: tap to play, tap again to stop. The words are in the bubble below.
-private struct AudioChip: View {
+/// Your voice notes, kept on the phone so they play back. Otto's live on the server.
+enum VoiceStore {
+    static func url(_ id: UUID) -> URL { .cachesDirectory.appending(path: "voice-\(id.uuidString).m4a") }
+    static func data(_ id: UUID) -> Data? { try? Data(contentsOf: url(id)) }
+}
+
+/// A voice note: play, a waveform that fills as it plays, the length.
+private struct VoiceRow: View {
     @Environment(OttoStore.self) private var store
-    let file: RemoteFile
+    let message: Message
+    let mine: Bool
+    @State private var duration: TimeInterval?
     private var player: AudioPlayer { .shared }
+    private var key: String { message.audio?.id ?? message.id.uuidString }
+    /// Every row asks on appear for its length; fetch each of Otto's files once.
+    @MainActor private static var cache: [String: Data] = [:]
 
     var body: some View {
-        let playing = player.playing == file.id
-        Button {
-            Task { await player.toggle(file.id) { await store.backend.file(file.id) } }
-        } label: {
-            Label(playing ? "Stop" : "Play", systemImage: playing ? "stop.fill" : "play.fill")
-                .font(.system(size: 15, weight: .medium))
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(Color(.systemGray5), in: .capsule)
-                .contentTransition(.symbolEffect(.replace))
+        let playing = player.playing == key
+        let ink: Color = mine ? .white : .primary
+        HStack(spacing: 8) {
+            Button { Task { await player.toggle(key, load: load) } } label: {
+                Image(systemName: playing ? "pause.fill" : "play.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(mine ? Color.blue : Color(.systemGray5))
+                    .frame(width: 26, height: 26)
+                    .background(ink, in: .circle)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(.plain)
+            TimelineView(.animation(paused: !playing)) { _ in
+                let done = playing ? player.progress : 0
+                let bars = Self.bars(key)
+                HStack(spacing: 2) {
+                    ForEach(bars.indices, id: \.self) { i in
+                        Capsule().fill(ink.opacity(Double(i) / Double(bars.count) < done ? 1 : 0.55))
+                            .frame(width: 2.5, height: bars[i])
+                    }
+                }
+                .frame(height: 20)
+            }
+            if let duration {
+                Text(Duration.seconds(duration.rounded()).formatted(.time(pattern: .minuteSecond)))
+                    .font(.system(size: 14, weight: .medium).monospacedDigit())
+                    .foregroundStyle(ink)
+            }
         }
-        .tint(.primary)
+        .padding(.vertical, 2)
+        .task(id: key) {
+            if duration == nil, let d = await load(), let p = try? AVAudioPlayer(data: d) { duration = p.duration }
+        }
+    }
+
+    private func load() async -> Data? {
+        if let local = VoiceStore.data(message.id) { return local }
+        guard let a = message.audio else { return nil }
+        if let hit = Self.cache[a.id] { return hit }
+        let d = await store.backend.file(a.id)
+        Self.cache[a.id] = d
+        return d
+    }
+
+    /// ponytail: decorative bars, the same for a given note every time; real levels if anyone squints.
+    static func bars(_ key: String) -> [CGFloat] {
+        var seed = key.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
+        return (0..<22).map { _ in
+            seed = seed &* 1664525 &+ 1013904223
+            return 4 + CGFloat(seed >> 24) / 255 * 14
+        }
     }
 }
 
@@ -732,6 +818,12 @@ private struct AudioChip: View {
     }
 
     func stop() { player?.stop(); player = nil; playing = nil }
+
+    /// 0…1 through what's playing. Not observed: read it from a TimelineView.
+    var progress: Double {
+        guard let p = player, p.duration > 0 else { return 0 }
+        return p.currentTime / p.duration
+    }
 
     nonisolated func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully: Bool) {
         Task { @MainActor in if player === p { stop() } }
