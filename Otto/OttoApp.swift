@@ -151,7 +151,7 @@ final class OttoStore {
                 Message(from: .me, text: "can you tell the landlord tuesday morning works for the boiler guy", read: true),
                 Message(from: .otto, text: "draft:\n\"Hi, Tuesday morning works for the boiler service. I'll be home from 9. Thanks!\"",
                         buttons: [ActionButton(label: "send ✓", data: "send"), ActionButton(label: "discard", data: "discard")]),
-                Message(from: .me, text: "remind me to call the plumber when I'm home, and is tuesday free for the dentist", isVoice: true, read: true),
+                Message(id: UUID(uuidString: "0D0D0D0D-0000-4000-8000-000000000001")!, from: .me, text: "remind me to call the plumber when I'm home, and is tuesday free for the dentist", isVoice: true, read: true),
                 Message(from: .otto, text: "plumber reminder set for when you're home. tuesday after 16:00 is free.", isVoice: true,
                         audio: RemoteFile(id: "demo-voice", name: "reply.m4a", kind: "audio")),
                 Message(from: .me, text: "whats a good place for dinner near the office thats not pizza", read: true),

@@ -64,7 +64,7 @@ struct Snooze: Decodable {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .custom { dec in
             let s = try dec.singleValueContainer().decode(String.self)
-            if let date = try? Date(s, strategy: .iso8601.year().month().day().time(includingFractionalSeconds: true)) ?? Date(s, strategy: .iso8601) { return date }
+            if let date = (try? Date(s, strategy: .iso8601.year().month().day().time(includingFractionalSeconds: true))) ?? (try? Date(s, strategy: .iso8601)) { return date }
             throw DecodingError.dataCorrupted(.init(codingPath: dec.codingPath, debugDescription: "not a date: \(s)"))
         }
         return d

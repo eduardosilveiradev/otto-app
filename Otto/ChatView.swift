@@ -739,6 +739,8 @@ private struct VoiceRow: View {
     let message: Message
     let mine: Bool
     @State private var duration: TimeInterval?
+    /// Peak per slice, 0…1, read from the audio itself. Flat until it's decoded.
+    @State private var levels: [CGFloat]?
     private var player: AudioPlayer { .shared }
     private var key: String { message.audio?.id ?? message.id.uuidString }
     /// Every row asks on appear for its length; fetch each of Otto's files once.
@@ -759,11 +761,11 @@ private struct VoiceRow: View {
             .buttonStyle(.plain)
             TimelineView(.animation(paused: !playing)) { _ in
                 let done = playing ? player.progress : 0
-                let bars = Self.bars(key)
+                let bars = levels ?? Array(repeating: 0, count: Self.slices)
                 HStack(spacing: 2) {
                     ForEach(bars.indices, id: \.self) { i in
                         Capsule().fill(ink.opacity(Double(i) / Double(bars.count) < done ? 1 : 0.55))
-                            .frame(width: 2.5, height: bars[i])
+                            .frame(width: 2.5, height: 3 + bars[i] * 17)
                     }
                 }
                 .frame(height: 20)
@@ -776,7 +778,10 @@ private struct VoiceRow: View {
         }
         .padding(.vertical, 2)
         .task(id: key) {
-            if duration == nil, let d = await load(), let p = try? AVAudioPlayer(data: d) { duration = p.duration }
+            guard duration == nil, let d = await load() else { return }
+            duration = (try? AVAudioPlayer(data: d))?.duration
+            let ext = message.audio.map { ($0.name as NSString).pathExtension } ?? "m4a"
+            levels = await Task.detached { Self.levels(d, ext: ext.isEmpty ? "m4a" : ext) }.value
         }
     }
 
@@ -789,13 +794,28 @@ private struct VoiceRow: View {
         return d
     }
 
-    /// ponytail: decorative bars, the same for a given note every time; real levels if anyone squints.
-    static func bars(_ key: String) -> [CGFloat] {
-        var seed = key.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
-        return (0..<22).map { _ in
-            seed = seed &* 1664525 &+ 1013904223
-            return 4 + CGFloat(seed >> 24) / 255 * 14
+    static let slices = 22
+
+    /// The loudest sample in each slice of the note, scaled so the loudest slice is 1.
+    /// Nil when the audio can't be decoded, which leaves the bars flat.
+    nonisolated static func levels(_ data: Data, ext: String) -> [CGFloat]? {
+        // AVAudioFile only reads from disk, and goes by the extension.
+        let url = URL.temporaryDirectory.appending(path: "wave-\(UUID().uuidString).\(ext)")
+        guard (try? data.write(to: url)) != nil else { return nil }
+        defer { try? FileManager.default.removeItem(at: url) }
+        guard let file = try? AVAudioFile(forReading: url),
+              let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
+              (try? file.read(into: buf)) != nil,
+              let ch = buf.floatChannelData?[0] else { return nil }
+        let n = Int(buf.frameLength), step = n / slices
+        guard step > 0 else { return nil }
+        let peaks = (0..<slices).map { i in
+            var m: Float = 0
+            for j in stride(from: i * step, to: (i + 1) * step, by: 8) { m = max(m, abs(ch[j])) }
+            return CGFloat(m)
         }
+        guard let top = peaks.max(), top > 0 else { return nil }
+        return peaks.map { $0 / top }
     }
 }
 
