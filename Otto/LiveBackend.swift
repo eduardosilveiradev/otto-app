@@ -25,6 +25,7 @@ final class LiveBackend: OttoBackend {
     let reactions: AsyncStream<(String, String)>
     let statuses: AsyncStream<String>
     let reads: AsyncStream<[String]>
+    let typing: AsyncStream<Bool>
 
     private let base: URL       // http(s)://host:port
     private let token: String
@@ -32,6 +33,7 @@ final class LiveBackend: OttoBackend {
     private let reacted: AsyncStream<(String, String)>.Continuation
     private let status: AsyncStream<String>.Continuation
     private let readIDs: AsyncStream<[String]>.Continuation
+    private let typingOn: AsyncStream<Bool>.Continuation
     private let session = URLSession(configuration: .default)
     private let lock = NSLock()
     private var live = false
@@ -52,6 +54,7 @@ final class LiveBackend: OttoBackend {
         (reactions, reacted) = AsyncStream.makeStream()
         (statuses, status) = AsyncStream.makeStream()
         (reads, readIDs) = AsyncStream.makeStream()
+        (typing, typingOn) = AsyncStream.makeStream()
         loop = Task { [weak self] in await self?.run() }
     }
 
@@ -192,6 +195,7 @@ final class LiveBackend: OttoBackend {
         if f.type == "react", let id = f.id, let emoji = f.emoji { reacted.yield((id, emoji)); return }
         if f.type == "status", let text = f.text { status.yield(text); return }
         if f.type == "read", let ids = f.ids { readIDs.yield(ids); return }
+        if f.type == "typing", let on = f.on { typingOn.yield(on); return }
         guard f.type == "message", let text = f.text else { return }
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
                           buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data) },
@@ -245,7 +249,7 @@ final class LiveBackend: OttoBackend {
     private struct WireButton: Decodable { let label: String; let data: String }
     private struct WireMessage: Decodable {
         let type: String; let id: String?; let text: String?; let ts: String?; let buttons: [WireButton]?
-        let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let emoji: String?; let ids: [String]?
+        let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let emoji: String?; let ids: [String]?; let on: Bool?
     }
     /// Otto's entries carry what the live frame did, so a message that arrived while the
     /// socket was asleep still has its photos, voice and buttons.

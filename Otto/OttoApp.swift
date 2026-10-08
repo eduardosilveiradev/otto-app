@@ -47,11 +47,15 @@ final class OttoStore {
     }
     /// The live line inside the dots bubble: the tool Otto is running right now.
     var ottoStatus: String?
+    /// The server sends "typing" frames; until one arrives (an older server), the app guesses.
+    @ObservationIgnored private var serverTyping = false
 
     private func armTypingTimeout() {
         typingTimeout?.cancel()
+        // Only a safety net once the server reports typing: a lost "off" can't strand the dots.
+        let wait: Double = serverTyping ? 900 : 180
         typingTimeout = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(180))
+            try? await Task.sleep(for: .seconds(wait))
             if !Task.isCancelled { self?.ottoTyping = false }
         }
     }
@@ -164,6 +168,15 @@ final class OttoStore {
             }
         }
         Task {
+            // The server's word on the dots. Once it has spoken, the guesses below (a reply
+            // or a tapback ends them) stop: Otto often answers and then keeps working.
+            for await on in backend.typing {
+                serverTyping = true
+                ottoTyping = on
+                if on { armTypingTimeout() }
+            }
+        }
+        Task {
             for await ids in backend.reads {
                 for id in ids { if let i = messages.firstIndex(where: { $0.wireID == id }) { messages[i].read = true } }
             }
@@ -171,12 +184,12 @@ final class OttoStore {
         Task {
             for await (id, emoji) in backend.reactions {
                 // A tapback can be Otto's whole answer, so it ends the typing dots too.
-                ottoTyping = false
+                if !serverTyping { ottoTyping = false }
                 if let i = messages.firstIndex(where: { $0.wireID == id }) { messages[i].reaction = emoji }
             }
         }
         for await m in backend.incoming {
-            ottoTyping = false
+            if !serverTyping { ottoTyping = false }
             messages.append(m)
             if !foreground && m.from == .otto { Notifier.shared.post(m) }
         }
@@ -193,7 +206,7 @@ final class OttoStore {
         let last = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
         let fresh = unseen(await backend.history().filter { $0.from == .otto }, after: last)
         guard !fresh.isEmpty else { return }
-        ottoTyping = false
+        if !serverTyping { ottoTyping = false }
         messages += fresh
         if notify { for m in fresh { Notifier.shared.post(m) } }
     }

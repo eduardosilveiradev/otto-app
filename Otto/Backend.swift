@@ -87,6 +87,8 @@ protocol OttoBackend: AnyObject {
     var statuses: AsyncStream<String> { get }
     /// wireIDs of your messages Otto has just taken in.
     var reads: AsyncStream<[String]> { get }
+    /// Whether Otto is working on something you sent, as the server sees it.
+    var typing: AsyncStream<Bool> { get }
     func history() async -> [Message]
     /// True once the server has the message; false means try again later.
     func send(_ text: String, id: String, replyTo: String?) async -> Bool
@@ -103,6 +105,7 @@ protocol OttoBackend: AnyObject {
 
 extension OttoBackend {
     func release() async -> Release? { nil }
+    var typing: AsyncStream<Bool> { AsyncStream { _ in } }
 }
 
 // MARK: - Mock
