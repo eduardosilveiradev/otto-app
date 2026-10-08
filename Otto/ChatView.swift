@@ -20,6 +20,8 @@ struct ChatView: View {
     @State private var margin: CGFloat = 0
     /// Scroll offset from the top of the content.
     @State private var offsetY: CGFloat = 0
+    /// Far enough up the thread that the newest messages are out of sight.
+    @State private var scrolledUp = false
 
     private var lastMine: Message.ID? { store.messages.last(where: { $0.from == .me })?.id }
 
@@ -81,6 +83,9 @@ struct ChatView: View {
         // keyboard's curve.
         .contentMargins(.bottom, margin, for: .scrollContent)
         .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y + $0.contentInsets.top }) { offsetY = $1 }
+        .onScrollGeometryChange(for: Bool.self, of: { g in
+            g.contentSize.height + g.contentInsets.bottom - g.visibleRect.maxY > 400
+        }) { scrolledUp = $1 }
         .onChange(of: ui.bottomInset) { old, new in
             // A drag-to-dismiss, frame by frame: follow it, and never scroll under the finger.
             guard ui.insetAnimated else { margin = new; return }
@@ -107,6 +112,23 @@ struct ChatView: View {
                 .ignoresSafeArea(edges: .bottom)
                 .allowsHitTesting(false)
         }
+        // Back to the newest message, once you've scrolled well away from it.
+        .overlay(alignment: .bottomTrailing) {
+            if scrolledUp {
+                Button { withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) } } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 40, height: 40)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .tint(.primary)
+                .accessibilityLabel("Scroll to bottom")
+                .padding(.trailing, 16)
+                .padding(.bottom, ui.bottomInset + 12)
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy, value: scrolledUp)
         .sheet(isPresented: $showDetails) { DetailsView() }
         .fullScreenCover(isPresented: $webCall) { CallView() }
         .alert("Calling Otto", isPresented: $showCall) {
