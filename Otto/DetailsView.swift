@@ -4,8 +4,8 @@ import SwiftUI
 struct DetailsView: View {
     @Environment(OttoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    // Server URL and token persist (LiveBackend.fromDefaults reads them at launch);
-    // the rest is local state, not yet sent anywhere.
+    // Server URL and token persist (LiveBackend.fromDefaults reads them at launch).
+    // speakReplies and `done` are still local only: nothing reads them yet.
     @AppStorage("serverURL") private var server = ""
     @AppStorage("serverToken") private var token = ""
     @AppStorage("callNumber") private var callNumber = ""
