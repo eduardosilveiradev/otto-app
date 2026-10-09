@@ -18,10 +18,17 @@ struct ChatView: View {
     @State private var scroll = ScrollPosition(edge: .bottom)
     /// The thread's bottom margin; follows ui.bottomInset, but lags it while the keyboard closes.
     @State private var margin: CGFloat = 0
-    /// Scroll offset from the top of the content.
-    @State private var offsetY: CGFloat = 0
+    /// Scroll offset from the top of the content. Held in a box: it changes every scroll
+    /// frame, and as plain state each change re-ran the body of the whole thread.
+    @State private var offset = Offset()
+    final class Offset { var y: CGFloat = 0 }
     /// Far enough up the thread that the newest messages are out of sight.
     @State private var scrolledUp = false
+    /// How many of the newest messages are laid out. The thread isn't lazy (see below), so a
+    /// long one laid out whole made every change cost a pass over all of it; reaching the
+    /// top lays out another page.
+    @State private var shown = Self.page
+    private static let page = 60
 
     private var lastMine: Message.ID? { store.messages.last(where: { $0.from == .me })?.id }
 
@@ -32,17 +39,18 @@ struct ChatView: View {
     }
 
     var body: some View {
+        let byWire = Dictionary(store.messages.map { ($0.wireID, $0) }, uniquingKeysWith: { a, _ in a })
         ScrollView {
                 // Not lazy: rows materialised lazily went blank while UIKit animated the
                 // thread's frame with the keyboard. A chat is short enough to lay out whole.
                 VStack(spacing: 0) {
-                    ForEach(Array(store.messages.enumerated()), id: \.element.id) { i, m in
+                    ForEach(Array(store.messages.enumerated()).suffix(shown), id: \.element.id) { i, m in
                         let prev = i > 0 ? store.messages[i - 1] : nil
                         let next = i + 1 < store.messages.count ? store.messages[i + 1] : nil
                         let newBlock = prev.map { m.date.timeIntervalSince($0.date) > 3600 } ?? true
                         if newBlock { Stamp(date: m.date) }
                         Row(message: m,
-                            quote: m.replyTo.flatMap { r in store.messages.first { $0.wireID == r } },
+                            quote: m.replyTo.flatMap { byWire[$0] },
                             tail: next?.from != m.from || next.map { $0.date.timeIntervalSince(m.date) > 3600 } ?? true,
                             receipt: m.id == lastMine && m.pending != true ? receipt(for: i) : nil,
                             onTap: { store.tap($0, on: m.id) })
@@ -82,10 +90,21 @@ struct ChatView: View {
         // curve, so the thread lurched. Now the margin and the scroll move together, on the
         // keyboard's curve.
         .contentMargins(.bottom, margin, for: .scrollContent)
-        .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y + $0.contentInsets.top }) { offsetY = $1 }
+        .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y + $0.contentInsets.top }) { offset.y = $1 }
         .onScrollGeometryChange(for: Bool.self, of: { g in
             g.contentSize.height + g.contentInsets.bottom - g.visibleRect.maxY > 400
-        }) { scrolledUp = $1 }
+        }) { _, up in
+            scrolledUp = up
+            if !up { shown = Self.page }   // back at the newest: drop the pages read on the way up
+        }
+        // Near the top: the next page of older messages. The bottom anchor keeps what's on screen still.
+        .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y + $0.contentInsets.top < 600 }) { _, near in
+            guard near, shown < store.messages.count else { return }
+            // Keep the oldest bubble on screen where it is, rather than at the top of the new page.
+            let keep = store.messages[store.messages.count - shown].id
+            shown += Self.page
+            Task { scroll.scrollTo(id: keep, anchor: .top) }
+        }
         .onChange(of: ui.bottomInset) { old, new in
             // A drag-to-dismiss, frame by frame: follow it, and never scroll under the finger.
             guard ui.insetAnimated else { margin = new; return }
@@ -95,11 +114,26 @@ struct ChatView: View {
                 // Shrinking the margin first clamps the offset in one frame (the snap). Slide the
                 // thread down by the same amount on the keyboard's curve, then let the margin go.
                 withAnimation(ComposerUI.keyboard, completionCriteria: .logicallyComplete) {
-                    scroll.scrollTo(y: max(0, offsetY - (old - new)))
+                    scroll.scrollTo(y: max(0, offset.y - (old - new)))
                 } completion: { margin = ui.bottomInset }
             }
         }
         .sensoryFeedback(.impact(weight: .light), trigger: lastMine)
+        #if PERFDEMO
+        // `-scrollDemo`: up to the top a few times, then home, printing the window each time.
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-scrollDemo") else { return }
+            try? await Task.sleep(for: .seconds(2))
+            for _ in 0..<4 {
+                withAnimation { scroll.scrollTo(edge: .top) }
+                try? await Task.sleep(for: .seconds(1.5))
+                print("SCROLL top shown=\(shown) offset=\(Int(offset.y))")
+            }
+            withAnimation { scroll.scrollTo(edge: .bottom) }
+            try? await Task.sleep(for: .seconds(1.5))
+            print("SCROLL bottom shown=\(shown) scrolledUp=\(scrolledUp)")
+        }
+        #endif
         .overlay { if store.messages.isEmpty && !store.ottoTyping { EmptyChat(asleep: store.asleep, connected: store.connected, lookingAtCursor: focused) } }
         .background(Color(.systemBackground))
         .safeAreaInset(edge: .top, spacing: 0) { header }
@@ -512,7 +546,17 @@ private struct Row: View {
     /// The text with its URLs marked as links (underlined, so they read on either bubble colour).
     /// A long one shows as its start and "…"; the link itself stays whole.
     static func linked(_ s: String) -> AttributedString {
-        guard let d = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return AttributedString(s) }
+        if let hit = linkedCache[s] { return hit }
+        let a = detectLinks(s)
+        linkedCache[s] = a
+        return a
+    }
+    /// Every row asks on every pass of the thread; detection costs a millisecond or so a bubble.
+    @MainActor private static var linkedCache: [String: AttributedString] = [:]
+    private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    private static func detectLinks(_ s: String) -> AttributedString {
+        guard let d = detector else { return AttributedString(s) }
         var a = AttributedString()
         var rest = s.startIndex
         for m in d.matches(in: s, range: NSRange(s.startIndex..., in: s)) {

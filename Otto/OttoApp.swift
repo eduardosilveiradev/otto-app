@@ -17,7 +17,7 @@ struct OttoApp: App {
         .onChange(of: phase) { _, p in
             store.foreground = p == .active
             if p == .active { store.sendShared() }
-            if p == .background { Notifier.scheduleRefresh() }
+            if p == .background { store.flush(); Notifier.scheduleRefresh() }
             Grace.update(background: p == .background)
             Keepalive.update(background: p == .background)
         }
@@ -114,7 +114,24 @@ final class OttoStore {
         update = r
     }
 
+    /// The thread carries its photos, so encoding it is megabytes of work: never on the main
+    /// thread, and once per burst of changes (a send flips pending, read and typing in a row).
     private func save() {
+        saving?.cancel()
+        let snapshot = messages, file = file
+        saving = Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            try? JSONEncoder().encode(snapshot).write(to: file, options: .atomic)
+        }
+    }
+    @ObservationIgnored private var saving: Task<Void, Never>?
+
+    /// Writes now, for when the app is about to be suspended and a pending save could be lost.
+    func flush() {
+        guard let s = saving, !s.isCancelled else { return }
+        s.cancel()
+        saving = nil
         try? JSONEncoder().encode(messages).write(to: file, options: .atomic)
     }
 
@@ -168,6 +185,9 @@ final class OttoStore {
             : unseen(await backend.history(), after: last)
         if !fresh.isEmpty { messages += fresh }
         animated = true
+        #if PERFDEMO
+        if ProcessInfo.processInfo.arguments.contains("-perfDemo") { Task { await perfDemo() } }
+        #endif
         Task { await resendPending() }
         sendShared()
         ShareOutbox.observe(ShareOutbox.ping) { [weak self] in MainActor.assumeIsolated { self?.sendShared() } }
@@ -208,6 +228,30 @@ final class OttoStore {
             if !foreground && m.from == .otto { Notifier.shared.post(m) }
         }
     }
+
+    #if PERFDEMO
+    /// `-perfDemo` in a build with `-DPERFDEMO`: sends, typing steps, tapbacks and replies
+    /// in a loop, then prints how many frames ran late. Release config, so the numbers mean something.
+    private func perfDemo() async {
+        let frames = FrameClock()
+        try? await Task.sleep(for: .seconds(2))
+        frames.reset()
+        for i in 0..<15 {
+            send("perf \(i)")
+            try? await Task.sleep(for: .milliseconds(500))
+            for s in ["Reading mail", "Searching the web", "Writing"] {
+                ottoStatus = s
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+            if let id = messages.dropLast(4).last?.id { react("❤️", on: id) }
+            try? await Task.sleep(for: .milliseconds(400))
+            ottoTyping = false
+            messages.append(Message(from: .otto, text: "reply \(i), see https://example.com/page/\(i)"))
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        print("PERF late=\(frames.late) of \(frames.count) frames, worst \(Int(frames.worst * 1000))ms, lost \(Int(frames.lost * 1000))ms")
+    }
+    #endif
 
     /// A background refresh: pull anything newer than what's saved and notify for Otto's.
     func backgroundSync() async { await catchUp(notify: true) }
@@ -319,3 +363,27 @@ final class OttoStore {
         if let s = await backend.snooze(change) { snooze = s }
     }
 }
+
+#if PERFDEMO
+/// Counts frames that arrived later than one refresh interval, for `-perfDemo`.
+@MainActor final class FrameClock: NSObject {
+    private var link: CADisplayLink?
+    private var last: CFTimeInterval = 0
+    private(set) var count = 0, late = 0
+    private(set) var worst: CFTimeInterval = 0, lost: CFTimeInterval = 0
+
+    override init() {
+        super.init()
+        link = CADisplayLink(target: self, selector: #selector(tick))
+        link?.add(to: .main, forMode: .common)
+    }
+    func reset() { count = 0; late = 0; worst = 0; lost = 0; last = 0 }
+    @objc private func tick(_ l: CADisplayLink) {
+        defer { last = l.timestamp }
+        guard last > 0 else { return }
+        let gap = l.timestamp - last, budget = l.targetTimestamp - l.timestamp
+        count += 1
+        if gap > budget * 1.5 { late += 1; lost += gap - budget; worst = max(worst, gap) }
+    }
+}
+#endif

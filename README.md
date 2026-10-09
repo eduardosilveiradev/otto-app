@@ -60,6 +60,11 @@ Debug builds accept a few arguments for checking layout without a server:
 `-seedThread`, `-thinking`, `-keyboardDemo`, `-growDraft`, `-seedDraft`,
 `-seedAttachments`.
 
+A Release build with `OTHER_SWIFT_FLAGS='$(inherited) -DPERFDEMO'` also takes `-perfDemo`
+(sends, typing steps, tapbacks and replies in a loop, then prints how many frames ran late)
+and `-scrollDemo` (pages up the thread and back, printing the window). Run either with
+`xcrun simctl launch --console-pty`.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
