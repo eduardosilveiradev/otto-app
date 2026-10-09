@@ -142,7 +142,7 @@ final class OttoStore {
         // `-seedThread`: a thread with long bubbles (and a link), for checking layout without a server.
         if ProcessInfo.processInfo.arguments.contains("-seedThread") {
             let long = String(repeating: "this is a long message that should wrap onto several lines. ", count: 6)
-            messages = (0..<8).map { Message(from: $0 % 2 == 0 ? .me : .otto, text: $0 == 7 ? "LAST https://www.ovs.it " + long : long) }
+            messages = (0..<8).map { Message(from: $0 % 2 == 0 ? .me : .otto, text: $0 == 7 ? "LAST https://www.ovs.it and https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=1234567890&scope=openid " + long : long) }
         }
         // `-demoThread`: the conversation the website shows, for screen recordings.
         if ProcessInfo.processInfo.arguments.contains("-demoThread") {

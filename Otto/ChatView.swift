@@ -510,14 +510,26 @@ private struct Row: View {
     private var mine: Bool { message.from == .me }
 
     /// The text with its URLs marked as links (underlined, so they read on either bubble colour).
+    /// A long one shows as its start and "…"; the link itself stays whole.
     static func linked(_ s: String) -> AttributedString {
-        var a = AttributedString(s)
-        guard let d = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return a }
+        guard let d = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return AttributedString(s) }
+        var a = AttributedString()
+        var rest = s.startIndex
         for m in d.matches(in: s, range: NSRange(s.startIndex..., in: s)) {
-            guard let url = m.url, let r = Range(m.range, in: s), let ar = Range(r, in: a) else { continue }
-            a[ar].link = url
-            a[ar].underlineStyle = .single
+            guard let url = m.url, let r = Range(m.range, in: s) else { continue }
+            a += AttributedString(s[rest..<r.lowerBound])
+            var shown = String(s[r])
+            if shown.count > 40 {
+                for p in ["https://", "http://", "www."] where shown.hasPrefix(p) { shown.removeFirst(p.count) }
+                if shown.count > 40 { shown = shown.prefix(36) + "…" }
+            }
+            var piece = AttributedString(shown)
+            piece.link = url
+            piece.underlineStyle = .single
+            a += piece
+            rest = r.upperBound
         }
+        a += AttributedString(s[rest...])
         return a
     }
     /// What goes in the bubble: a draft card, a voice note, or the text.
