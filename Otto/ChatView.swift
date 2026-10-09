@@ -904,16 +904,18 @@ private struct Typing: View {
     let status: String?
     @State private var phase = 0
     var body: some View {
-        HStack(spacing: 8) {
+        // Top-aligned so the dots stay on the first line when a long status wraps.
+        HStack(alignment: .top, spacing: 8) {
             HStack(spacing: 4) {
                 ForEach(0..<3, id: \.self) { i in
                     Circle().frame(width: 8, height: 8).opacity(phase == i ? 0.85 : 0.35)
                 }
             }
+            .padding(.top, status == nil ? 0 : 4.5)
             if let status {
                 Text(status)
                     .font(.system(size: 14))
-                    .lineLimit(1).truncationMode(.middle)
+                    .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.opacity)
                     .id(status)
                     .transition(.opacity.combined(with: .offset(y: 6)))
