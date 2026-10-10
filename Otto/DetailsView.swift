@@ -53,6 +53,7 @@ struct DetailsView: View {
                         }))
                         .disabled(speakReplies == nil)
                     Toggle("Stay connected in background", isOn: $stayAwake)
+                    NavigationLink("Settings") { SettingsView() }
                 }
 
                 Section {

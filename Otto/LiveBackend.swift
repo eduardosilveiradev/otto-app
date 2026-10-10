@@ -236,6 +236,13 @@ final class LiveBackend: OttoBackend {
         return s?.speakReplies
     }
 
+    func settings(flip id: String?) async -> SettingsPage? {
+        guard let id else { return await get("app/settings") }
+        guard let body = try? JSONSerialization.data(withJSONObject: ["id": id]),
+              let data = await post("app/settings", body) else { return nil }
+        return try? JSONDecoder().decode(SettingsPage.self, from: data)
+    }
+
     func snooze(_ change: SnoozeChange?) async -> Snooze? {
         var req = URLRequest(url: base.appendingPathComponent("app/snooze"))
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

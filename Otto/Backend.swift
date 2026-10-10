@@ -129,6 +129,8 @@ protocol OttoBackend: AnyObject {
     func setLoop(_ id: String, done: Bool) async -> Bool
     /// "Speak replies when I speak", which lives on the Mac. `set` nil just reads it.
     func speakReplies(set: Bool?) async -> Bool?
+    /// The Mac's /settings switches. `flip` nil just reads them.
+    func settings(flip id: String?) async -> SettingsPage?
 }
 
 extension OttoBackend {
@@ -136,7 +138,22 @@ extension OttoBackend {
     func snooze(_ change: SnoozeChange?) async -> Snooze? { nil }
     func setLoop(_ id: String, done: Bool) async -> Bool { !isLive }
     func speakReplies(set: Bool?) async -> Bool? { nil }
+    func settings(flip id: String?) async -> SettingsPage? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
+}
+
+/// One switch on the Mac's settings page; `section` is otto, recurring or connectors.
+struct SettingToggle: Decodable, Identifiable, Hashable {
+    let id: String
+    let label: String
+    let on: Bool
+    let section: String
+}
+
+struct SettingsPage: Decodable {
+    let toggles: [SettingToggle]
+    /// Set after a flip; starts with "couldn't" when the Mac refused it.
+    let note: String?
 }
 
 // MARK: - Mock
