@@ -17,6 +17,7 @@ import Foundation
 ///   GET  <server>/app/file/<id>  a file or voice clip from a message
 ///   POST <server>/app/photo?text=<caption>&id=<uuid>  JPEG body
 ///   POST <server>/app/voice?id=<uuid>    m4a body -> {"text": "<transcript>"}
+///   <server>/app/dash/*         the web dashboard's API (otto/dash-types.ts), same token
 final class LiveBackend: OttoBackend {
     let name = "Otto server"
     var isLive: Bool { lock.withLock { live } }
@@ -260,6 +261,18 @@ final class LiveBackend: OttoBackend {
         return try? Snooze.decoder.decode(Snooze.self, from: data)
     }
 
+    func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data? {
+        var c = URLComponents(url: base.appending(path: "app/dash/\(path)"), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty { c.queryItems = query }
+        var req = URLRequest(url: c.url!)
+        req.httpMethod = method
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body { req.httpBody = body; req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        guard let (data, resp) = try? await session.data(for: req),
+              let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else { return nil }
+        return data
+    }
+
     // MARK: HTTP
 
     private func get<T: Decodable>(_ path: String) async -> T? {
@@ -311,7 +324,7 @@ final class LiveBackend: OttoBackend {
     }
 
     /// Server timestamps are ISO 8601 with milliseconds; loop dues may be a bare date.
-    private static func date(_ s: String?) -> Date? {
+    static func date(_ s: String?) -> Date? {
         guard let s else { return nil }
         for opts: ISO8601DateFormatter.Options in [[.withInternetDateTime, .withFractionalSeconds], [.withInternetDateTime], [.withFullDate]] {
             let f = ISO8601DateFormatter()

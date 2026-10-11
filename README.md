@@ -20,6 +20,10 @@ what Otto knows about your day.
   Delivered / Read receipts
 - Otto's one-tap buttons
 - The day at a glance: calendar, inbox, open loops, armed triggers
+- The web dashboard's pages, in the contact card: loops and tonight's hygiene
+  pass, memory (search, topics, the summary), people, money, trips, activity,
+  status and paired devices. They read the server's `/app/dash/*` API with the
+  app's own token.
 - Web calls to Otto through [Vapi](https://vapi.ai), if you have it set up
 - Local notifications while the app is in the background
 
@@ -58,7 +62,8 @@ documented at the top of that file and in the "App transport" block in
 
 Debug builds accept a few arguments for checking layout without a server:
 `-seedThread`, `-thinking`, `-keyboardDemo`, `-growDraft`, `-seedDraft`,
-`-seedAttachments`.
+`-seedAttachments`, and `-details -screen <Loops|Memory|People|Money|Trips|Activity|Status|Devices>`
+to open the contact card on one of its pages.
 
 A Release build with `OTHER_SWIFT_FLAGS='$(inherited) -DPERFDEMO'` also takes `-perfDemo`
 (sends, typing steps, tapbacks and replies in a loop, then prints how many frames ran late)

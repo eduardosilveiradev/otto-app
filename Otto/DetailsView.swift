@@ -14,6 +14,8 @@ struct DetailsView: View {
     /// Keepalive: instant notifications for some battery. Read by Keepalive.enabled.
     @AppStorage("stayAwake") private var stayAwake = true
     @State private var done: Set<Loop.ID> = []
+    /// `-screen Money` opens straight onto a page, for screenshots.
+    @State private var screen = UserDefaults.standard.string(forKey: "screen")
 
     var body: some View {
         NavigationStack {
@@ -36,6 +38,20 @@ struct DetailsView: View {
                 if let s = store.snooze, let until = s.until, until > .now { snoozed(s, until: until) }
 
                 if let b = store.brief { today(b) }
+
+                Section {
+                    NavigationLink { LoopsScreen() } label: { Label("Loops", systemImage: "checklist") }
+                    NavigationLink { MemoryScreen() } label: { Label("Memory", systemImage: "brain") }
+                    NavigationLink { PeopleScreen() } label: { Label("People", systemImage: "person.2") }
+                    NavigationLink { MoneyScreen() } label: { Label("Money", systemImage: "creditcard") }
+                    NavigationLink { TripsScreen() } label: { Label("Trips", systemImage: "airplane") }
+                    NavigationLink { ActivityScreen() } label: { Label("Activity", systemImage: "waveform.path.ecg") }
+                }
+
+                Section {
+                    NavigationLink { StatusScreen() } label: { Label("Status", systemImage: "gauge.with.dots.needle.33percent") }
+                    NavigationLink { DevicesScreen() } label: { Label("Devices", systemImage: "iphone") }
+                }
 
                 Section {
                     if store.snooze?.until.map({ $0 > .now }) != true {
@@ -70,6 +86,18 @@ struct DetailsView: View {
                 async let s: Void = store.setSnooze(nil)
                 speakReplies = await store.backend.speakReplies(set: nil)
                 await s
+            }
+            .navigationDestination(item: $screen) { name in
+                switch name {
+                case "Loops": LoopsScreen()
+                case "Memory": MemoryScreen()
+                case "People": PeopleScreen()
+                case "Money": MoneyScreen()
+                case "Trips": TripsScreen()
+                case "Activity": ActivityScreen()
+                case "Status": StatusScreen()
+                default: DevicesScreen()
+                }
             }
             .toolbar { Button("Done") { dismiss() } }
             .navigationBarTitleDisplayMode(.inline)
@@ -132,6 +160,19 @@ struct DetailsView: View {
             Text("as of \(b.asOf.formatted(date: .omitted, time: .shortened)) \(TimeZone.current.abbreviation() ?? "")")
         }
 
+        if !b.inbox.isEmpty || b.bulk > 0 {
+            Section {
+                ForEach(b.inbox) { m in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(m.subject).lineLimit(2)
+                        Text(m.from).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+            } header: { Text("Inbox") } footer: {
+                if b.bulk > 0 { Text("and \(b.bulk) not worth naming") }
+            }
+        }
+
         if !b.loops.isEmpty {
             Section("Open loops") {
                 ForEach(b.loops) { l in
@@ -164,6 +205,18 @@ struct DetailsView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                }
+            }
+        }
+
+        if !b.triggers.isEmpty {
+            Section("Up next") {
+                ForEach(b.triggers.sorted { $0.next < $1.next }.prefix(5)) { t in
+                    LabeledContent {
+                        Text(t.next.formatted(.relative(presentation: .named)))
+                    } label: {
+                        Text(t.title).lineLimit(2)
+                    }
                 }
             }
         }

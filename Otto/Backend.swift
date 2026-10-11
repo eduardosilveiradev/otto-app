@@ -131,6 +131,8 @@ protocol OttoBackend: AnyObject {
     func speakReplies(set: Bool?) async -> Bool?
     /// The Mac's /settings switches. `flip` nil just reads them.
     func settings(flip id: String?) async -> SettingsPage?
+    /// One call to the dashboard API (`/app/dash/<path>`), the body of a 2xx or nil.
+    func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data?
 }
 
 extension OttoBackend {
@@ -139,6 +141,7 @@ extension OttoBackend {
     func setLoop(_ id: String, done: Bool) async -> Bool { !isLive }
     func speakReplies(set: Bool?) async -> Bool? { nil }
     func settings(flip id: String?) async -> SettingsPage? { nil }
+    func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
 }
 
