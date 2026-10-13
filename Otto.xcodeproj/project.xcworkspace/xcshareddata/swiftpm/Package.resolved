@@ -1,5 +1,5 @@
 {
-  "originHash" : "9d9591f16061c4b2c14ba7eebb9494f540296aaea3ec0841d1f8feb01ed8aa5c",
+  "originHash" : "788f492ec7b0dc15d28a8dc3ced9c9dcde486574351f95f4f48c871055255113",
   "pins" : [
     {
       "identity" : "daily-client-ios",
@@ -17,6 +17,14 @@
       "state" : {
         "branch" : "main",
         "revision" : "5fdb73d8a4475bc1d97d351e31426f3682f4663e"
+      }
+    },
+    {
+      "identity" : "libraries.dev",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Jakubantalik/Libraries.dev",
+      "state" : {
+        "revision" : "a27566557b4def79bcdcedc71858c0fb28020b6d"
       }
     }
   ],

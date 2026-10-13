@@ -2,6 +2,8 @@ import SwiftUI
 import PhotosUI
 import AVFoundation
 import QuickLook
+import ThinkingOrbsKit
+import VoiceGlowKit
 
 /// The whole app is one Messages-style conversation. Tapping Otto's name opens details.
 struct ChatView: View {
@@ -273,8 +275,10 @@ struct Composer: View {
                         .tint(.secondary)
                         TimelineView(.periodic(from: started, by: 1)) { tl in
                             let s = Int(tl.date.timeIntervalSince(started))
-                            Label(String(format: "%d:%02d", s / 60, s % 60), systemImage: "circle.fill")
-                                .foregroundStyle(.red).monospacedDigit()
+                            HStack(spacing: 8) {
+                                ThinkingOrb(state: .listening, size: .px20)
+                                Text(String(format: "%d:%02d", s / 60, s % 60)).monospacedDigit()
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 8)
@@ -313,6 +317,7 @@ struct Composer: View {
             .animation(.snappy(duration: 0.22), value: canSend)
             .animation(.snappy(duration: 0.22), value: recorder.started != nil)
             .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
+            .voiceGlow(levelProvider: { recorder.level() }, active: recorder.started != nil, cornerRadius: 18)
         }
         }
         .padding(.horizontal, 12)
@@ -944,18 +949,12 @@ private struct Tapback: View {
 }
 
 private struct Typing: View {
-    /// What Otto is doing, shown beside the dots; nil is just the dots.
+    /// What Otto is doing, shown beside the orb; nil is just the orb.
     let status: String?
-    @State private var phase = 0
     var body: some View {
-        // Top-aligned so the dots stay on the first line when a long status wraps.
+        // Top-aligned so the orb stays on the first line when a long status wraps.
         HStack(alignment: .top, spacing: 8) {
-            HStack(spacing: 4) {
-                ForEach(0..<3, id: \.self) { i in
-                    Circle().frame(width: 8, height: 8).opacity(phase == i ? 0.85 : 0.35)
-                }
-            }
-            .padding(.top, status == nil ? 0 : 4.5)
+            ThinkingOrb(state: status == nil ? .breathing : .working, size: .px20)
             if let status {
                 Text(status)
                     .font(.system(size: 14))
@@ -971,12 +970,6 @@ private struct Typing: View {
         .background(BubbleShape(mine: false, tail: true).fill(Color(.systemGray5)))
         .padding(.trailing, 64)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(300))
-                withAnimation { phase = (phase + 1) % 3 }
-            }
-        }
     }
 }
 
@@ -1047,7 +1040,9 @@ final class VoiceRecorder {
         let url = URL.temporaryDirectory.appending(path: "voice-\(UUID().uuidString).m4a")
         let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 16_000,
                                        AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue]
-        guard let r = try? AVAudioRecorder(url: url, settings: settings), r.record() else { return }
+        guard let r = try? AVAudioRecorder(url: url, settings: settings) else { return }
+        r.isMeteringEnabled = true
+        guard r.record() else { return }
         recorder = r
         started = .now
         Self.active = true
@@ -1065,6 +1060,14 @@ final class VoiceRecorder {
         UIApplication.shared.isIdleTimerDisabled = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         return r.url
+    }
+
+    /// Linear 0–1 loudness for the glow. Read off the recorder, not a second mic tap: the
+    /// library's own meter opens a mixable session, which lets music back in mid-note.
+    func level() -> Double {
+        guard let r = recorder else { return 0 }
+        r.updateMeters()
+        return pow(10, Double(r.averagePower(forChannel: 0)) / 20)
     }
 
     func cancel() { if let url = stop() { try? FileManager.default.removeItem(at: url) } }

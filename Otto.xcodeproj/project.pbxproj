@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		0A0000000000000000000020 /* Vapi in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000021 /* Vapi */; };
+		0A0000000000000000000051 /* ThinkingOrbsKit in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000053 /* ThinkingOrbsKit */; };
+		0A0000000000000000000052 /* VoiceGlowKit in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000054 /* VoiceGlowKit */; };
 		0A000000000000000000003B /* OttoShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000030 /* OttoShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -31,7 +33,7 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		0A0000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (0A0000000000000000000020 /* Vapi in Frameworks */); runOnlyForDeploymentPostprocessing = 0; };
+		0A0000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (0A0000000000000000000020 /* Vapi in Frameworks */, 0A0000000000000000000051 /* ThinkingOrbsKit in Frameworks */, 0A0000000000000000000052 /* VoiceGlowKit in Frameworks */); runOnlyForDeploymentPostprocessing = 0; };
 		0A0000000000000000000038 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
@@ -48,7 +50,7 @@
 			buildRules = ();
 			dependencies = (0A000000000000000000003D /* PBXTargetDependency */);
 			fileSystemSynchronizedGroups = (0A0000000000000000000002 /* Otto */, 0A0000000000000000000032 /* Shared */);
-			packageProductDependencies = (0A0000000000000000000021 /* Vapi */);
+			packageProductDependencies = (0A0000000000000000000021 /* Vapi */, 0A0000000000000000000053 /* ThinkingOrbsKit */, 0A0000000000000000000054 /* VoiceGlowKit */);
 			name = Otto;
 			productName = Otto;
 			productReference = 0A0000000000000000000001 /* Otto.app */;
@@ -78,7 +80,7 @@
 			knownRegions = (en, Base);
 			mainGroup = 0A0000000000000000000004;
 			minimizedProjectReferenceProxies = 1;
-			packageReferences = (0A0000000000000000000022 /* XCRemoteSwiftPackageReference "ios" */);
+			packageReferences = (0A0000000000000000000022 /* XCRemoteSwiftPackageReference "ios" */, 0A0000000000000000000050 /* XCRemoteSwiftPackageReference "Libraries.dev" */);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0A0000000000000000000005 /* Products */;
 			projectDirPath = "";
@@ -224,6 +226,11 @@
 			repositoryURL = "https://github.com/VapiAI/ios";
 			requirement = {kind = branch; branch = main;};
 		};
+		0A0000000000000000000050 /* XCRemoteSwiftPackageReference "Libraries.dev" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Jakubantalik/Libraries.dev";
+			requirement = {kind = revision; revision = a27566557b4def79bcdcedc71858c0fb28020b6d;};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -231,6 +238,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0A0000000000000000000022 /* XCRemoteSwiftPackageReference "ios" */;
 			productName = Vapi;
+		};
+		0A0000000000000000000053 /* ThinkingOrbsKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0A0000000000000000000050 /* XCRemoteSwiftPackageReference "Libraries.dev" */;
+			productName = ThinkingOrbsKit;
+		};
+		0A0000000000000000000054 /* VoiceGlowKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0A0000000000000000000050 /* XCRemoteSwiftPackageReference "Libraries.dev" */;
+			productName = VoiceGlowKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 
