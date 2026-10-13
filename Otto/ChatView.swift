@@ -955,10 +955,24 @@ private struct Typing: View {
     let status: String?
     /// Off while the server is unreachable: the orb shows it's reconnecting instead of thinking.
     let connected: Bool
+
+    /// The orb that fits the step, read off the label's first word (the server's
+    /// toolstatus.ts): looking things up, writing, running something, remembering.
+    static func orb(for status: String?) -> OrbState {
+        guard let status else { return .breathing }
+        switch status.split(separator: " ").first.map(String.init) ?? "" {
+        case "Searching", "Looking", "Checking", "Reading": return .searching
+        case "Editing", "Writing": return .composing
+        case "Running": return .solving
+        case "Remembering": return .weaving
+        default: return .working
+        }
+    }
+
     var body: some View {
         // Top-aligned so the orb stays on the first line when a long status wraps.
         HStack(alignment: .top, spacing: 8) {
-            ThinkingOrb(state: !connected ? .connecting : status == nil ? .breathing : .working, size: .px20)
+            ThinkingOrb(state: !connected ? .connecting : Self.orb(for: status), size: .px20)
             // A status from before the drop would be stale; say what's actually happening.
             if let status = connected ? status : "Reconnecting…" {
                 Text(status)
