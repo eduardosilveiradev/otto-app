@@ -1034,6 +1034,8 @@ private struct CameraPicker: UIViewControllerRepresentable {
 /// Tap the mic to record, tap send to upload. AAC at 16 kHz mono: Whisper needs no more.
 @MainActor @Observable
 final class VoiceRecorder {
+    /// True while a note is recording, so the background keepalive leaves the mic's session alone.
+    static var active = false
     private(set) var started: Date?
     private var recorder: AVAudioRecorder?
 
@@ -1048,6 +1050,9 @@ final class VoiceRecorder {
         guard let r = try? AVAudioRecorder(url: url, settings: settings), r.record() else { return }
         recorder = r
         started = .now
+        Self.active = true
+        // A screen that auto-locks mid-note backgrounds the app and the recording dies with it.
+        UIApplication.shared.isIdleTimerDisabled = true
     }
 
     /// The finished file, or nil if nothing was recording.
@@ -1056,6 +1061,8 @@ final class VoiceRecorder {
         r.stop()
         recorder = nil
         started = nil
+        Self.active = false
+        UIApplication.shared.isIdleTimerDisabled = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         return r.url
     }

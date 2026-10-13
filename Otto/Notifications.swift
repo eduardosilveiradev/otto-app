@@ -108,7 +108,8 @@ enum Grace {
 /// so a silent loop (mixed with whatever else is playing) keeps the websocket open
 /// and replies become banners within a second. Sideloaded only — App Review would
 /// reject this. Costs some battery; Settings has an off switch ("stayAwake").
-/// Never runs during a web call, whose audio session belongs to the call.
+/// Never runs during a web call or a voice note, whose audio session it would take over
+/// (switching to mixable playback lets music resume and kills the mic).
 @MainActor
 enum Keepalive {
     private static var player: AVAudioPlayer?
@@ -116,7 +117,7 @@ enum Keepalive {
     static var enabled: Bool { UserDefaults.standard.object(forKey: "stayAwake") as? Bool ?? true }
 
     static func update(background: Bool) {
-        if background && enabled && !CallManager.active { start() } else { stop() }
+        if background && enabled && !CallManager.active && !VoiceRecorder.active { start() } else { stop() }
     }
 
     private static func start() {
