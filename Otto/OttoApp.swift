@@ -139,7 +139,10 @@ final class OttoStore {
     private func tick() async {
         var seen = backend.connections
         while !Task.isCancelled {
-            let live = backend is MockBackend || backend.isLive
+            var live = backend is MockBackend || backend.isLive
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-offline") { live = false }   // the disconnected UI, in the simulator
+            #endif
             // A reconnect is when replies sent into a socket iOS had frozen go missing; catch up.
             // Counted, not sampled: the drop usually lasts under a second and a 1s tick misses it.
             if backend.connections != seen {

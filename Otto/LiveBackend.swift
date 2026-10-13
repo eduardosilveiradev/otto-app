@@ -179,9 +179,19 @@ final class LiveBackend: OttoBackend {
         }
     }
 
-    private func ping(_ task: URLSessionWebSocketTask) async throws {
+    /// Bounded: a handshake caught in a network switch (wifi to cellular) can leave the pong
+    /// handler never called, and an unbounded wait here parks the reconnect loop for good,
+    /// asleep while HTTP (voice, history) still works.
+    private func ping(_ task: URLSessionWebSocketTask, timeout: Double = 10) async throws {
         try await withCheckedThrowingContinuation { (k: CheckedContinuation<Void, Error>) in
-            task.sendPing { err in if let err { k.resume(throwing: err) } else { k.resume() } }
+            let done = NSLock()
+            nonisolated(unsafe) var resumed = false
+            let finish: @Sendable (Error?) -> Void = { err in
+                guard done.withLock({ let first = !resumed; resumed = true; return first }) else { return }
+                if let err { k.resume(throwing: err) } else { k.resume() }
+            }
+            task.sendPing { finish($0) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { finish(URLError(.timedOut)) }
         }
     }
 

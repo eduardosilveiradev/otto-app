@@ -66,7 +66,7 @@ struct ChatView: View {
                                 removal: .opacity))
                     }
                     if store.ottoTyping {
-                        Typing(status: store.ottoStatus).padding(.top, 10).id("typing")
+                        Typing(status: store.ottoStatus, connected: store.connected).padding(.top, 10).id("typing")
                             .transition(.scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity))
                     }
                 }
@@ -956,11 +956,14 @@ private struct Tapback: View {
 private struct Typing: View {
     /// What Otto is doing, shown beside the orb; nil is just the orb.
     let status: String?
+    /// Off while the server is unreachable: the orb shows it's reconnecting instead of thinking.
+    let connected: Bool
     var body: some View {
         // Top-aligned so the orb stays on the first line when a long status wraps.
         HStack(alignment: .top, spacing: 8) {
-            ThinkingOrb(state: status == nil ? .breathing : .working, size: .px20)
-            if let status {
+            ThinkingOrb(state: !connected ? .connecting : status == nil ? .breathing : .working, size: .px20)
+            // A status from before the drop would be stale; say what's actually happening.
+            if let status = connected ? status : "Reconnecting…" {
                 Text(status)
                     .font(.system(size: 14))
                     .fixedSize(horizontal: false, vertical: true)
@@ -970,6 +973,7 @@ private struct Typing: View {
             }
         }
         .animation(.snappy(duration: 0.25), value: status)
+        .animation(.snappy(duration: 0.25), value: connected)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14).padding(.vertical, 12)
         .background(BubbleShape(mine: false, tail: true).fill(Color(.systemGray5)))
