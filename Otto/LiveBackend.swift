@@ -22,6 +22,10 @@ final class LiveBackend: OttoBackend {
     let name = "Otto server"
     var isLive: Bool { lock.withLock { live } }
     var connections: Int { lock.withLock { connects } }
+    /// Why the socket last dropped, and when — shown under Status, since a drop that only
+    /// happens on one network can't be seen from the Mac.
+    var lastDrop: String? { lock.withLock { drop } }
+    private var drop: String?
     let incoming: AsyncStream<Message>
     let reactions: AsyncStream<(String, String)>
     let statuses: AsyncStream<String>
@@ -169,7 +173,9 @@ final class LiveBackend: OttoBackend {
                 defer { keepalive.cancel() }
                 while true { handle(try await task.receive()) }
             } catch {
-                lock.withLock { if socket === task { socket = nil }; live = false }
+                let why = "\(Date.now.formatted(date: .omitted, time: .shortened)): \(error.localizedDescription)"
+                    + (task.closeCode != .invalid ? " (close \(task.closeCode.rawValue))" : "")
+                lock.withLock { if socket === task { socket = nil }; live = false; drop = why }
                 task.cancel(with: .goingAway, reason: nil)
             }
             try? await Task.sleep(for: .seconds(delay))

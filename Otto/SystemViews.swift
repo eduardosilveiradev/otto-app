@@ -148,9 +148,16 @@ struct Triggers: Decodable { let triggers: [DashTrigger] }
 
 /// Every moving part on the Mac and when it last checked in.
 struct StatusScreen: View {
+    @Environment(OttoStore.self) private var store
     var body: some View {
         Loaded(path: "status") { (s: DashStatus, reload) in
             List {
+                Section("This phone") {
+                    LabeledContent("Live connection", value: store.connected ? "up" : "down")
+                    if let drop = (store.backend as? LiveBackend)?.lastDrop {
+                        Text("Last drop \(drop)").font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                }
                 Section {
                     ForEach(s.rows) { r in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
