@@ -317,9 +317,12 @@ struct Composer: View {
             .animation(.snappy(duration: 0.22), value: canSend)
             .animation(.snappy(duration: 0.22), value: recorder.started != nil)
             .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
-            .voiceGlow(levelProvider: { recorder.level() }, active: recorder.started != nil, cornerRadius: 18)
         }
         }
+        // Outside the glass container: inside it, the glass material swallows the glow.
+        // Pill preset fits a one-line box; the extra gain is for a phone held at arm's length.
+        .voiceGlow(type: .pill, levelProvider: { recorder.level() }, active: recorder.started != nil,
+                   cornerRadius: 18, options: { var o = VoiceGlowOptions(); o.sensitivity = 6; o.idle = 0.35; return o }())
         .padding(.horizontal, 12)
         .padding(.top, 6)
         .padding(.bottom, 4)
@@ -330,7 +333,8 @@ struct Composer: View {
         .onChange(of: store.replyingTo) { if store.replyingTo != nil { focused = true }; ui.relayout() }
         #if DEBUG
         // Layout checks without a keyboard or a server: `-growDraft` types, `-seedDraft`
-        // fills the box, `-seedAttachments` adds two photos, `-keyboardDemo` loops focus.
+        // fills the box, `-seedAttachments` adds two photos, `-keyboardDemo` loops focus,
+        // `-recordDemo` starts a voice note.
         .task {
             let args = ProcessInfo.processInfo.arguments
             if args.contains("-seedAttachments") {
@@ -341,6 +345,7 @@ struct Composer: View {
             if args.contains("-growDraft") {
                 for _ in 0..<40 { try? await Task.sleep(for: .milliseconds(120)); draft += "typing more words " }
             }
+            if args.contains("-recordDemo") { await recorder.start() }
             if args.contains("-seedDraft") {
                 draft = String(repeating: "a long draft that should make the box grow. ", count: 5)
             }
@@ -1066,6 +1071,13 @@ final class VoiceRecorder {
     /// library's own meter opens a mixable session, which lets music back in mid-note.
     func level() -> Double {
         guard let r = recorder else { return 0 }
+        #if DEBUG
+        // `-recordDemo`: a talking-shaped level, since the simulator's mic hears a quiet room.
+        if ProcessInfo.processInfo.arguments.contains("-recordDemo") {
+            let t = Date.now.timeIntervalSinceReferenceDate
+            return 0.06 + 0.1 * abs(sin(t * 5)) * abs(sin(t * 1.3))
+        }
+        #endif
         r.updateMeters()
         return pow(10, Double(r.averagePower(forChannel: 0)) / 20)
     }
