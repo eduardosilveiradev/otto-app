@@ -277,3 +277,154 @@ struct TripsScreen: View {
         }
     }
 }
+
+// MARK: - Packages
+
+/// Orders on their way, read from shipping mail on the Mac, and what arrived lately.
+struct PackagesScreen: View {
+    var body: some View {
+        Loaded(path: "packages") { (p: DashPackages, reload) in PackagesList(p: p, reload: reload) }
+            .navigationTitle("Packages").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private let stages = ["ordered", "shipped", "in_transit", "out_for_delivery", "delivered"]
+
+struct PackagesList: View {
+    let p: DashPackages
+    let reload: () async -> Void
+    @Environment(OttoStore.self) private var store
+    @Environment(\.openURL) private var openURL
+    /// Off once the Mac refuses a write (a read-only token), so the action stops being offered.
+    @State private var canWrite = true
+
+    var body: some View {
+        let active = p.packages.filter { $0.status != "delivered" }
+        let delivered = p.packages.filter { $0.status == "delivered" }
+        List {
+            if p.packages.isEmpty { Text("Packages show up here as shipping emails arrive.").foregroundStyle(.secondary) }
+            ForEach(active) { pkg in
+                package(pkg, header: pkg.id == active.first?.id ? "On the way · \(active.count)" : nil)
+            }
+            ForEach(delivered) { pkg in
+                package(pkg, header: pkg.id == delivered.first?.id ? "Delivered" : nil)
+            }
+        }
+        .refreshable { await reload() }
+    }
+
+    private func package(_ pkg: DashPackages.Package, header: String?) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(pkg.item ?? pkg.merchant ?? pkg.carrierName).font(.headline).lineLimit(2)
+                if pkg.item != nil, let m = pkg.merchant { Text(m).font(.subheadline).foregroundStyle(.secondary) }
+                StageBar(status: pkg.status, events: pkg.events)
+                HStack {
+                    Text(arrival(pkg)).font(.subheadline.weight(.medium))
+                        .foregroundStyle(pkg.status == "exception" ? .red : .primary)
+                    Spacer()
+                    Text(ago(pkg.updatedAt)).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
+            .swipeActions {
+                if canWrite && pkg.status != "delivered" {
+                    Button("Mark delivered") { Task { await markDelivered(pkg.id) } }.tint(.green)
+                }
+            }
+
+            Button {
+                if let u = pkg.trackingUrl.flatMap(URL.init(string:)) { openURL(u) }
+            } label: {
+                HStack(spacing: 12) {
+                    RowIcon(symbol: "shippingbox")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(pkg.carrierName).foregroundStyle(.primary)
+                        if let t = pkg.tracking { Text(t).font(.footnote.monospaced()).foregroundStyle(.secondary) }
+                    }
+                    Spacer()
+                    if pkg.trackingUrl != nil { Image(systemName: "arrow.up.right").font(.footnote).foregroundStyle(.tertiary) }
+                }
+            }
+            .contextMenu {
+                if let t = pkg.tracking {
+                    Button("Copy Tracking Number", systemImage: "doc.on.doc") { UIPasteboard.general.string = t }
+                }
+            }
+
+            if !pkg.events.isEmpty {
+                DisclosureGroup("Updates · \(pkg.events.count)") {
+                    ForEach(pkg.events.sorted { (dashDate($0.at) ?? .distantPast) > (dashDate($1.at) ?? .distantPast) }, id: \.self) { e in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(e.text).foregroundStyle(e.status == "exception" ? .red : .primary)
+                            Text(dashDate(e.at)?.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute()) ?? e.at)
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        } header: { if let header { Text(header) } }
+    }
+
+    /// "Arrives Tue 20 Oct", "Arrives 16–20 Oct", "Delivered Mon 19 Oct".
+    private func arrival(_ pkg: DashPackages.Package) -> String {
+        if pkg.status == "delivered" {
+            let d = dashDate(pkg.deliveredAt) ?? dashDate(pkg.updatedAt)
+            return "Delivered" + (d.map { " " + $0.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)) } ?? "")
+        }
+        if pkg.status == "exception" && pkg.eta == nil { return "Delivery problem" }
+        guard let eta = pkg.eta else { return pkg.status == "ordered" ? "Not shipped yet" : "No delivery date yet" }
+        if let late = pkg.etaLatest, late != eta, let a = dashDate(eta), let b = dashDate(late), a < b {
+            return "Arrives " + (a..<b).formatted(.interval.day().month(.abbreviated))
+        }
+        return "Arrives \(day(eta))"
+    }
+
+    private func markDelivered(_ id: String) async {
+        let body = try? JSONSerialization.data(withJSONObject: ["id": id])
+        if await store.backend.dashData("POST", "packages/done", query: [], body: body) != nil { await reload() }
+        else { canWrite = false }
+    }
+}
+
+/// Five segments, ordered → delivered, filled up to where the package is. Red while something's wrong.
+private struct StageBar: View {
+    let status: String
+    let events: [DashPackages.Event]
+
+    var body: some View {
+        // An exception sits at the last real stage it reached.
+        let reached = stages.firstIndex(of: status)
+            ?? events.sorted { $0.at > $1.at }.lazy.compactMap { stages.firstIndex(of: $0.status) }.first
+            ?? 2
+        let tint: Color = status == "exception" ? .red : status == "delivered" ? .green : .accentColor
+        HStack(spacing: 4) {
+            ForEach(stages.indices, id: \.self) { i in
+                Capsule().fill(i <= reached ? AnyShapeStyle(tint) : AnyShapeStyle(Color(.tertiarySystemFill))).frame(height: 4)
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel(status.replacingOccurrences(of: "_", with: " "))
+    }
+}
+
+#Preview("Packages · sample data") {
+    // Sample data for the canvas only.
+    let json = """
+    {"packages":[
+     {"id":"a","carrier":"ups","carrierName":"UPS","tracking":"1Z999AA10123456784","trackingUrl":"https://example.com/track",
+      "merchant":"Example Store","item":"Desk lamp","status":"in_transit","eta":"2026-10-16","etaLatest":"2026-10-20",
+      "updatedAt":"2026-10-14T09:00:00Z","events":[
+       {"at":"2026-10-13T08:00:00Z","status":"shipped","text":"Shipped"},
+       {"at":"2026-10-14T09:00:00Z","status":"in_transit","text":"Departed facility"}]},
+     {"id":"b","carrier":"dhl","carrierName":"DHL","tracking":"JD0000000000","merchant":"Sample Shop","status":"exception",
+      "eta":"2026-10-15","updatedAt":"2026-10-14T07:00:00Z","events":[
+       {"at":"2026-10-14T07:00:00Z","status":"exception","text":"Address issue"}]},
+     {"id":"c","carrier":"usps","carrierName":"USPS","merchant":"Sample Shop","item":"Headphones","status":"delivered",
+      "updatedAt":"2026-10-12T15:00:00Z","deliveredAt":"2026-10-12T15:00:00Z","events":[]}
+    ]}
+    """
+    let p = try! JSONDecoder().decode(DashPackages.self, from: Data(json.utf8))
+    return NavigationStack { PackagesList(p: p, reload: {}).navigationTitle("Packages") }
+        .environment(OttoStore(backend: MockBackend()))
+}

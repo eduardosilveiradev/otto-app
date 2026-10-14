@@ -45,6 +45,7 @@ struct DetailsView: View {
                     NavigationLink { PeopleScreen() } label: { Label("People", systemImage: "person.2") }
                     NavigationLink { MoneyScreen() } label: { Label("Money", systemImage: "creditcard") }
                     NavigationLink { TripsScreen() } label: { Label("Trips", systemImage: "airplane") }
+                    NavigationLink { PackagesScreen() } label: { Label("Packages", systemImage: "shippingbox") }
                     NavigationLink { ActivityScreen() } label: { Label("Activity", systemImage: "waveform.path.ecg") }
                 }
 
@@ -94,6 +95,7 @@ struct DetailsView: View {
                 case "People": PeopleScreen()
                 case "Money": MoneyScreen()
                 case "Trips": TripsScreen()
+                case "Packages": PackagesScreen()
                 case "Activity": ActivityScreen()
                 case "Status": StatusScreen()
                 default: DevicesScreen()
