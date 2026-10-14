@@ -2,6 +2,7 @@ import AVFoundation
 import Combine
 import SwiftUI
 import Vapi
+import VoiceGlowKit
 
 /// A Vapi web call to the Otto assistant: audio over the internet instead of the
 /// phone network, so no carrier minutes. Config lives in UserDefaults like the
@@ -30,6 +31,8 @@ final class CallManager {
 
     /// 0…1, how loud Otto is right now; drives the face.
     var level: Float { vapi?.remoteAudioLevel ?? 0 }
+    /// 0…1, whoever is louder, Otto or the user (unless muted); drives the screen glow.
+    var anyLevel: Float { max(level, muted ? 0 : vapi?.localAudioLevel ?? 0) }
 
     func start() {
         let d = UserDefaults.standard
@@ -40,7 +43,13 @@ final class CallManager {
         vapi.eventPublisher.receive(on: DispatchQueue.main).sink { [weak self] event in
             guard let self else { return }
             switch event {
-            case .callDidStart: phase = .live; startedAt = .now
+            case .callDidStart:
+                phase = .live; startedAt = .now
+                // Daily reports no levels until asked to: without these both stay nil.
+                Task {
+                    try? await vapi.startRemoteParticipantsAudioLevelObserver()
+                    try? await vapi.startLocalAudioLevelObserver()
+                }
             case .callDidEnd: phase = .ended
             case .speechUpdate(let s): if s.role == .assistant { ottoSpeaking = s.status == .started }
             case .error(let e): error = e.localizedDescription; phase = .ended
@@ -82,22 +91,24 @@ struct CallView: View {
             LinearGradient(colors: [Color(red: 0.16, green: 0.1, blue: 0.06), .black], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
 
+            // The same glow as a recording voice note, rising from the screen's edge with either voice.
+            Color.clear
+                .voiceGlow(type: .mobile, levelProvider: { [call] in Double(min(1, call.anyLevel * 4)) },
+                           active: call.phase == .live, theme: .dark, cornerRadius: 55, options: {
+                               var o = VoiceGlowOptions()
+                               o.sensitivity = 10; o.attack = 0.12; o.release = 0.5; o.idle = 0.4
+                               o.brightness = 1.4; o.saturation = 1.5
+                               return o
+                           }())
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+
             VStack(spacing: 0) {
                 Spacer()
                 TimelineView(.animation) { _ in
-                    let level = CGFloat(min(1, call.level * 4))   // remote levels are quiet; boost for visibility
-                    ZStack {
-                        // Rings that swell with Otto's voice.
-                        ForEach(0..<3, id: \.self) { i in
-                            Circle()
-                                .stroke(Color(red: 1, green: 0.62, blue: 0.24).opacity(0.35 - Double(i) * 0.1), lineWidth: 2)
-                                .frame(width: 190 + CGFloat(i) * 46, height: 190 + CGFloat(i) * 46)
-                                .scaleEffect(1 + level * (0.12 + CGFloat(i) * 0.06))
-                        }
-                        OttoAvatar(size: 180, thinking: call.phase == .connecting)
-                            .scaleEffect(1 + level * 0.08)
-                    }
-                    .animation(.easeOut(duration: 0.12), value: level)
+                    OttoAvatar(size: 180, thinking: call.phase == .connecting)
+                        .scaleEffect(1 + CGFloat(min(1, call.level * 4)) * 0.08)   // remote levels are quiet; boost
+                        .animation(.easeOut(duration: 0.12), value: call.level)
                 }
                 .frame(height: 340)
 
