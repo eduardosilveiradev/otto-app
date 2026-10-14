@@ -51,19 +51,23 @@ struct ChatView: View {
                         let next = i + 1 < store.messages.count ? store.messages[i + 1] : nil
                         let newBlock = prev.map { m.date.timeIntervalSince($0.date) > 3600 } ?? true
                         if newBlock { Stamp(date: m.date) }
-                        Row(message: m,
-                            quote: m.replyTo.flatMap { byWire[$0] },
-                            tail: next?.from != m.from || next.map { $0.date.timeIntervalSince(m.date) > 3600 } ?? true,
-                            receipt: m.id == lastMine && m.pending != true ? receipt(for: i) : nil,
-                            onTap: { store.tap($0, on: m.id) })
-                            .padding(.top, newBlock ? 0 : (prev?.from == m.from ? 2 : 10))
-                            .id(m.id)
-                            // New bubbles grow out of their own tail corner, iMessage-style.
-                            .transition(.asymmetric(
-                                insertion: .scale(scale: 0.4, anchor: m.from == .me ? .bottomTrailing : .bottomLeading)
-                                    .combined(with: .opacity)
-                                    .combined(with: .offset(y: m.from == .me ? 24 : 0)),
-                                removal: .opacity))
+                        if m.from == .terminal {
+                            TerminalLine(message: m, afterStamp: newBlock).id(m.id).transition(.opacity)
+                        } else {
+                            Row(message: m,
+                                quote: m.replyTo.flatMap { byWire[$0] },
+                                tail: next?.from != m.from || next.map { $0.date.timeIntervalSince(m.date) > 3600 } ?? true,
+                                receipt: m.id == lastMine && m.pending != true ? receipt(for: i) : nil,
+                                onTap: { store.tap($0, on: m.id) })
+                                .padding(.top, newBlock || prev?.from == .terminal ? 0 : (prev?.from == m.from ? 2 : 10))
+                                .id(m.id)
+                                // New bubbles grow out of their own tail corner, iMessage-style.
+                                .transition(.asymmetric(
+                                    insertion: .scale(scale: 0.4, anchor: m.from == .me ? .bottomTrailing : .bottomLeading)
+                                        .combined(with: .opacity)
+                                        .combined(with: .offset(y: m.from == .me ? 24 : 0)),
+                                    removal: .opacity))
+                        }
                     }
                     if store.ottoTyping {
                         Typing(status: store.ottoStatus, connected: store.connected).padding(.top, 10).id("typing")
@@ -531,6 +535,24 @@ private struct Stamp: View {
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
             .padding(.top, 14).padding(.bottom, 8)
+    }
+}
+
+/// A prompt typed into Otto's terminal, set like a Stamp: the time and its first words.
+private struct TerminalLine: View {
+    let message: Message
+    /// Right under a Stamp, which already has the spacing above.
+    let afterStamp: Bool
+    var body: some View {
+        (Text(Image(systemName: "terminal")) + Text(" " + message.date.formatted(date: .omitted, time: .shortened)).fontWeight(.semibold)
+            + Text(" \u{201C}\(message.text)\u{201D}"))
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .lineLimit(1).truncationMode(.tail)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 24)
+            .padding(.top, afterStamp ? 0 : 14).padding(.bottom, 8)
+            .accessibilityLabel("You, in the terminal at \(message.date.formatted(date: .omitted, time: .shortened)): \(message.text)")
     }
 }
 

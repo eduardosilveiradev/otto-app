@@ -163,6 +163,7 @@ final class OttoStore {
         if ProcessInfo.processInfo.arguments.contains("-seedThread") {
             let long = String(repeating: "this is a long message that should wrap onto several lines. ", count: 6)
             messages = (0..<8).map { Message(from: $0 % 2 == 0 ? .me : .otto, text: $0 == 7 ? "LAST https://www.ovs.it and https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=1234567890&scope=openid " + long : long) }
+            messages.insert(Message(from: .terminal, text: "check why the dashboard build fails…"), at: 6)
         }
         // `-demoThread`: the conversation the website shows, for screen recordings.
         if ProcessInfo.processInfo.arguments.contains("-demoThread") {
@@ -226,7 +227,7 @@ final class OttoStore {
             }
         }
         for await m in backend.incoming {
-            if !serverTyping { ottoTyping = false }
+            if !serverTyping && m.from == .otto { ottoTyping = false }
             messages.append(m)
             if !foreground && m.from == .otto { Notifier.shared.post(m) }
         }
@@ -259,17 +260,17 @@ final class OttoStore {
     /// A background refresh: pull anything newer than what's saved and notify for Otto's.
     func backgroundSync() async { await catchUp(notify: true) }
 
-    /// Otto's replies from the server's history that this phone doesn't have yet.
-    /// Only Otto's side: yours are already here, and the server's copy of them is
+    /// Otto's replies (and terminal lines) from the server's history that this phone doesn't
+    /// have yet. Not yours: they're already here, and the server's copy of them is
     /// stamped a moment later, so merging those would show every message twice.
     private func catchUp(notify: Bool) async {
         guard !(backend is MockBackend) else { return }
         let last = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
-        let fresh = unseen(await backend.history().filter { $0.from == .otto }, after: last)
+        let fresh = unseen(await backend.history().filter { $0.from != .me }, after: last)
         guard !fresh.isEmpty else { return }
-        if !serverTyping { ottoTyping = false }
+        if !serverTyping && fresh.contains(where: { $0.from == .otto }) { ottoTyping = false }
         messages += fresh
-        if notify { for m in fresh { Notifier.shared.post(m) } }
+        if notify { for m in fresh where m.from == .otto { Notifier.shared.post(m) } }
     }
 
     func send(_ text: String) {

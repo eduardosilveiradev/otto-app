@@ -12,8 +12,9 @@ import Foundation
 ///                  {"type":"react","id":"<id>","emoji":"👍"}
 ///                  {"type":"status","text":"Reading ChatView.swift"}   while a reply is in the works
 ///                  {"type":"read","ids":["<uuid>"]}   your messages Otto has taken in
+///                  {"type":"terminal","text":"first six words…","ts":"<ISO>"}   a prompt typed in Otto's terminal
 ///   GET  <server>/app/brief    brief JSON
-///   GET  <server>/app/history  [{"dir":"in"|"out","text","ts","id"?, and on Otto's: "files","voice","reply_to","buttons"?}]
+///   GET  <server>/app/history  [{"dir":"in"|"out","text","ts","id"?,"kind":"terminal"?, and on Otto's: "files","voice","reply_to","buttons"?}]
 ///   GET  <server>/app/file/<id>  a file or voice clip from a message
 ///   POST <server>/app/photo?text=<caption>&id=<uuid>  JPEG body
 ///   POST <server>/app/voice?id=<uuid>    m4a body -> {"text": "<transcript>"}
@@ -82,7 +83,8 @@ final class LiveBackend: OttoBackend {
         guard let rows: [WireHistory] = await get("app/history") else { return [] }
         // Ids make the merge exact: yours come back under the UUID this phone sent them with.
         return rows.map { r in
-            r.dir == "in"
+            r.kind == "terminal" ? Self.terminal(r.text, ts: r.ts)
+            : r.dir == "in"
                 ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date())
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
                           buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data) },
@@ -213,6 +215,7 @@ final class LiveBackend: OttoBackend {
         if f.type == "status", let text = f.text { status.yield(text); return }
         if f.type == "read", let ids = f.ids { readIDs.yield(ids); return }
         if f.type == "typing", let on = f.on { typingOn.yield(on); return }
+        if f.type == "terminal", let text = f.text, let ts = f.ts { out.yield(Self.terminal(text, ts: ts)); return }
         guard f.type == "message", let text = f.text else { return }
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
                           buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data) },
@@ -313,6 +316,12 @@ final class LiveBackend: OttoBackend {
         return data
     }
 
+    /// The server stamps the live frame and the history line with the same ts, so the id
+    /// made from it is how the store knows a replayed one is already in the thread.
+    private static func terminal(_ text: String, ts: String) -> Message {
+        Message(from: .terminal, text: text, date: date(ts) ?? Date(), serverID: "terminal|\(ts)|\(text)")
+    }
+
     // MARK: Wire types
 
     private struct WireButton: Decodable { let label: String; let data: String }
@@ -323,7 +332,7 @@ final class LiveBackend: OttoBackend {
     /// Otto's entries carry what the live frame did, so a message that arrived while the
     /// socket was asleep still has its photos, voice and buttons.
     private struct WireHistory: Decodable {
-        let dir: String; let text: String; let ts: String; let id: String?
+        let dir: String; let text: String; let ts: String; let id: String?; let kind: String?
         let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let buttons: [WireButton]?
     }
     private struct WireBrief: Decodable {

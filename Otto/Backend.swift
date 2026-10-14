@@ -2,7 +2,9 @@ import Foundation
 
 // MARK: - Models
 
-enum Sender: String, Codable { case me, otto }
+/// `terminal` is a prompt you typed into Otto's terminal on the Mac: a system line in the
+/// thread (its first few words), not a bubble, and nothing to notify, answer or react to.
+enum Sender: String, Codable { case me, otto, terminal }
 
 struct ActionButton: Identifiable, Hashable, Codable {
     var id: String { data }
