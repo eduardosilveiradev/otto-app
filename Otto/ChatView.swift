@@ -631,7 +631,7 @@ private struct Row: View {
                     .frame(maxWidth: 240, maxHeight: 320)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
             }
-            ForEach(message.files ?? [], id: \.id) { RemoteFileView(file: $0) }
+            ForEach(message.files ?? [], id: \.id) { f in if StudySet.isStudy(f) { StudyBubble(file: f) } else { RemoteFileView(file: f) } }
             if message.image == nil || !message.text.isEmpty {
             content
                 .font(.system(size: 17))
