@@ -72,6 +72,17 @@ struct DashTrips: Decodable {
     let trips: [Trip]; let current: Current?; let problems: [String: [String]]
 }
 
+struct DashPackages: Decodable {
+    struct Event: Decodable, Hashable { let at: String; let status: String; let text: String }
+    struct Package: Decodable, Identifiable {
+        let id: String; let carrier: String; let carrierName: String; let tracking: String?; let trackingUrl: String?
+        let merchant: String?; let item: String?; let status: String
+        let eta: String?; let etaLatest: String?; let updatedAt: String; let deliveredAt: String?; let events: [Event]
+    }
+    /// Active first, then delivered in the last 30 days.
+    let packages: [Package]
+}
+
 struct SourceStats: Decodable, Identifiable {
     var id: String { src }
     let src: String; let sent: Int; let engaged: Int; let silentStreak: Int; let lastSent: String?; let lastEngaged: String?
