@@ -68,6 +68,11 @@ final class OttoStore {
     var connected = false
     /// The message a swipe picked to answer; the composer shows it until you send or cancel.
     var replyingTo: Message.ID?
+    #if DEBUG
+    /// `-scriptDemo` types through these, so the real composer shows the words going in.
+    var demoDraft: String?
+    var demoFocus = false
+    #endif
 
     /// The thread lives on the phone, one file per backend so mock data never mixes
     /// with the real conversation. The server only keeps the last 50.
@@ -178,6 +183,8 @@ final class OttoStore {
                 Message(from: .me, text: "whats a good place for dinner near the office thats not pizza", read: true),
             ]
         }
+        // `-scriptDemo`: a scripted session for the launch film; see scriptDemo().
+        if ProcessInfo.processInfo.arguments.contains("-scriptDemo") { Task { await scriptDemo() } }
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
         if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift" }
         #endif
@@ -254,6 +261,73 @@ final class OttoStore {
             try? await Task.sleep(for: .milliseconds(500))
         }
         print("PERF late=\(frames.late) of \(frames.count) frames, worst \(Int(frames.worst * 1000))ms, lost \(Int(frames.lost * 1000))ms")
+    }
+    #endif
+
+    #if DEBUG
+    /// `-scriptDemo`: one continuous session, recorded from the simulator for the launch film.
+    /// Everything goes straight into the thread, never through the backend, so the mock's
+    /// canned "(mock) …" replies can't appear. Timings are tuned for a ~40 s take.
+    private func scriptDemo() async {
+        func wait(_ s: Double) async { try? await Task.sleep(for: .seconds(s)) }
+        func type(_ text: String) async {
+            demoFocus = true
+            await wait(0.6)
+            var typed = ""
+            for c in text {
+                typed.append(c)
+                demoDraft = typed
+                // a little human unevenness: faster mid-word, a beat after spaces
+                await wait(c == " " ? 0.11 : Double.random(in: 0.045...0.08))
+            }
+            await wait(0.45)
+        }
+        func sendTyped(_ text: String) {
+            demoDraft = ""
+            messages.append(Message(from: .me, text: text, read: true))
+        }
+        func think(_ steps: [String], each: Double = 1.1) async {
+            ottoTyping = true
+            for s in steps { ottoStatus = s; await wait(each) }
+        }
+        func say(_ text: String, buttons: [ActionButton] = []) {
+            ottoTyping = false
+            messages.append(Message(from: .otto, text: text, buttons: buttons))
+        }
+
+        messages = [Message(from: .otto, text: "morning. dentist at 15:00, then you're free. enel bill, €112, due friday. and it's thursday, so: the boiler",
+                            date: Date().addingTimeInterval(-7 * 3600))]
+        await wait(2.5)
+
+        let ask = "can you tell the landlord tuesday morning works for the boiler guy"
+        await type(ask); sendTyped(ask)
+        await wait(0.5)
+        await think(["Reading your mail", "Finding the landlord's thread", "Writing"])
+        say("draft:\n\"Hi, Tuesday morning works for the boiler service. I'll be home from 9. Thanks!\"",
+            buttons: [ActionButton(label: "send ✓", data: "send"), ActionButton(label: "discard", data: "discard")])
+        demoFocus = false
+        await wait(2.8)
+
+        // the tap on "send ✓": buttons go, the label lands as your reply, like the real tap()
+        if let i = messages.lastIndex(where: { !$0.buttons.isEmpty }) { messages[i].buttons = [] }
+        messages.append(Message(from: .me, text: "send ✓", read: true))
+        await wait(0.4)
+        await think(["Sending"], each: 1.0)
+        say("sent. I'll tell you when they answer.")
+        await wait(2.2)
+
+        let ask2 = "and remind me to call the plumber when I'm home"
+        await type(ask2); sendTyped(ask2)
+        await wait(0.4)
+        await think(["Setting a reminder"], each: 1.2)
+        say("done. it'll go off when you get home.")
+        demoFocus = false
+        await wait(3.5)
+
+        // later, unprompted: the reason it exists
+        await think(["Reading your mail"], each: 1.4)
+        say("landlord replied: tuesday 9 is perfect, he'll let the boiler guy in 👍")
+        await wait(4)
     }
     #endif
 

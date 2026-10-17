@@ -328,6 +328,10 @@ struct Composer: View {
         .padding(.bottom, 4)
         .onChange(of: focused) { ui.focused = focused }
         .onChange(of: draft) { ui.relayout() }
+        #if DEBUG
+        .onChange(of: store.demoDraft) { if let d = store.demoDraft { draft = d } }
+        .onChange(of: store.demoFocus) { focused = store.demoFocus }
+        #endif
         .onChange(of: attachments.count) { ui.relayout() }
         .onChange(of: recorder.started != nil) { ui.recording = recorder.started != nil; ui.relayout() }
         .onAppear { [recorder] in ui.level = { recorder.level() } }
