@@ -41,6 +41,10 @@ final class LiveBackend: OttoBackend {
     private let readIDs: AsyncStream<[String]>.Continuation
     private let typingOn: AsyncStream<Bool>.Continuation
     private let session = URLSession(configuration: .default)
+    /// The socket's own session, replaced on every drop. After iOS suspends the app a
+    /// session can be left where every new websocket handshake fails while plain HTTP on
+    /// the shared one still works: "not connected" for good, with history still syncing.
+    private var wsSession = URLSession(configuration: .default)
     private let lock = NSLock()
     private var live = false
     private var connects = 0
@@ -64,7 +68,7 @@ final class LiveBackend: OttoBackend {
         loop = Task { [weak self] in await self?.run() }
     }
 
-    deinit { loop?.cancel(); socket?.cancel(with: .goingAway, reason: nil) }
+    deinit { loop?.cancel(); socket?.cancel(with: .goingAway, reason: nil); wsSession.invalidateAndCancel() }
 
     /// Reads `serverURL` (e.g. "https://mac.tailnet.ts.net" or "http://100.x.y.z:4589")
     /// and `serverToken` from UserDefaults. Nil when either is unset.
@@ -157,7 +161,7 @@ final class LiveBackend: OttoBackend {
             url.scheme = url.scheme == "https" ? "wss" : "ws"
             var req = URLRequest(url: url.url!)
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            let task = session.webSocketTask(with: req)
+            let task = lock.withLock { wsSession }.webSocketTask(with: req)
             task.resume()
             do {
                 try await ping(task)                    // handshake done, token accepted
@@ -179,6 +183,11 @@ final class LiveBackend: OttoBackend {
                     + (task.closeCode != .invalid ? " (close \(task.closeCode.rawValue))" : "")
                 lock.withLock { if socket === task { socket = nil }; live = false; drop = why }
                 task.cancel(with: .goingAway, reason: nil)
+                let stale = lock.withLock { () -> URLSession in
+                    defer { wsSession = URLSession(configuration: .default) }
+                    return wsSession
+                }
+                stale.invalidateAndCancel()
             }
             try? await Task.sleep(for: .seconds(delay))
             // Short cap: the usual drop is iOS suspending the app, and coming back
