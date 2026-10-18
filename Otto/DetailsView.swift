@@ -41,6 +41,7 @@ struct DetailsView: View {
 
                 Section {
                     NavigationLink { LoopsScreen() } label: { Label("Loops", systemImage: "checklist") }
+                    NavigationLink { CallsScreen() } label: { Label("Calls", systemImage: "phone") }
                     NavigationLink { MemoryScreen() } label: { Label("Memory", systemImage: "brain") }
                     NavigationLink { PeopleScreen() } label: { Label("People", systemImage: "person.2") }
                     NavigationLink { MoneyScreen() } label: { Label("Money", systemImage: "creditcard") }
@@ -91,6 +92,7 @@ struct DetailsView: View {
             .navigationDestination(item: $screen) { name in
                 switch name {
                 case "Loops": LoopsScreen()
+                case "Calls": CallsScreen()
                 case "Memory": MemoryScreen()
                 case "People": PeopleScreen()
                 case "Money": MoneyScreen()

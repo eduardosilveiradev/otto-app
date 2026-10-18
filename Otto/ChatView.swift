@@ -11,6 +11,9 @@ struct ChatView: View {
     @State private var showDetails = ProcessInfo.processInfo.arguments.contains("-details")
     @State private var showCall = false
     @State private var webCall = false
+    /// Calls Otto is placing for you; a live one shows as a banner under the header.
+    @State private var calls = CallWatch()
+    @State private var openCall: DashCall?
     /// Otto's phone line (the Vapi assistant). Set in details; dialled with the phone app.
     @AppStorage("callNumber") private var callNumber = ""
     @Environment(\.openURL) private var openURL
@@ -142,7 +145,31 @@ struct ChatView: View {
         #endif
         .overlay { if store.messages.isEmpty && !store.ottoTyping { EmptyChat(asleep: store.asleep, connected: store.connected, lookingAtCursor: focused) } }
         .background(Color(.systemBackground))
-        .safeAreaInset(edge: .top, spacing: 0) { header }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 8) {
+                header
+                if let live = calls.live {
+                    CallBanner(call: live) { openCall = live }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.snappy, value: calls.live?.id)
+            // The header's fade, carried down behind the banner so the thread doesn't show through it.
+            .background(alignment: .top) {
+                if calls.live != nil {
+                    LinearGradient(colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
+                                   startPoint: UnitPoint(x: 0.5, y: 0.6), endPoint: .bottom)
+                        .padding(.bottom, -16)
+                        .ignoresSafeArea(edges: .top)
+                }
+            }
+        }
+        .task { await calls.run(store.backend) }
+        // `-openCall`: open the live call as soon as there is one, for screenshots.
+        .onChange(of: calls.live?.id) {
+            if ProcessInfo.processInfo.arguments.contains("-openCall"), let live = calls.live { openCall = live }
+        }
+        .sheet(item: $openCall) { CallSheet(call: $0) }
         // The header's fade, mirrored behind the composer: bubbles dissolve into the
         // edge instead of meeting a solid strip.
         .overlay(alignment: .bottom) {
