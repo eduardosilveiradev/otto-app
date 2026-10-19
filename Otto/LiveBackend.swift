@@ -32,6 +32,7 @@ final class LiveBackend: OttoBackend {
     let statuses: AsyncStream<String>
     let reads: AsyncStream<[String]>
     let typing: AsyncStream<Bool>
+    let approvalUpdates: AsyncStream<ApprovalUpdate>
 
     private let base: URL       // http(s)://host:port
     private let token: String
@@ -40,6 +41,7 @@ final class LiveBackend: OttoBackend {
     private let status: AsyncStream<String>.Continuation
     private let readIDs: AsyncStream<[String]>.Continuation
     private let typingOn: AsyncStream<Bool>.Continuation
+    private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
     private let session = URLSession(configuration: .default)
     /// The socket's own session, replaced on every drop. After iOS suspends the app a
     /// session can be left where every new websocket handshake fails while plain HTTP on
@@ -65,6 +67,7 @@ final class LiveBackend: OttoBackend {
         (statuses, status) = AsyncStream.makeStream()
         (reads, readIDs) = AsyncStream.makeStream()
         (typing, typingOn) = AsyncStream.makeStream()
+        (approvalUpdates, approvalOut) = AsyncStream.makeStream()
         loop = Task { [weak self] in await self?.run() }
     }
 
@@ -106,6 +109,10 @@ final class LiveBackend: OttoBackend {
               let json = try? JSONSerialization.data(withJSONObject: frame),
               let s = String(data: json, encoding: .utf8) else { return false }
         do { try await task.send(.string(s)); return true } catch { return false }
+    }
+
+    func decide(approval id: String, approve: Bool) async {
+        await write(["type": "approval", "id": id, "decision": approve ? "approve" : "decline"])
     }
 
     func tap(_ button: ActionButton) async {
@@ -226,6 +233,8 @@ final class LiveBackend: OttoBackend {
         if f.type == "status", let text = f.text { status.yield(text); return }
         if f.type == "read", let ids = f.ids { readIDs.yield(ids); return }
         if f.type == "typing", let on = f.on { typingOn.yield(on); return }
+        if f.type == "approval", let a = try? JSONDecoder().decode(ApprovalRequest.self, from: data) { approvalOut.yield(.show(a)); return }
+        if f.type == "approval_done", let id = f.id { approvalOut.yield(.done(id)); return }
         if f.type == "terminal", let text = f.text, let ts = f.ts { out.yield(Self.terminal(text, ts: ts)); return }
         guard f.type == "message", let text = f.text else { return }
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),

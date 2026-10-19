@@ -48,6 +48,10 @@ final class OttoStore {
     }
     /// The live line inside the dots bubble: the tool Otto is running right now.
     var ottoStatus: String?
+    /// Approval screens waiting on you, newest last; `Later` hides one until the next launch.
+    var approvals: [ApprovalRequest] = []
+    var hiddenApprovals: Set<String> = []
+    var shownApproval: ApprovalRequest? { approvals.last { !hiddenApprovals.contains($0.id) } }
     /// The server sends "typing" frames; until one arrives (an older server), the app guesses.
     @ObservationIgnored private var serverTyping = false
 
@@ -222,6 +226,14 @@ final class OttoStore {
             }
         }
         Task {
+            for await u in backend.approvalUpdates {
+                switch u {
+                case .show(let a): if !approvals.contains(where: { $0.id == a.id }) { approvals.append(a) }
+                case .done(let id): approvals.removeAll { $0.id == id }
+                }
+            }
+        }
+        Task {
             for await ids in backend.reads {
                 for id in ids { if let i = messages.firstIndex(where: { $0.wireID == id }) { messages[i].read = true } }
             }
@@ -387,6 +399,13 @@ final class OttoStore {
     /// Everything still unsent, oldest first. Runs at launch and on every reconnect.
     private func resendPending() async {
         for m in messages where m.pending == true { await deliver(m.id) }
+    }
+
+    func hideApproval(_ id: String) { hiddenApprovals.insert(id) }
+
+    func decide(_ id: String, approve: Bool) async {
+        await backend.decide(approval: id, approve: approve)
+        approvals.removeAll { $0.id == id }
     }
 
     /// Downscaled to 1600px so the upload is quick and the saved thread stays small.

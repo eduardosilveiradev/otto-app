@@ -142,6 +142,7 @@
 				INFOPLIST_FILE = "Otto-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Otto;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Take a photo to send Otto.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID confirms changes you approve for Otto.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Otto listens when you record a voice message or call.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -166,6 +167,7 @@
 				INFOPLIST_FILE = "Otto-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Otto;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Take a photo to send Otto.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID confirms changes you approve for Otto.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Otto listens when you record a voice message or call.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

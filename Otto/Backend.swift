@@ -115,6 +115,9 @@ protocol OttoBackend: AnyObject {
     var reads: AsyncStream<[String]> { get }
     /// Whether Otto is working on something you sent, as the server sees it.
     var typing: AsyncStream<Bool> { get }
+    /// Approval screens the server raised, and ones it settled or dropped.
+    var approvalUpdates: AsyncStream<ApprovalUpdate> { get }
+    func decide(approval id: String, approve: Bool) async
     func history() async -> [Message]
     /// True once the server has the message; false means try again later.
     func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool
@@ -147,6 +150,8 @@ extension OttoBackend {
     func settings(flip id: String?) async -> SettingsPage? { nil }
     func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
+    var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
+    func decide(approval id: String, approve: Bool) async {}
 }
 
 /// One switch on the Mac's settings page; `section` is otto, recurring or connectors.

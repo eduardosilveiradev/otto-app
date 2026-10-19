@@ -170,6 +170,10 @@ struct ChatView: View {
             if ProcessInfo.processInfo.arguments.contains("-openCall"), let live = calls.live { openCall = live }
         }
         .sheet(item: $openCall) { CallSheet(call: $0) }
+        // Closed only by its own buttons (Later hides it), so the setter has nothing to do.
+        .sheet(item: Binding(get: { store.shownApproval }, set: { _ in })) {
+            ApprovalSheet(request: $0)
+        }
         // The header's fade, mirrored behind the composer: bubbles dissolve into the
         // edge instead of meeting a solid strip.
         .overlay(alignment: .bottom) {
