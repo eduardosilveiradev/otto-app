@@ -1084,12 +1084,9 @@ private struct CameraPicker: UIViewControllerRepresentable {
         c.delegate = context.coordinator
         c.showsCameraControls = false
         c.cameraOverlayView = context.coordinator.overlay(for: c)
-        // The bare preview is 4:3 at the top; stretch it to fill the screen like the Camera app.
+        // The bare preview is 4:3 at the top; centre it, uncropped, so what you frame is what's sent.
         let screen = UIScreen.main.bounds.size
-        let previewHeight = screen.width * 4 / 3
-        let scale = screen.height / previewHeight
-        c.cameraViewTransform = CGAffineTransform(translationX: 0, y: (screen.height - previewHeight) / 2)
-            .scaledBy(x: scale, y: scale)
+        c.cameraViewTransform = CGAffineTransform(translationX: 0, y: max(0, (screen.height - screen.width * 4 / 3) / 2))
         return c
     }
     func updateUIViewController(_ c: UIImagePickerController, context: Context) {}
@@ -1100,6 +1097,9 @@ private struct CameraPicker: UIViewControllerRepresentable {
         private weak var picker: UIImagePickerController?
         private let count = UILabel()
         private let flash = UIView()
+        private let shutter = UIButton(type: .custom)
+        private let done = UIButton(configuration: .filled())
+        private let haptic = UIImpactFeedbackGenerator(style: .medium)
         private var shots = 0
         init(_ p: CameraPicker) { parent = p }
 
@@ -1115,7 +1115,6 @@ private struct CameraPicker: UIViewControllerRepresentable {
             flash.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             v.addSubview(flash)
 
-            let shutter = UIButton(type: .custom)
             shutter.backgroundColor = .white
             shutter.layer.cornerRadius = 36
             shutter.layer.borderWidth = 5
@@ -1127,7 +1126,7 @@ private struct CameraPicker: UIViewControllerRepresentable {
             cfg.title = "Done"
             cfg.cornerStyle = .capsule
             cfg.baseBackgroundColor = UIColor.black.withAlphaComponent(0.5)
-            let done = UIButton(configuration: cfg)
+            done.configuration = cfg
             done.addTarget(self, action: #selector(finish), for: .touchUpInside)
 
             count.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
@@ -1137,6 +1136,7 @@ private struct CameraPicker: UIViewControllerRepresentable {
             count.layer.cornerRadius = 18
             count.clipsToBounds = true
             count.isHidden = true
+            haptic.prepare()
 
             for b in [shutter, done, count] as [UIView] { b.translatesAutoresizingMaskIntoConstraints = false; v.addSubview(b) }
             let g = v.safeAreaLayoutGuide
@@ -1155,20 +1155,33 @@ private struct CameraPicker: UIViewControllerRepresentable {
             return v
         }
 
+        /// takePicture() is a no-op while a capture is in flight, so the shutter (and Done, which
+        /// would drop that capture) wait for the delegate.
         @objc private func shoot() {
+            shutter.isEnabled = false
+            done.isEnabled = false
             picker?.takePicture()
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            haptic.impactOccurred()
+            haptic.prepare()
             flash.alpha = 0.8
             UIView.animate(withDuration: 0.25) { self.flash.alpha = 0 }
         }
         @objc private func finish() { parent.dismiss() }
 
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            shutter.isEnabled = true
+            done.isEnabled = true
             guard let img = info[.originalImage] as? UIImage else { return }
-            parent.onPick(img)
+            // A full-res capture is ~50 MB decoded; a burst of them gets the app killed. Keep 1600px.
+            let k = min(1, 1600 / max(img.size.width * img.scale, img.size.height * img.scale))
+            let size = CGSize(width: img.size.width * img.scale * k, height: img.size.height * img.scale * k)
             shots += 1
             count.text = "  \(shots)  "
+            count.accessibilityLabel = "\(shots) photos"
             count.isHidden = false
+            UIAccessibility.post(notification: .announcement, argument: "\(shots) photos")
+            let onPick = parent.onPick
+            Task { onPick(await img.byPreparingThumbnail(ofSize: size) ?? img) }
         }
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.dismiss() }
     }

@@ -392,13 +392,19 @@ final class OttoStore {
     func sendPhoto(_ image: UIImage, caption: String = "") {
         let scale = min(1, 1600 / max(image.size.width, image.size.height))
         let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-        let small = UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        // Scale 1: the default format multiplies by the screen scale, which made "1600px" 4800.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let small = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
         guard let jpeg = small.jpegData(compressionQuality: 0.7) else { return }
         let m = Message(from: .me, text: caption, image: jpeg)
         messages.append(m)
         ottoTyping = true
-        Task { await backend.sendPhoto(jpeg, caption: caption, id: m.wireID) }
+        // One after another, so a burst arrives in order with the caption on the last photo.
+        let previous = photoUpload
+        photoUpload = Task { await previous?.value; await backend.sendPhoto(jpeg, caption: caption, id: m.wireID) }
     }
+    @ObservationIgnored private var photoUpload: Task<Void, Never>?
 
     /// The bubble shows up at once; the transcript fills it in when the server has it.
     func sendVoice(_ file: URL) {
