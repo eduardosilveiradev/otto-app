@@ -38,7 +38,20 @@ cp -R "$APP" "$WORK/ipa/Payload/"
 cp "$WORK/ipa/Otto.ipa" "$OUT/Otto.ipa.tmp" && mv "$OUT/Otto.ipa.tmp" "$OUT/Otto.ipa"
 cp "$WORK/ipa/Otto.ipa" "$ROOT/build/Otto.ipa" 2>/dev/null || true
 cp "$ROOT/Otto/Assets.xcassets/AppIcon.appiconset/icon-1024.png" "$OUT/icon.png"   # SideStore requires an icon
-printf '{"version":"%s","build":"%s","date":"%s","size":%s}\n' \
-  "$VERSION" "$BUILD" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(stat -f%z "$OUT/Otto.ipa")" > "$OUT/release.json"
+# Changelog: commit subjects since the last release's commit (SideStore shows it as "What's New").
+COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
+PREV="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("commit",""))' "$OUT/release.json" 2>/dev/null || true)"
+if [ -n "$PREV" ] && git -C "$ROOT" merge-base --is-ancestor "$PREV" "$COMMIT" 2>/dev/null; then
+  NOTES="$(git -C "$ROOT" log --no-merges --format='• %s' "$PREV..$COMMIT")"
+else
+  NOTES="$(git -C "$ROOT" log --no-merges --format='• %s' -5)"
+fi
+python3 - "$OUT/release.json" "$VERSION" "$BUILD" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(stat -f%z "$OUT/Otto.ipa")" "$COMMIT" "${NOTES:-• Fixes and polish}" <<'PY'
+import json, sys
+out, version, build, date, size, commit, notes = sys.argv[1:]
+with open(out + '.tmp', 'w') as f:
+    json.dump({"version": version, "build": build, "date": date, "size": int(size), "commit": commit, "notes": notes}, f, ensure_ascii=False)
+import os; os.replace(out + '.tmp', out)
+PY
 
 echo "==> Published $VERSION ($BUILD) to $OUT"
