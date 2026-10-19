@@ -98,9 +98,10 @@ final class LiveBackend: OttoBackend {
 
     /// Straight onto the open socket, no outbox: the store keeps unsent messages
     /// (saved with the thread) and retries them, so they survive a restart.
-    func send(_ text: String, id: String, replyTo: String?) async -> Bool {
-        var frame = ["type": "message", "text": text, "id": id]
+    func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool {
+        var frame: [String: Any] = ["type": "message", "text": text, "id": id]
         if let replyTo { frame["reply_to"] = replyTo }
+        if shared { frame["shared"] = true }
         guard let task = lock.withLock({ socket }),
               let json = try? JSONSerialization.data(withJSONObject: frame),
               let s = String(data: json, encoding: .utf8) else { return false }
@@ -115,9 +116,10 @@ final class LiveBackend: OttoBackend {
         await write(["type": "react", "id": id, "emoji": emoji])
     }
 
-    func sendPhoto(_ jpeg: Data, caption: String, id: String) async {
+    func sendPhoto(_ jpeg: Data, caption: String, id: String, shared: Bool) async {
         _ = await post("app/photo", jpeg, query: [URLQueryItem(name: "id", value: id)]
-                       + (caption.isEmpty ? [] : [URLQueryItem(name: "text", value: caption)]))
+                       + (caption.isEmpty ? [] : [URLQueryItem(name: "text", value: caption)])
+                       + (shared ? [URLQueryItem(name: "shared", value: "1")] : []))
     }
 
     func file(_ id: String) async -> Data? {

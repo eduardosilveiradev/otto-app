@@ -20,7 +20,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func register() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        let reply = UNTextInputNotificationAction(identifier: Self.replyAction, title: "Reply", options: [],
+        // Unlock first: a "yes" typed on a locked phone can approve a draft or an install.
+        let reply = UNTextInputNotificationAction(identifier: Self.replyAction, title: "Reply", options: [.authenticationRequired],
                                                   textInputButtonTitle: "Send", textInputPlaceholder: "Message Otto")
         center.setNotificationCategories([UNNotificationCategory(identifier: Self.category, actions: [reply],
                                                                  intentIdentifiers: [], options: [])])

@@ -347,8 +347,9 @@ final class OttoStore {
         if notify { for m in fresh where m.from == .otto { Notifier.shared.post(m) } }
     }
 
-    func send(_ text: String) {
+    func send(_ text: String, shared: Bool = false) {
         var m = Message(from: .me, text: text, pending: true)
+        if shared { m.shared = true }
         m.replyTo = replyingTo.flatMap { id in messages.first { $0.id == id }?.wireID }
         replyingTo = nil
         messages.append(m)
@@ -363,7 +364,7 @@ final class OttoStore {
         sending.insert(id)
         defer { sending.remove(id) }
         // ponytail: sent-then-killed before this save resends once; dedupe server-side if it shows up.
-        if await backend.send(m.text, id: m.wireID, replyTo: m.replyTo), let i = messages.firstIndex(where: { $0.id == id }) {
+        if await backend.send(m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true), let i = messages.firstIndex(where: { $0.id == id }) {
             messages[i].pending = nil
             ottoTyping = true
             ottoStatus = nil   // a new message starts a new reply; the last one's step is stale
@@ -376,8 +377,8 @@ final class OttoStore {
         let draft = replyingTo
         replyingTo = nil   // a share is its own message, not an answer to the one being replied to
         let n = ShareOutbox.drain { text, jpeg in
-            if let jpeg, let image = UIImage(data: jpeg) { sendPhoto(image, caption: text) }
-            else if !text.isEmpty { send(text) }
+            if let jpeg, let image = UIImage(data: jpeg) { sendPhoto(image, caption: text, shared: true) }
+            else if !text.isEmpty { send(text, shared: true) }
         }
         replyingTo = draft
         if n > 0 { ShareOutbox.post(ShareOutbox.ack) }
@@ -389,7 +390,7 @@ final class OttoStore {
     }
 
     /// Downscaled to 1600px so the upload is quick and the saved thread stays small.
-    func sendPhoto(_ image: UIImage, caption: String = "") {
+    func sendPhoto(_ image: UIImage, caption: String = "", shared: Bool = false) {
         let scale = min(1, 1600 / max(image.size.width, image.size.height))
         let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
         // Scale 1: the default format multiplies by the screen scale, which made "1600px" 4800.
@@ -402,7 +403,7 @@ final class OttoStore {
         ottoTyping = true
         // One after another, so a burst arrives in order with the caption on the last photo.
         let previous = photoUpload
-        photoUpload = Task { await previous?.value; await backend.sendPhoto(jpeg, caption: caption, id: m.wireID) }
+        photoUpload = Task { await previous?.value; await backend.sendPhoto(jpeg, caption: caption, id: m.wireID, shared: shared) }
     }
     @ObservationIgnored private var photoUpload: Task<Void, Never>?
 

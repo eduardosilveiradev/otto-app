@@ -25,6 +25,8 @@ struct Message: Identifiable, Codable {
     /// Yours, written but not yet handed to the server. Saved with the thread, so a
     /// restart resends it. Optional so threads saved before it existed still decode.
     var pending: Bool? = nil
+    /// Came in through the share sheet: the server treats it as someone else's words, not a request.
+    var shared: Bool? = nil
     /// Emoji reaction shown on the bubble's corner (Otto reacting to yours, or yours to Otto's).
     var reaction: String? = nil
     /// Otto's id for its own messages; yours go up under `id`. See `wireID`.
@@ -115,10 +117,10 @@ protocol OttoBackend: AnyObject {
     var typing: AsyncStream<Bool> { get }
     func history() async -> [Message]
     /// True once the server has the message; false means try again later.
-    func send(_ text: String, id: String, replyTo: String?) async -> Bool
+    func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool
     func tap(_ button: ActionButton) async
     func react(to id: String, emoji: String) async
-    func sendPhoto(_ jpeg: Data, caption: String, id: String) async
+    func sendPhoto(_ jpeg: Data, caption: String, id: String, shared: Bool) async
     /// Uploads an m4a voice note and returns its transcript ("" when there is none).
     func sendVoice(_ m4a: Data, id: String) async -> String
     /// A file Otto sent (RemoteFile.id). Nil when it's gone, e.g. after a server restart.
@@ -182,7 +184,7 @@ final class MockBackend: OttoBackend {
         return []
     }
 
-    func send(_ text: String, id: String, replyTo: String?) async -> Bool {
+    func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool {
         Task {
             try? await Task.sleep(for: .seconds(60))
             out.yield(Message(from: .otto, text: "(mock) got it — \"\(text)\". the real me isn't plugged in yet."))
@@ -195,7 +197,7 @@ final class MockBackend: OttoBackend {
         out.yield(Message(from: .otto, text: "(mock) \(button.data) ✓"))
     }
 
-    func sendPhoto(_ jpeg: Data, caption: String, id: String) async {
+    func sendPhoto(_ jpeg: Data, caption: String, id: String, shared: Bool) async {
         out.yield(Message(from: .otto, text: "(mock) nice photo"))
     }
 
