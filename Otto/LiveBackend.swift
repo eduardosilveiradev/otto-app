@@ -228,13 +228,17 @@ final class LiveBackend: OttoBackend {
         case .data(let d): data = d
         @unknown default: return
         }
+        // Before WireMessage: an approval's `files` aren't RemoteFiles, so it would fail that decode whole.
+        struct Kind: Decodable { let type: String; let id: String? }
+        if let k = try? JSONDecoder().decode(Kind.self, from: data) {
+            if k.type == "approval" { if let a = try? JSONDecoder().decode(ApprovalRequest.self, from: data) { approvalOut.yield(.show(a)) }; return }
+            if k.type == "approval_done", let id = k.id { approvalOut.yield(.done(id)); return }
+        }
         guard let f = try? JSONDecoder().decode(WireMessage.self, from: data) else { return }
         if f.type == "react", let id = f.id, let emoji = f.emoji { reacted.yield((id, emoji)); return }
         if f.type == "status", let text = f.text { status.yield(text); return }
         if f.type == "read", let ids = f.ids { readIDs.yield(ids); return }
         if f.type == "typing", let on = f.on { typingOn.yield(on); return }
-        if f.type == "approval", let a = try? JSONDecoder().decode(ApprovalRequest.self, from: data) { approvalOut.yield(.show(a)); return }
-        if f.type == "approval_done", let id = f.id { approvalOut.yield(.done(id)); return }
         if f.type == "terminal", let text = f.text, let ts = f.ts { out.yield(Self.terminal(text, ts: ts)); return }
         guard f.type == "message", let text = f.text else { return }
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
