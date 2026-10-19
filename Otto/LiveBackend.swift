@@ -172,6 +172,14 @@ final class LiveBackend: OttoBackend {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let task = lock.withLock { wsSession }.webSocketTask(with: req)
             task.resume()
+            // Receive from the first moment. URLSession only reads control frames while a receive
+            // is pending, so a frame the server sends on connect (pending replies, an approval)
+            // used to sit unread in front of the pong: the handshake ping timed out (-1001),
+            // every reconnect, for as long as the server kept something to send.
+            let frames = AsyncThrowingStream<URLSessionWebSocketTask.Message, Error> { c in
+                let reader = Task { do { while true { c.yield(try await task.receive()) } } catch { c.finish(throwing: error) } }
+                c.onTermination = { _ in reader.cancel() }
+            }
             do {
                 try await ping(task)                    // handshake done, token accepted
                 lock.withLock { socket = task; live = true; connects += 1 }
@@ -186,7 +194,8 @@ final class LiveBackend: OttoBackend {
                     }
                 }
                 defer { keepalive.cancel() }
-                while true { handle(try await task.receive()) }
+                for try await m in frames { handle(m) }
+                throw URLError(.networkConnectionLost)   // the stream ends only when the socket does
             } catch {
                 let why = "\(Date.now.formatted(date: .omitted, time: .shortened)): \(error.localizedDescription)"
                     + (task.closeCode != .invalid ? " (close \(task.closeCode.rawValue))" : "")

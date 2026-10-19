@@ -22,8 +22,10 @@ xcodebuild -project "$ROOT/Otto.xcodeproj" -scheme Otto -configuration Release \
 APP="$WORK/dd/Build/Products/Release-iphoneos/Otto.app"
 # A plain `build` leaves symbol tables in: ~5 MB on Otto itself and ~9 MB on the calling SDK.
 # Nothing on the phone reads them (crash logs symbolicate here), and every MB is install time.
-xcrun strip -rSTx "$APP/Otto" "$APP/PlugIns/OttoShare.appex/OttoShare" 2>/dev/null
-for f in "$APP"/Frameworks/*.framework; do xcrun strip -x "$f/$(basename "$f" .framework)" 2>/dev/null; done
+if [ "${STRIP:-1}" = 1 ]; then   # STRIP=0 Scripts/release.sh ships symbols, to rule stripping out
+  xcrun strip -rSTx "$APP/Otto" "$APP/PlugIns/OttoShare.appex/OttoShare" 2>/dev/null
+  for f in "$APP"/Frameworks/*.framework; do xcrun strip -x "$f/$(basename "$f" .framework)" 2>/dev/null; done
+fi
 # An unsigned build carries no entitlements, and SideStore reads them off the signature to
 # know which app group to register for the app and its share extension. Sign ad hoc with
 # them, extension first; SideStore re-signs both for real on the phone.
