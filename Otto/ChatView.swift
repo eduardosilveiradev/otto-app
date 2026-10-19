@@ -1072,7 +1072,8 @@ private struct EmptyChat: View {
     }
 }
 
-/// The system camera, for the composer's + menu.
+/// The system camera, for the composer's + menu. Shoots in a burst: each tap of the shutter
+/// lands in the composer as an attachment, Done goes back to the box to send them together.
 private struct CameraPicker: UIViewControllerRepresentable {
     let onPick: (UIImage) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -1081,6 +1082,14 @@ private struct CameraPicker: UIViewControllerRepresentable {
         let c = UIImagePickerController()
         c.sourceType = .camera
         c.delegate = context.coordinator
+        c.showsCameraControls = false
+        c.cameraOverlayView = context.coordinator.overlay(for: c)
+        // The bare preview is 4:3 at the top; stretch it to fill the screen like the Camera app.
+        let screen = UIScreen.main.bounds.size
+        let previewHeight = screen.width * 4 / 3
+        let scale = screen.height / previewHeight
+        c.cameraViewTransform = CGAffineTransform(translationX: 0, y: (screen.height - previewHeight) / 2)
+            .scaledBy(x: scale, y: scale)
         return c
     }
     func updateUIViewController(_ c: UIImagePickerController, context: Context) {}
@@ -1088,10 +1097,78 @@ private struct CameraPicker: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
         let parent: CameraPicker
+        private weak var picker: UIImagePickerController?
+        private let count = UILabel()
+        private let flash = UIView()
+        private var shots = 0
         init(_ p: CameraPicker) { parent = p }
+
+        func overlay(for picker: UIImagePickerController) -> UIView {
+            self.picker = picker
+            let v = UIView(frame: UIScreen.main.bounds)
+            v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
+            flash.backgroundColor = .black
+            flash.alpha = 0
+            flash.isUserInteractionEnabled = false
+            flash.frame = v.bounds
+            flash.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            v.addSubview(flash)
+
+            let shutter = UIButton(type: .custom)
+            shutter.backgroundColor = .white
+            shutter.layer.cornerRadius = 36
+            shutter.layer.borderWidth = 5
+            shutter.layer.borderColor = UIColor.white.withAlphaComponent(0.4).cgColor
+            shutter.accessibilityLabel = "Take photo"
+            shutter.addTarget(self, action: #selector(shoot), for: .touchUpInside)
+
+            var cfg = UIButton.Configuration.filled()
+            cfg.title = "Done"
+            cfg.cornerStyle = .capsule
+            cfg.baseBackgroundColor = UIColor.black.withAlphaComponent(0.5)
+            let done = UIButton(configuration: cfg)
+            done.addTarget(self, action: #selector(finish), for: .touchUpInside)
+
+            count.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
+            count.textColor = .white
+            count.textAlignment = .center
+            count.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+            count.layer.cornerRadius = 18
+            count.clipsToBounds = true
+            count.isHidden = true
+
+            for b in [shutter, done, count] as [UIView] { b.translatesAutoresizingMaskIntoConstraints = false; v.addSubview(b) }
+            let g = v.safeAreaLayoutGuide
+            NSLayoutConstraint.activate([
+                shutter.centerXAnchor.constraint(equalTo: v.centerXAnchor),
+                shutter.bottomAnchor.constraint(equalTo: g.bottomAnchor, constant: -24),
+                shutter.widthAnchor.constraint(equalToConstant: 72),
+                shutter.heightAnchor.constraint(equalToConstant: 72),
+                done.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 24),
+                done.centerYAnchor.constraint(equalTo: shutter.centerYAnchor),
+                count.trailingAnchor.constraint(equalTo: v.trailingAnchor, constant: -24),
+                count.centerYAnchor.constraint(equalTo: shutter.centerYAnchor),
+                count.heightAnchor.constraint(equalToConstant: 36),
+                count.widthAnchor.constraint(greaterThanOrEqualToConstant: 36),
+            ])
+            return v
+        }
+
+        @objc private func shoot() {
+            picker?.takePicture()
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            flash.alpha = 0.8
+            UIView.animate(withDuration: 0.25) { self.flash.alpha = 0 }
+        }
+        @objc private func finish() { parent.dismiss() }
+
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            if let img = info[.originalImage] as? UIImage { parent.onPick(img) }
-            parent.dismiss()
+            guard let img = info[.originalImage] as? UIImage else { return }
+            parent.onPick(img)
+            shots += 1
+            count.text = "  \(shots)  "
+            count.isHidden = false
         }
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.dismiss() }
     }
