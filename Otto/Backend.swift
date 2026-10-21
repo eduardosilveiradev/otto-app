@@ -7,10 +7,12 @@ import Foundation
 enum Sender: String, Codable { case me, otto, terminal }
 
 struct ActionButton: Identifiable, Hashable, Codable {
-    var id: String { data }
+    var id: String { data ?? url ?? label }
     let label: String
-    /// Self-contained instruction, same contract as Telegram button data.
-    let data: String
+    /// Self-contained instruction, same contract as Telegram button data. Nil on a link button.
+    let data: String?
+    /// A link button opens this page and never comes back as an event.
+    var url: String? = nil
 }
 
 struct Message: Identifiable, Codable {
@@ -204,7 +206,7 @@ final class MockBackend: OttoBackend {
 
     func tap(_ button: ActionButton) async {
         try? await Task.sleep(for: .milliseconds(600))
-        out.yield(Message(from: .otto, text: "(mock) \(button.data) ✓"))
+        out.yield(Message(from: .otto, text: "(mock) \(button.data ?? button.url ?? "") ✓"))
     }
 
     func sendPhoto(_ jpeg: Data, caption: String, id: String, shared: Bool) async {
