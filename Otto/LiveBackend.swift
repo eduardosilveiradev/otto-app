@@ -19,6 +19,8 @@ import Foundation
 ///   GET  <server>/app/file/<id>  a file or voice clip from a message
 ///   POST <server>/app/photo?text=<caption>&id=<uuid>  JPEG body
 ///   POST <server>/app/voice?id=<uuid>    m4a body -> {"text": "<transcript>"}
+///   POST <server>/app/ask     {"id","text","via":"siri"|"here","place"?} -> {"reply"?:{"id","text","buttons"}}  (Siri; waits for Otto's first reply)
+///   POST <server>/app/photo?snap=1&id=<uuid>  JPEG body -> the same answer, for the Snap intent
 ///   POST <server>/app/health  JSON {notifications, backgroundRefresh, keepAwake, shareConfigured, lastRefresh?, build, version, ios, reason} -> 204
 ///   <server>/app/dash/*         the web dashboard's API (otto/dash-types.ts), same token
 final class LiveBackend: OttoBackend {
@@ -144,6 +146,28 @@ final class LiveBackend: OttoBackend {
     func sendVoice(_ m4a: Data, id: String) async -> String? {
         guard let data = await post("app/voice", m4a, query: [URLQueryItem(name: "id", value: id)]) else { return nil }
         return (try? JSONDecoder().decode([String: String].self, from: data))?["text"] ?? ""
+    }
+
+    /// What a Siri intent gets back: Otto's first reply, if it came within the server's wait.
+    /// A nil `reply` means it's still coming and will land in the thread.
+    struct Answer: Decodable {
+        struct Reply: Decodable { let id: String; let text: String; let buttons: [ActionButton] }
+        let reply: Reply?
+    }
+
+    /// Nil when the server can't be reached or predates /app/ask (404), so the caller falls back.
+    func ask(id: String, text: String, via: String, place: [String: Any]? = nil) async -> Answer? {
+        var body: [String: Any] = ["id": id, "text": text, "via": via]
+        if let place { body["place"] = place }
+        guard let json = try? JSONSerialization.data(withJSONObject: body), let data = await post("app/ask", json) else { return nil }
+        return (try? JSONDecoder().decode(Answer.self, from: data)) ?? Answer(reply: nil)
+    }
+
+    /// A photo to be filed. An older server answers 204 with no body: delivered, nothing to say.
+    func snap(_ jpeg: Data, note: String, id: String) async -> Answer? {
+        guard let data = await post("app/photo", jpeg, query: [URLQueryItem(name: "id", value: id), URLQueryItem(name: "snap", value: "1")]
+                                    + (note.isEmpty ? [] : [URLQueryItem(name: "text", value: note)])) else { return nil }
+        return (try? JSONDecoder().decode(Answer.self, from: data)) ?? Answer(reply: nil)
     }
 
     /// The protocol can't say "unavailable", so a failed fetch is an empty brief

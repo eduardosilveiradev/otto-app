@@ -383,19 +383,33 @@ final class OttoStore {
         Task { await deliver(m.id) }
     }
 
-    /// For Siri: send, then keep trying until the server has it or `timeout` runs out. A
-    /// background launch has no tick loop to retry once the socket comes up. Left pending
-    /// on timeout, so the next connection sends it like any other unsent message.
-    func sendAndConfirm(_ text: String, timeout: Duration = .seconds(10)) async -> Bool {
-        let m = Message(from: .me, text: text, pending: true)
-        messages.append(m)
+    /// For Siri when /app/ask can't be reached: mark it unsent and keep trying until the server has it
+    /// or `timeout` runs out. A background launch has no tick loop to retry once the socket comes up.
+    /// Left pending on timeout, so the next connection sends it like any other unsent message.
+    func sendAndConfirm(_ id: Message.ID, timeout: Duration = .seconds(10)) async -> Bool {
+        guard let i = messages.firstIndex(where: { $0.id == id }) else { return false }
+        messages[i].pending = true
         let end = ContinuousClock.now + timeout
         while ContinuousClock.now < end {
-            await deliver(m.id)
-            if messages.first(where: { $0.id == m.id })?.pending == nil { return true }
+            await deliver(id)
+            if messages.first(where: { $0.id == id })?.pending == nil { return true }
             try? await Task.sleep(for: .milliseconds(300))
         }
         return false
+    }
+
+    /// Siri's intents: `mine` goes in the thread, `send` hands it to the server over HTTP (the
+    /// socket may not be up in a background launch), and Otto's reply joins the thread, so
+    /// opening the app shows both. The socket's copy is deduped by id. Nil when there's no live
+    /// server or it can't be reached; `mine` stays either way.
+    func siri(_ mine: Message, send: (LiveBackend) async -> LiveBackend.Answer?) async -> LiveBackend.Answer? {
+        messages.append(mine)
+        defer { flush() }   // a background launch can be suspended before the debounced save
+        guard let live = backend as? LiveBackend, let a = await send(live) else { return nil }
+        if let r = a.reply, !messages.contains(where: { $0.wireID == r.id }) {
+            messages.append(Message(from: .otto, text: r.text, buttons: r.buttons, serverID: r.id))
+        }
+        return a
     }
 
     /// Message ids being sent right now, so a reconnect retry can't double-send one.
@@ -440,14 +454,18 @@ final class OttoStore {
     }
 
     /// Downscaled to 1600px so the upload is quick and the saved thread stays small.
-    func sendPhoto(_ image: UIImage, caption: String = "", shared: Bool = false) {
+    static func jpeg(_ image: UIImage) -> Data? {
         let scale = min(1, 1600 / max(image.size.width, image.size.height))
         let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
         // Scale 1: the default format multiplies by the screen scale, which made "1600px" 4800.
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         let small = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
-        guard let jpeg = small.jpegData(compressionQuality: 0.7) else { return }
+        return small.jpegData(compressionQuality: 0.7)
+    }
+
+    func sendPhoto(_ image: UIImage, caption: String = "", shared: Bool = false) {
+        guard let jpeg = Self.jpeg(image) else { return }
         let m = Message(from: .me, text: caption, image: jpeg)
         messages.append(m)
         ottoTyping = true
