@@ -39,6 +39,10 @@ struct Message: Identifiable, Codable {
     var files: [RemoteFile]? = nil
     /// Otto's spoken version of `text`.
     var audio: RemoteFile? = nil
+    /// Which notification stack it belongs to ("chat", or the topic of something Otto raised
+    /// on its own), and "timeSensitive" when it shouldn't wait. See `Notifier.post`.
+    var thread: String? = nil
+    var level: String? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }

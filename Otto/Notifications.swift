@@ -57,7 +57,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.body = m.text
         content.sound = .default
         content.categoryIdentifier = Self.category
-        content.threadIdentifier = "otto"
+        // One subject per stack, so an Apple Intelligence summary of the stack is about one thing.
+        content.threadIdentifier = m.thread ?? "otto"
+        // Time Sensitive needs an entitlement a free team can't have, so urgency rides on the
+        // relevance score instead: it orders the scheduled summary, and may inform Priority Notifications.
+        content.relevanceScore = m.level == "timeSensitive" ? 1 : m.thread == "chat" ? 0.8 : 0.5
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: m.id.uuidString, content: content, trigger: nil))
     }
 

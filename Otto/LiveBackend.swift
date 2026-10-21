@@ -95,7 +95,8 @@ final class LiveBackend: OttoBackend {
                 ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date())
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
                           buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data) },
-                          isVoice: r.voice != nil, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice)
+                          isVoice: r.voice != nil, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
+                          thread: r.thread, level: r.level)
         }
     }
 
@@ -252,7 +253,7 @@ final class LiveBackend: OttoBackend {
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
                           buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data) },
                           isVoice: f.voice != nil, serverID: f.id, replyTo: f.reply_to,
-                          files: f.files, audio: f.voice))
+                          files: f.files, audio: f.voice, thread: f.thread, level: f.level))
     }
 
     private func write(_ frame: [String: String]) async {
@@ -360,12 +361,14 @@ final class LiveBackend: OttoBackend {
     private struct WireMessage: Decodable {
         let type: String; let id: String?; let text: String?; let ts: String?; let buttons: [WireButton]?
         let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let emoji: String?; let ids: [String]?; let on: Bool?
+        let thread: String?; let level: String?
     }
     /// Otto's entries carry what the live frame did, so a message that arrived while the
     /// socket was asleep still has its photos, voice and buttons.
     private struct WireHistory: Decodable {
         let dir: String; let text: String; let ts: String; let id: String?; let kind: String?
         let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let buttons: [WireButton]?
+        let thread: String?; let level: String?
     }
     private struct WireBrief: Decodable {
         struct Event: Decodable { let title: String; let start: String; let minutes: Int }
