@@ -1,6 +1,6 @@
 import AppIntents
 
-/// "Hey Siri, message Otto", and the same thing on the Action Button. App Intents need
+/// "Hey Siri, ask Otto", and the same thing on the Action Button. App Intents need
 /// no Siri entitlement; SiriKit's INSendMessageIntent would, and a free personal team
 /// can't provision it. There's only one recipient, so nothing to resolve.
 struct MessageOtto: AppIntent {
@@ -21,7 +21,8 @@ struct MessageOtto: AppIntent {
 struct OttoShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(intent: MessageOtto(),
-                    phrases: ["Message \(.applicationName)", "Tell \(.applicationName)", "Send a message to \(.applicationName)"],
+                    // Not "message/tell Otto": Siri hands those to Messages, and there's a contact named Otto.
+                    phrases: ["Ask \(.applicationName)", "Ping \(.applicationName)", "Talk to \(.applicationName)"],
                     shortTitle: "Message Otto", systemImageName: "message")
     }
 }
