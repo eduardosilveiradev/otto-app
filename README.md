@@ -26,6 +26,11 @@ what Otto knows about your day.
   app's own token.
 - Web calls to Otto through [Vapi](https://vapi.ai), if you have it set up
 - Local notifications while the app is in the background
+- Siri: "Ask Otto" answers out loud, and anything that would change something
+  opens the chat on its confirm buttons. "Save this place in Otto" saves where
+  you are with what you say about it. "Snap to Otto" files a photo (homework,
+  a receipt, anything to keep): it's a Shortcuts action, so put Take Photo
+  before it and give the shortcut a name or the Action Button.
 
 ## Requirements
 
