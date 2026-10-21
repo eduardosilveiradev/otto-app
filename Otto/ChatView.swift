@@ -146,6 +146,8 @@ struct ChatView: View {
             print("SCROLL bottom shown=\(shown) scrolledUp=\(scrolledUp)")
         }
         #endif
+        // An empty thread has no width of its own; without this the line wrapped a letter at a time.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay { if store.messages.isEmpty && !store.ottoTyping { EmptyChat(asleep: store.asleep, connected: store.connected, lookingAtCursor: focused) } }
         .background(Color(.systemBackground))
         .safeAreaInset(edge: .top, spacing: 0) {
