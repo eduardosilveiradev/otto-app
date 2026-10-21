@@ -218,6 +218,7 @@ struct ChatView: View {
         .animation(.snappy, value: scrolledUp)
         .sheet(isPresented: $showDetails) { DetailsView() }
         .fullScreenCover(isPresented: $webCall) { CallView() }
+        .fullScreenCover(isPresented: Binding(get: { WalkieLauncher.shared.open }, set: { WalkieLauncher.shared.open = $0 })) { WalkieView() }
         .alert("Calling Otto", isPresented: $showCall) {
             Button("OK", role: .cancel) {}
         } message: { Text("Add Otto's phone number in details (tap Otto's name).") }
@@ -256,6 +257,10 @@ struct ChatView: View {
                         .glassEffect(.regular.interactive(), in: .circle)
                 }
                 .tint(.primary)
+                // Long press: the walkie-talkie, for talking to Otto on the move.
+                .contextMenu {
+                    Button("Walkie-talkie", systemImage: "waveform") { WalkieLauncher.shared.open = true }
+                }
             }
             Button { showDetails = true } label: {
                 VStack(spacing: 4) {

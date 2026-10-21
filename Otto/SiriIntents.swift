@@ -140,5 +140,8 @@ struct OttoShortcuts: AppShortcutsProvider {
         AppShortcut(intent: SaveThisPlace(),
                     phrases: ["Save this place in \(.applicationName)", "Pin this place in \(.applicationName)", "\(.applicationName), save this place"],
                     shortTitle: "Save This Place", systemImageName: "mappin.and.ellipse")
+        AppShortcut(intent: OpenWalkie(),
+                    phrases: ["Walkie-talkie with \(.applicationName)", "\(.applicationName) walkie-talkie", "Start \(.applicationName) walkie-talkie"],
+                    shortTitle: "Walkie-talkie", systemImageName: "waveform")
     }
 }
