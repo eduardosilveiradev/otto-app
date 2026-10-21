@@ -137,10 +137,9 @@ final class LiveBackend: OttoBackend {
         return data
     }
 
-    func sendVoice(_ m4a: Data, id: String) async -> String {
-        guard let data = await post("app/voice", m4a, query: [URLQueryItem(name: "id", value: id)]),
-              let r = try? JSONDecoder().decode([String: String].self, from: data) else { return "" }
-        return r["text"] ?? ""
+    func sendVoice(_ m4a: Data, id: String) async -> String? {
+        guard let data = await post("app/voice", m4a, query: [URLQueryItem(name: "id", value: id)]) else { return nil }
+        return (try? JSONDecoder().decode([String: String].self, from: data))?["text"] ?? ""
     }
 
     /// The protocol can't say "unavailable", so a failed fetch is an empty brief

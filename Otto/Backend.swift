@@ -124,8 +124,9 @@ protocol OttoBackend: AnyObject {
     func tap(_ button: ActionButton) async
     func react(to id: String, emoji: String) async
     func sendPhoto(_ jpeg: Data, caption: String, id: String, shared: Bool) async
-    /// Uploads an m4a voice note and returns its transcript ("" when there is none).
-    func sendVoice(_ m4a: Data, id: String) async -> String
+    /// Uploads an m4a voice note and returns its transcript ("" when there is none),
+    /// or nil when the upload didn't make it, so the note stays pending and is retried.
+    func sendVoice(_ m4a: Data, id: String) async -> String?
     /// A file Otto sent (RemoteFile.id). Nil when it's gone, e.g. after a server restart.
     func file(_ id: String) async -> Data?
     func brief() async -> Brief
@@ -206,7 +207,7 @@ final class MockBackend: OttoBackend {
         out.yield(Message(from: .otto, text: "(mock) nice photo"))
     }
 
-    func sendVoice(_ m4a: Data, id: String) async -> String {
+    func sendVoice(_ m4a: Data, id: String) async -> String? {
         out.yield(Message(from: .otto, text: "(mock) heard you"))
         return "(mock transcript)"
     }

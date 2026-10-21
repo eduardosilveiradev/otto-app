@@ -393,6 +393,7 @@ final class OttoStore {
         guard !sending.contains(id), let m = messages.first(where: { $0.id == id }), m.pending == true else { return }
         sending.insert(id)
         defer { sending.remove(id) }
+        if m.isVoice { return await deliverVoice(m) }
         // ponytail: sent-then-killed before this save resends once; dedupe server-side if it shows up.
         if await backend.send(m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true), let i = messages.firstIndex(where: { $0.id == id }) {
             messages[i].pending = nil
@@ -445,20 +446,27 @@ final class OttoStore {
     @ObservationIgnored private var photoUpload: Task<Void, Never>?
 
     /// The bubble shows up at once; the transcript fills it in when the server has it.
+    /// Pending until the upload lands, so a dropped one (a weak hotspot) is retried on the
+    /// next connection instead of vanishing.
     func sendVoice(_ file: URL) {
-        guard let audio = try? Data(contentsOf: file) else { return }
-        let m = Message(from: .me, text: "", isVoice: true)
-        // Kept so the note plays back from the thread.
+        let m = Message(from: .me, text: "", isVoice: true, pending: true)
+        // Kept so the note plays back from the thread, and so a retry has the audio.
         try? FileManager.default.removeItem(at: VoiceStore.url(m.id))
-        try? FileManager.default.moveItem(at: file, to: VoiceStore.url(m.id))
+        guard (try? FileManager.default.moveItem(at: file, to: VoiceStore.url(m.id))) != nil else { return }
         messages.append(m)
         ottoTyping = true
-        Task {
-            let text = await backend.sendVoice(audio, id: m.wireID)
-            if let i = messages.firstIndex(where: { $0.id == m.id }) {
-                messages[i] = Message(id: m.id, from: .me, text: text, date: m.date, isVoice: true)
-            }
+        Task { await deliver(m.id) }
+    }
+
+    // ponytail: a note the server took but whose answer was lost is sent twice; dedupe by id server-side if it shows up.
+    private func deliverVoice(_ m: Message) async {
+        guard let audio = try? Data(contentsOf: VoiceStore.url(m.id)) else {
+            if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i].pending = nil }   // the audio is gone; nothing to retry
+            return
         }
+        guard let text = await backend.sendVoice(audio, id: m.wireID),
+              let i = messages.firstIndex(where: { $0.id == m.id }) else { return }
+        messages[i] = Message(id: m.id, from: .me, text: text, date: m.date, isVoice: true)
     }
 
     func tap(_ button: ActionButton, on id: Message.ID) {
