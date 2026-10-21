@@ -81,6 +81,7 @@ final class LiveBackend: OttoBackend {
               let url = URL(string: s), url.host != nil,
               let t = d.string(forKey: "serverToken")?.trimmingCharacters(in: .whitespaces), !t.isEmpty
         else { return nil }
+        ShareDirect.save(serverURL: s, token: t)   // the share sheet's way in on builds without an app group
         return LiveBackend(serverURL: url, token: t)
     }
 

@@ -58,7 +58,14 @@ final class ShareModel {
                 ok = ok && ShareOutbox.put(text: i == 0 ? message : "", jpeg: img.jpegData(compressionQuality: 0.85))
             }
         }
-        guard ok else { state = .failed; return }
+        guard ok else {
+            // No app group on this build: hand it to the server directly instead.
+            Task {
+                let direct = await ShareDirect.send(text: message, jpegs: images.compactMap { $0.jpegData(compressionQuality: 0.85) })
+                if direct { finish() } else { state = .failed }
+            }
+            return
+        }
         // A running app answers at once; otherwise it sends when it next opens.
         var taken = false
         ShareOutbox.observe(ShareOutbox.ack) { taken = true }

@@ -1,8 +1,8 @@
 import Foundation
 
-/// The hand-off between the share extension and the app. The extension can't talk to the
-/// server itself (the token and the open socket live in the app), so it leaves what was
-/// shared in the app group's container and pings the app, which sends it as if typed.
+/// The hand-off between the share extension and the app: what was shared waits in the app
+/// group's container and the app sends it as if typed. Builds without an app group (a free
+/// Xcode team) fall back to `ShareDirect`.
 enum ShareOutbox {
     /// Extension → app: something is waiting. App → extension: it's been taken.
     static let ping = "dev.otto.app.share"
