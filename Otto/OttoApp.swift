@@ -247,6 +247,9 @@ final class OttoStore {
         }
         for await m in backend.incoming {
             if !serverTyping && m.from == .otto { ottoTyping = false }
+            // A reply held for a closed app is in /app/history too: a fresh launch reads
+            // history first, then the socket flushes the held copy.
+            guard !messages.contains(where: { $0.wireID == m.wireID }) else { continue }
             messages.append(m)
             if !foreground && m.from == .otto { Notifier.shared.post(m) }
         }
