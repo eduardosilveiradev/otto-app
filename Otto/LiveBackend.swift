@@ -14,10 +14,11 @@ import Foundation
 ///                  {"type":"read","ids":["<uuid>"]}   your messages Otto has taken in
 ///                  {"type":"terminal","text":"first six words…","ts":"<ISO>"}   a prompt typed in Otto's terminal
 ///   GET  <server>/app/brief    brief JSON
-///   GET  <server>/app/history  [{"dir":"in"|"out","text","ts","id"?,"kind":"terminal"?, and on Otto's: "files","voice","reply_to","buttons"?}]
+///   GET  <server>/app/history  [{"dir":"in"|"out","text","ts","id"?,"kind":"terminal"?, and on Otto's: "files","voice","reply_to","buttons"?}]   (X-Otto-Background: 1 from the background refresh)
 ///   GET  <server>/app/file/<id>  a file or voice clip from a message
 ///   POST <server>/app/photo?text=<caption>&id=<uuid>  JPEG body
 ///   POST <server>/app/voice?id=<uuid>    m4a body -> {"text": "<transcript>"}
+///   POST <server>/app/health  JSON {notifications, backgroundRefresh, keepAwake, shareConfigured, lastRefresh?, build, version, ios, reason} -> 204
 ///   <server>/app/dash/*         the web dashboard's API (otto/dash-types.ts), same token
 final class LiveBackend: OttoBackend {
     let name = "Otto server"
@@ -87,8 +88,8 @@ final class LiveBackend: OttoBackend {
 
     // MARK: OttoBackend
 
-    func history() async -> [Message] {
-        guard let rows: [WireHistory] = await get("app/history") else { return [] }
+    func history(background: Bool) async -> [Message] {
+        guard let rows: [WireHistory] = await get("app/history", background: background) else { return [] }
         // Ids make the merge exact: yours come back under the UUID this phone sent them with.
         return rows.map { r in
             r.kind == "terminal" ? Self.terminal(r.text, ts: r.ts)
@@ -297,6 +298,13 @@ final class LiveBackend: OttoBackend {
         return try? JSONDecoder().decode(SettingsPage.self, from: data)
     }
 
+    /// The phone's own state for otto_status. Fire-and-forget: a server without the route
+    /// answers 404/405 and post() returns nil, which is the right amount of noise (none).
+    func postHealth(_ fields: [String: Any]) async {
+        guard let body = try? JSONSerialization.data(withJSONObject: fields) else { return }
+        _ = await post("app/health", body)
+    }
+
     func snooze(_ change: SnoozeChange?) async -> Snooze? {
         var req = URLRequest(url: base.appendingPathComponent("app/snooze"))
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -328,9 +336,10 @@ final class LiveBackend: OttoBackend {
 
     // MARK: HTTP
 
-    private func get<T: Decodable>(_ path: String) async -> T? {
+    private func get<T: Decodable>(_ path: String, background: Bool = false) async -> T? {
         var req = URLRequest(url: base.appendingPathComponent(path))
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if background { req.setValue("1", forHTTPHeaderField: "X-Otto-Background") }
         guard let (data, resp) = try? await session.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)

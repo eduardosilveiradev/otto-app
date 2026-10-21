@@ -158,6 +158,7 @@ final class OttoStore {
                 seen = backend.connections
                 if animated { Task { await catchUp(notify: !foreground) } }
                 Task { await resendPending() }
+                Task { await reportHealth("connect") }
             }
             if live != connected { connected = live }
             if !live != asleep { asleep = !live }
@@ -197,7 +198,7 @@ final class OttoStore {
         // The mock's canned thread is only a seed for an empty chat.
         let last = messages.last?.date ?? .distantPast
         let fresh = backend is MockBackend && !messages.isEmpty ? []
-            : unseen(await backend.history(), after: last)
+            : unseen(await backend.history(background: false), after: last)
         if !fresh.isEmpty { messages += fresh }
         animated = true
         #if PERFDEMO
@@ -347,15 +348,26 @@ final class OttoStore {
     #endif
 
     /// A background refresh: pull anything newer than what's saved and notify for Otto's.
-    func backgroundSync() async { await catchUp(notify: true) }
+    /// Also the proof that refresh runs at all, which the server's status shows.
+    func backgroundSync() async {
+        UserDefaults.standard.set(Date(), forKey: "lastRefresh")
+        await catchUp(notify: true, background: true)
+        await reportHealth("refresh")
+    }
+
+    /// Live backend only; the mock has nothing to report and older servers answer 404/405, which post() swallows.
+    func reportHealth(_ reason: String) async {
+        guard let live = backend as? LiveBackend else { return }
+        await live.postHealth(await Notifier.health(reason: reason))
+    }
 
     /// Otto's replies (and terminal lines) from the server's history that this phone doesn't
     /// have yet. Not yours: they're already here, and the server's copy of them is
     /// stamped a moment later, so merging those would show every message twice.
-    private func catchUp(notify: Bool) async {
+    private func catchUp(notify: Bool, background: Bool = false) async {
         guard !(backend is MockBackend) else { return }
         let last = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
-        let fresh = unseen(await backend.history().filter { $0.from != .me }, after: last)
+        let fresh = unseen(await backend.history(background: background).filter { $0.from != .me }, after: last)
         guard !fresh.isEmpty else { return }
         if !serverTyping && fresh.contains(where: { $0.from == .otto }) { ottoTyping = false }
         messages += fresh

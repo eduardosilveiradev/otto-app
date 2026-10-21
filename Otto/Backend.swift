@@ -122,7 +122,7 @@ protocol OttoBackend: AnyObject {
     /// Approval screens the server raised, and ones it settled or dropped.
     var approvalUpdates: AsyncStream<ApprovalUpdate> { get }
     func decide(approval id: String, approve: Bool) async
-    func history() async -> [Message]
+    func history(background: Bool) async -> [Message]
     /// True once the server has the message; false means try again later.
     func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool
     func tap(_ button: ActionButton) async
@@ -190,7 +190,7 @@ final class MockBackend: OttoBackend {
     func react(to id: String, emoji: String) async {}
     func file(_ id: String) async -> Data? { nil }
 
-    func history() async -> [Message] {
+    func history(background: Bool) async -> [Message] {
         return []
     }
 
