@@ -664,7 +664,6 @@ private struct Row: View {
         }
     }
 
-    /// Otto's "draft:" messages: the first line is the heading, the rest the words that would go out.
     /// The tap "Less of this" sends: self-contained, like any button data, so it still reads days later.
     static func lessOfThis(_ m: Message) -> String {
         "less of this: \(m.src ?? "unknown") — re: \"\(m.text.prefix(40))\""
@@ -681,6 +680,7 @@ private struct Row: View {
     }
     private var hidesText: Bool { preview != nil && Self.previewURL(message).map { Self.isOnlyLink(message, $0) } == true }
 
+    /// Otto's "draft:" messages: the first line is the heading, the rest the words that would go out.
     static func draft(_ m: Message) -> (head: String, body: String)? {
         guard m.from == .otto, let nl = m.text.firstIndex(of: "\n") else { return nil }
         let head = m.text[..<nl].trimmingCharacters(in: .whitespaces)
@@ -807,7 +807,11 @@ private struct Row: View {
                 .animation(.snappy, value: receipt)
             }
         }
-        .task(id: message.text) { if let u = Self.previewURL(message) { preview = LinkMeta.cached(u); if preview == nil { preview = await LinkMeta.load(u) } } }
+        .task(id: message.text) {
+            guard let u = Self.previewURL(message) else { preview = nil; return }   // an edit that dropped the link drops its card
+            preview = LinkMeta.cached(u)
+            if preview == nil { preview = await LinkMeta.load(u) }
+        }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         .padding(mine ? .leading : .trailing, 64)
         // Swipe right to reply, as in Messages: the row follows the finger, an arrow
