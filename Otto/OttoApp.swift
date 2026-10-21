@@ -368,6 +368,21 @@ final class OttoStore {
         Task { await deliver(m.id) }
     }
 
+    /// For Siri: send, then keep trying until the server has it or `timeout` runs out. A
+    /// background launch has no tick loop to retry once the socket comes up. Left pending
+    /// on timeout, so the next connection sends it like any other unsent message.
+    func sendAndConfirm(_ text: String, timeout: Duration = .seconds(10)) async -> Bool {
+        let m = Message(from: .me, text: text, pending: true)
+        messages.append(m)
+        let end = ContinuousClock.now + timeout
+        while ContinuousClock.now < end {
+            await deliver(m.id)
+            if messages.first(where: { $0.id == m.id })?.pending == nil { return true }
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+        return false
+    }
+
     /// Message ids being sent right now, so a reconnect retry can't double-send one.
     private var sending: Set<UUID> = []
 
