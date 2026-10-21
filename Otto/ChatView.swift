@@ -787,7 +787,10 @@ private struct Row: View {
             if !message.buttons.isEmpty {
                 HStack(spacing: 16) {
                     ForEach(message.buttons) { b in
-                        Button(b.label) { if let u = b.url.flatMap(URL.init(string:)) { openURL(u) } else { onTap(b) } }.font(.system(size: 15)).tint(.blue)
+                        Button(b.label) {
+                            if let c = b.copy { UIPasteboard.general.string = c; UINotificationFeedbackGenerator().notificationOccurred(.success) }
+                            else if let u = b.url.flatMap(URL.init(string:)) { openURL(u) } else { onTap(b) }
+                        }.font(.system(size: 15)).tint(.blue)
                     }
                 }
                 .padding(.leading, 12)

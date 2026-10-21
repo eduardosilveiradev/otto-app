@@ -7,12 +7,14 @@ import Foundation
 enum Sender: String, Codable { case me, otto, terminal }
 
 struct ActionButton: Identifiable, Hashable, Codable {
-    var id: String { data ?? url ?? label }
+    var id: String { data ?? url ?? copy ?? label }
     let label: String
     /// Self-contained instruction, same contract as Telegram button data. Nil on a link button.
     let data: String?
     /// A link button opens this page and never comes back as an event.
     var url: String? = nil
+    /// Copy button: tapping puts this on the clipboard and never comes back as an event.
+    var copy: String? = nil
 }
 
 struct Message: Identifiable, Codable {
