@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import AVFoundation
 import QuickLook
+import LinkPresentation
 import ThinkingOrbsKit
 import VoiceGlowKit
 
@@ -604,6 +605,8 @@ private struct Row: View {
     @State private var selecting = false
     @State private var link: URL?
     @State private var sharing: URL?
+    @State private var whyShown = false
+    @State private var preview: LPLinkMetadata?
     @Environment(\.openURL) private var openURL
     private var mine: Bool { message.from == .me }
 
@@ -662,6 +665,22 @@ private struct Row: View {
     }
 
     /// Otto's "draft:" messages: the first line is the heading, the rest the words that would go out.
+    /// The tap "Less of this" sends: self-contained, like any button data, so it still reads days later.
+    static func lessOfThis(_ m: Message) -> String {
+        "less of this: \(m.src ?? "unknown") — re: \"\(m.text.prefix(40))\""
+    }
+    /// The first link worth a card: not for photos, voice notes, audio or drafts.
+    static func previewURL(_ m: Message) -> URL? {
+        if m.image != nil || m.isVoice || m.audio != nil || draft(m) != nil { return nil }
+        return linked(m.text).runs.lazy.compactMap(\.link).first
+    }
+    /// A message that is nothing but the link: the bubble gives way to the card once metadata lands (Messages behaviour).
+    static func isOnlyLink(_ m: Message, _ url: URL) -> Bool {
+        let t = m.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t == url.absoluteString || URL(string: t)?.absoluteString == url.absoluteString
+    }
+    private var hidesText: Bool { preview != nil && Self.previewURL(message).map { Self.isOnlyLink(message, $0) } == true }
+
     static func draft(_ m: Message) -> (head: String, body: String)? {
         guard m.from == .otto, let nl = m.text.firstIndex(of: "\n") else { return nil }
         let head = m.text[..<nl].trimmingCharacters(in: .whitespaces)
@@ -689,7 +708,7 @@ private struct Row: View {
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
             }
             ForEach(message.files ?? [], id: \.id) { f in if StudySet.isStudy(f) { StudyBubble(file: f) } else { RemoteFileView(file: f) } }
-            if message.image == nil || !message.text.isEmpty {
+            if (message.image == nil || !message.text.isEmpty) && !hidesText {
             content
                 .font(.system(size: 17))
                 .tint(mine ? .white : .blue)
@@ -720,6 +739,10 @@ private struct Row: View {
                     Button("Reply", systemImage: "arrowshape.turn.up.left") { store.replyingTo = message.id }
                     Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
                     Button("Select Text", systemImage: "selection.pin.in.out") { selecting = true }
+                    if !mine, message.why != nil {
+                        Divider()
+                        Button("Why this?", systemImage: "questionmark.circle") { whyShown = true }
+                    }
                     // The same choices a tapped link gets, for the first link in the message.
                     if let url = Self.linked(message.text).runs.lazy.compactMap(\.link).first {
                         Divider()
@@ -733,10 +756,26 @@ private struct Row: View {
                         .presentationDetents([.medium, .large])
                         .presentationDragIndicator(.visible)
                 }
+                .alert("Why this?", isPresented: $whyShown, presenting: message.why) { _ in
+                    Button("Less of this", role: .destructive) { onTap(ActionButton(label: "Less of this", data: Self.lessOfThis(message))) }
+                    Button("OK", role: .cancel) {}
+                } message: { Text($0) }
                 .overlay(alignment: mine ? .topLeading : .topTrailing) {
                     if let r = message.reaction { Tapback(emoji: r, mine: mine) }
                 }
                 .padding(.top, message.reaction == nil ? 0 : 14)
+            }
+            if let md = preview {
+                LinkPreview(metadata: md)
+                    .frame(maxWidth: 280)
+                    .clipShape(.rect(cornerRadius: 18, style: .continuous))
+                    .contextMenu {
+                        if let url = Self.previewURL(message) {
+                            Button("Open Link", systemImage: "safari") { openURL(url) }
+                            Button("Copy Link", systemImage: "link") { UIPasteboard.general.url = url }
+                            Button("Share Link…", systemImage: "square.and.arrow.up") { sharing = url }
+                        }
+                    }
             }
             // What you said, under your voice note; Otto's sits inside its bubble.
             if mine, message.isVoice, !message.text.isEmpty {
@@ -768,6 +807,7 @@ private struct Row: View {
                 .animation(.snappy, value: receipt)
             }
         }
+        .task(id: message.text) { if let u = Self.previewURL(message) { preview = LinkMeta.cached(u); if preview == nil { preview = await LinkMeta.load(u) } } }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         .padding(mine ? .leading : .trailing, 64)
         // Swipe right to reply, as in Messages: the row follows the finger, an arrow

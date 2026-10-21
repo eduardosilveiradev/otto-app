@@ -43,6 +43,10 @@ struct Message: Identifiable, Codable {
     /// on its own), and "timeSensitive" when it shouldn't wait. See `Notifier.post`.
     var thread: String? = nil
     var level: String? = nil
+    /// Where an unprompted message of Otto's came from, as the server states it ("trigger:<id>",
+    /// "email-scan", "nudge:loops", …) and in plain words. Nil on replies: no "Why this?" for those.
+    var src: String? = nil
+    var why: String? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }
