@@ -155,6 +155,8 @@ protocol OttoBackend: AnyObject {
     func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data?
     /// The flight-day card (`/app/gate`); nil when the Mac didn't answer.
     func gate() async -> GateReply?
+    /// The passport page (`/app/stamps`); nil when the Mac didn't answer.
+    func stamps() async -> StampsReply?
 }
 
 extension OttoBackend {
@@ -165,6 +167,7 @@ extension OttoBackend {
     func settings(flip id: String?) async -> SettingsPage? { nil }
     func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data? { nil }
     func gate() async -> GateReply? { nil }
+    func stamps() async -> StampsReply? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
     func decide(approval id: String, approve: Bool) async {}
@@ -254,6 +257,16 @@ final class MockBackend: OttoBackend {
             departs: "08:45", arrives: "17:05", departsEst: "09:25", arrivesEst: "17:45",
             departsAt: ISO8601DateFormatter().string(from: dep), durationMinutes: 320, state: "scheduled",
             delayMinutes: 40, gate: "B12", terminal: "2", seat: "14A", cabin: "Economy", booking: "ABC123"))
+    }
+
+    func stamps() async -> StampsReply? {
+        StampsReply(stamps: [
+            TravelStamp(id: "new york", city: "New York", code: "JFK", country: "US", first: "2026-03-02", last: "2026-06-12", visits: 3,
+                  places: [StampPlace(name: "Café Lume", kind: "cafe", status: "loved", note: "the cortado, and the window seat")]),
+            TravelStamp(id: "lisboa", city: "Lisboa", country: "PT", first: "2026-05-01", last: "2026-05-01", visits: 1),
+            TravelStamp(id: "san francisco", city: "San Francisco", code: "SFO", country: "US", first: "2026-06-20", last: "2026-06-20", visits: 1),
+            TravelStamp(id: "tokyo", city: "Tokyo", code: "HND", country: "JP", first: "2026-08-14", last: "2026-08-14", visits: 1),
+        ])
     }
 
     func brief() async -> Brief {
