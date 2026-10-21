@@ -44,6 +44,28 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
+    /// What the server's otto_status shows about this phone (POST /app/health).
+    @MainActor static func health(reason: String) async -> [String: Any] {
+        let s = await UNUserNotificationCenter.current().notificationSettings()
+        let auth: String = switch s.authorizationStatus {
+        case .authorized: "authorized"; case .denied: "denied"; case .notDetermined: "notDetermined"
+        case .provisional: "provisional"; case .ephemeral: "ephemeral"; @unknown default: "unknown"
+        }
+        let bg: String = switch UIApplication.shared.backgroundRefreshStatus {
+        case .available: "available"; case .denied: "denied"; case .restricted: "restricted"; @unknown default: "unknown"
+        }
+        let info = Bundle.main.infoDictionary
+        var h: [String: Any] = [
+            "reason": reason, "notifications": auth, "backgroundRefresh": bg,
+            "keepAwake": Keepalive.enabled, "shareConfigured": ShareDirect.load() != nil,
+            "build": info?["CFBundleVersion"] as? String ?? "0",
+            "version": info?["CFBundleShortVersionString"] as? String ?? "0",
+            "ios": UIDevice.current.systemVersion,
+        ]
+        if let d = UserDefaults.standard.object(forKey: "lastRefresh") as? Date { h["lastRefresh"] = ISO8601DateFormatter().string(from: d) }
+        return h
+    }
+
     /// Ask iOS to wake the app again. 15 minutes is the floor we ask for; iOS decides.
     static func scheduleRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: refreshTask)
