@@ -153,6 +153,8 @@ protocol OttoBackend: AnyObject {
     func settings(flip id: String?) async -> SettingsPage?
     /// One call to the dashboard API (`/app/dash/<path>`), the body of a 2xx or nil.
     func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data?
+    /// The flight-day card (`/app/gate`); nil when the Mac didn't answer.
+    func gate() async -> GateReply?
 }
 
 extension OttoBackend {
@@ -162,6 +164,7 @@ extension OttoBackend {
     func speakReplies(set: Bool?) async -> Bool? { nil }
     func settings(flip id: String?) async -> SettingsPage? { nil }
     func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data? { nil }
+    func gate() async -> GateReply? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
     func decide(approval id: String, approve: Bool) async {}
@@ -241,6 +244,16 @@ final class MockBackend: OttoBackend {
             snoozed = Snooze(until: from.addingTimeInterval(Double(m) * 60), since: snoozed?.since ?? .now, held: snoozed?.held ?? [])
         }
         return snoozed ?? Snooze(until: nil, since: nil, held: [])
+    }
+
+    func gate() async -> GateReply? {
+        let dep = Date().addingTimeInterval(3 * 3600)
+        return GateReply(card: GateCard(
+            key: "TA482@mock", flight: "TA482", carrier: "TA", from: "SFO", to: "JFK",
+            fromCity: "San Francisco", toCity: "New York", date: String(ISO8601DateFormatter().string(from: dep).prefix(10)),
+            departs: "08:45", arrives: "17:05", departsEst: "09:25", arrivesEst: "17:45",
+            departsAt: ISO8601DateFormatter().string(from: dep), durationMinutes: 320, state: "scheduled",
+            delayMinutes: 40, gate: "B12", terminal: "2", seat: "14A", cabin: "Economy", booking: "ABC123"))
     }
 
     func brief() async -> Brief {
