@@ -7,7 +7,7 @@ import Foundation
 ///     app -> otto  {"type":"message","id":"<uuid>","text":"...","reply_to":"<id>"?}
 ///                  {"type":"tap","data":"<button data>","label":"..."}
 ///                  {"type":"react","id":"<id>","emoji":"❤️"}
-///     otto -> app  {"type":"message","id":"...","text":"...","ts":"<ISO>","buttons":[{"label","data"}],
+///     otto -> app  {"type":"message","id":"...","text":"...","ts":"<ISO>","buttons":[{"label","data"} or {"label","url"}],
 ///                   "files":[{"id","name","kind"}]?,"voice":{"id","name","kind"}?,"reply_to":"<id>"?,
 ///                   "src"?,"why"?  (only on messages Otto sent unprompted)}
 ///                  {"type":"react","id":"<id>","emoji":"👍"}
@@ -97,7 +97,7 @@ final class LiveBackend: OttoBackend {
             : r.dir == "in"
                 ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date())
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
-                          buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data) },
+                          buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url) },
                           isVoice: r.voice != nil, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
                           thread: r.thread, level: r.level, src: r.src, why: r.why)
         }
@@ -120,7 +120,7 @@ final class LiveBackend: OttoBackend {
     }
 
     func tap(_ button: ActionButton) async {
-        await write(["type": "tap", "data": button.data, "label": button.label])
+        await write(["type": "tap", "data": button.data ?? "", "label": button.label])
     }
 
     func react(to id: String, emoji: String) async {
@@ -254,7 +254,7 @@ final class LiveBackend: OttoBackend {
         if f.type == "terminal", let text = f.text, let ts = f.ts { out.yield(Self.terminal(text, ts: ts)); return }
         guard f.type == "message", let text = f.text else { return }
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
-                          buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data) },
+                          buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url) },
                           isVoice: f.voice != nil, serverID: f.id, replyTo: f.reply_to,
                           files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why))
     }
@@ -368,7 +368,7 @@ final class LiveBackend: OttoBackend {
 
     // MARK: Wire types
 
-    private struct WireButton: Decodable { let label: String; let data: String }
+    private struct WireButton: Decodable { let label: String; let data: String?; let url: String? }
     private struct WireMessage: Decodable {
         let type: String; let id: String?; let text: String?; let ts: String?; let buttons: [WireButton]?
         let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let emoji: String?; let ids: [String]?; let on: Bool?
