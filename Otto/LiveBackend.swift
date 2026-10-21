@@ -276,6 +276,8 @@ final class LiveBackend: OttoBackend {
 
     func release() async -> Release? { await get("app/update") }
 
+    func gate() async -> GateReply? { await get("app/gate") }
+
     func setLoop(_ id: String, done: Bool) async -> Bool {
         guard let body = try? JSONSerialization.data(withJSONObject: ["id": id, "done": done]) else { return false }
         return await post("app/loop", body) != nil

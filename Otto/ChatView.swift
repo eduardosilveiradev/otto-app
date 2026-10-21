@@ -14,6 +14,8 @@ struct ChatView: View {
     @State private var webCall = false
     /// Calls Otto is placing for you; a live one shows as a banner under the header.
     @State private var calls = CallWatch()
+    @State private var gate = GateWatch()
+    @State private var showGate = false
     @State private var openCall: DashCall?
     /// Otto's phone line (the Vapi assistant). Set in details; dialled with the phone app.
     @AppStorage("callNumber") private var callNumber = ""
@@ -153,11 +155,16 @@ struct ChatView: View {
                     CallBanner(call: live) { openCall = live }
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                if let card = gate.visible() {
+                    GateBanner(card: card) { showGate = true }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
             .animation(.snappy, value: calls.live?.id)
+            .animation(.snappy, value: gate.card?.key)
             // The header's fade, carried down behind the banner so the thread doesn't show through it.
             .background(alignment: .top) {
-                if calls.live != nil {
+                if calls.live != nil || gate.visible() != nil {
                     LinearGradient(colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
                                    startPoint: UnitPoint(x: 0.5, y: 0.6), endPoint: .bottom)
                         .padding(.bottom, -16)
@@ -166,6 +173,12 @@ struct ChatView: View {
             }
         }
         .task { await calls.run(store.backend) }
+        .task { await gate.run(store.backend) }
+        .sheet(isPresented: $showGate) { GateSheet(watch: gate) }
+        // `-openGate`: open the boarding pass as soon as there is one, for screenshots.
+        .onChange(of: gate.card?.key, initial: true) {
+            if ProcessInfo.processInfo.arguments.contains("-openGate"), gate.card != nil { showGate = true }
+        }
         // `-openCall`: open the live call as soon as there is one, for screenshots.
         .onChange(of: calls.live?.id) {
             if ProcessInfo.processInfo.arguments.contains("-openCall"), let live = calls.live { openCall = live }
