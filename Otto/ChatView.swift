@@ -19,6 +19,9 @@ struct ChatView: View {
     @State private var openCall: DashCall?
     /// Otto's phone line (the Vapi assistant). Set in details; dialled with the phone app.
     @AppStorage("callNumber") private var callNumber = ""
+    /// When the "hold for walkie-talkie" hint last showed; it comes back every two months.
+    @AppStorage("walkieHintAt") private var walkieHintAt = 0.0
+    @State private var walkieHint = false
     @Environment(\.openURL) private var openURL
     /// Shared with the composer, which lives in its own hosting controller (see KeyboardDock).
     let ui: ComposerUI
@@ -259,7 +262,25 @@ struct ChatView: View {
                 .tint(.primary)
                 // Long press: the walkie-talkie, for talking to Otto on the move.
                 .contextMenu {
-                    Button("Walkie-talkie", systemImage: "waveform") { WalkieLauncher.shared.open = true }
+                    Button("Walkie-talkie", systemImage: "waveform") { walkieHint = false; WalkieLauncher.shared.open = true }
+                }
+                .popover(isPresented: $walkieHint, arrowEdge: .top) {
+                    Label("Hold for walkie-talkie", systemImage: "waveform")
+                        .font(.system(size: 14, weight: .medium))
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .presentationCompactAdaptation(.popover)
+                }
+                .task {
+                    var due = Date.now.timeIntervalSince1970 - walkieHintAt > 60 * 86_400
+                    #if DEBUG
+                    if CommandLine.arguments.contains("-walkieHint") { due = true }
+                    #endif
+                    guard due else { return }
+                    try? await Task.sleep(for: .seconds(1.5))
+                    walkieHintAt = Date.now.timeIntervalSince1970
+                    walkieHint = true
+                    try? await Task.sleep(for: .seconds(6))
+                    walkieHint = false
                 }
             }
             Button { showDetails = true } label: {
