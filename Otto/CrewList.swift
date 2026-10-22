@@ -8,7 +8,7 @@ struct CrewRoot: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ChatListView()
+            ChatListView { path.append($0) }
                 .navigationDestination(for: Route.self) { route in
                     switch route {
                     case .otto:
@@ -42,6 +42,9 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
 
 struct ChatListView: View {
     @Environment(OttoStore.self) private var store
+    @AppStorage("crewShowTools") private var showTools = false
+    /// Pushes a thread, for the compose menu.
+    var open: (CrewRoot.Route) -> Void = { _ in }
 
     var body: some View {
         let crew = store.crew
@@ -68,7 +71,48 @@ struct ChatListView: View {
         }
         .listStyle(.plain)
         .navigationTitle("Messages")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    Toggle("Show tool calls", isOn: $showTools)
+                    let busy = crew.agents.filter { $0.status == "working" }
+                    if !busy.isEmpty {
+                        Button("Stop all", systemImage: "stop.fill", role: .destructive) {
+                            Task { for a in busy { await crew.stop(a.id) } }
+                        }
+                    }
+                } label: { Image(systemName: "ellipsis") }
+            }
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text("Messages").font(.system(size: 17, weight: .semibold))
+                    Text(summary).font(.system(size: 12)).foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                }
+                .animation(.snappy, value: summary)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Otto") { open(.otto) }
+                    Section("Crew") {
+                        ForEach(crew.agents) { a in Button(a.name) { open(.agent(a.id)) } }
+                    }
+                } label: { Image(systemName: "square.and.pencil") }
+                .accessibilityLabel("New message")
+            }
+        }
         .refreshable { await crew.refresh() }
+    }
+
+    /// Who's busy, at a glance: "2 working · 1 waiting", or how many are on the crew.
+    private var summary: String {
+        let a = store.crew.agents
+        let parts = [("working", "working"), ("waiting", "waiting"), ("error", "stuck")].compactMap { s, word in
+            let n = a.filter { $0.status == s }.count
+            return n > 0 ? "\(n) \(word)" : nil
+        }
+        return parts.isEmpty ? "\(a.count) on the crew, all free" : parts.joined(separator: " · ")
     }
 
     private var ottoLine: String {

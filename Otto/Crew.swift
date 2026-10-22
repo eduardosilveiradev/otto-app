@@ -52,6 +52,8 @@ final class CrewStore {
     var open: String?
     /// Keys of your messages the server never took.
     var failed: Set<String> = []
+    /// Threads whose history has come back at least once (empty or not), so an empty one isn't still loading.
+    var loaded: Set<String> = []
     /// Set by the list while Otto's thread is pushed; the thread's back button calls it.
     var back: (() -> Void)?
     private var seen: [String: String] = [:]
@@ -108,6 +110,7 @@ final class CrewStore {
     /// `notify`: a refetch after a gap. Only for a thread already held, so a first load never replays old history.
     func load(_ id: String, notify: Bool = false) async {
         guard let rows = await backend?.crewHistory(id, limit: 200) else { return }
+        loaded.insert(id)
         let held = !(threads[id] ?? []).isEmpty
         let mark = seen[id] ?? UserDefaults.standard.string(forKey: "crewSeen.\(id)") ?? ""
         var have = Set((threads[id] ?? []).map(\.key))

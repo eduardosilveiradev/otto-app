@@ -1114,7 +1114,7 @@ private struct Tapback: View {
     }
 }
 
-private struct Typing: View {
+struct Typing: View {
     /// What Otto is doing, shown beside the orb; nil is just the orb.
     let status: String?
     /// Off while the server is unreachable: the orb shows it's reconnecting instead of thinking.
