@@ -61,6 +61,9 @@ final class CrewStore {
     var loaded: Set<String> = []
     /// Set by the list while a thread is pushed; the thread's back button calls it.
     var back: (() -> Void)?
+    /// A thread a tapped notification asked for, waiting for the list to open it. It can arrive on a
+    /// cold launch before the list exists (the splash is still up), so it is held here, not sent.
+    var pendingThread: CrewRoot.Route?
     /// Tapbacks and swipe-replies, by event key. The server has no crew route for either, so
     /// they stay on the phone; a reply's quote also goes to the agent as a "> " line.
     var reactions = UserDefaults.standard.dictionary(forKey: "crewReactions") as? [String: String] ?? [:] {

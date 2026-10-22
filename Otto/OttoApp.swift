@@ -24,7 +24,8 @@ struct OttoApp: App {
 private struct MainRoot: View {
     @State private var store = OttoStore.shared
     @Environment(\.scenePhase) private var phase
-    /// Offline at launch: stop waiting on the roster and open the single chat, as before.
+    /// Offline at launch: stop waiting on the roster and open the single chat. 12s, not less: a phone
+    /// reaching the Mac through the tunnel can take several seconds, and that is still loading.
     @State private var gaveUp = false
     @State private var splash = Splash.loading
     enum Splash { case loading, loaded, gone }
@@ -32,9 +33,11 @@ private struct MainRoot: View {
     private var ready: Bool { store.crew.known || gaveUp }
 
     var body: some View {
-        Group {
+        // A ZStack, not a Group: a Group hands its modifiers to whichever child is showing, so the
+        // splash timer, the overlay and store.start() were all restarted when the content swapped in.
+        ZStack {
             if !ready {
-                Color(.systemBackground).task { try? await Task.sleep(for: .seconds(6)); gaveUp = true }
+                Color(.systemBackground).task { try? await Task.sleep(for: .seconds(12)); gaveUp = true }
             } else if store.crew.hasCrew {
                 CrewRoot(store: store)
             } else {
@@ -44,15 +47,22 @@ private struct MainRoot: View {
             // Over the content, so it is already laid out underneath when the splash fades.
             .overlay { if splash != .gone { Connecting(loaded: splash == .loaded).transition(.opacity) } }
             .task {
-                // The reconnecting orb gets at least a second, even on a fast connect, so it reads.
-                try? await Task.sleep(for: .seconds(1))
-                while !ready { try? await Task.sleep(for: .milliseconds(100)) }
-                // Offline there is nothing loaded to show off: just fade to the single chat.
-                if store.crew.known {
-                    withAnimation(.easeInOut(duration: 0.25)) { splash = .loaded }
-                    try? await Task.sleep(for: .seconds(1.4))   // the 0.9s morph, then the still globe for a beat
-                }
+                do {
+                    // The reconnecting orb gets at least a second, even on a fast connect, so it reads.
+                    try await Task.sleep(for: .seconds(1))
+                    while !ready { try await Task.sleep(for: .milliseconds(100)) }
+                    // Offline there is nothing loaded to show off: just fade to the single chat.
+                    if store.crew.known {
+                        withAnimation(.easeInOut(duration: 0.25)) { splash = .loaded }
+                        try await Task.sleep(for: .seconds(1.7))   // the 0.9s morph, then the still globe for 0.8s
+                    }
+                } catch { return }   // cancelled: leave the splash to whoever runs next
                 withAnimation(.easeOut(duration: 0.4)) { splash = .gone }
+            }
+            // Bark pushes carry a bare otto:// (otto://pair belongs to onboarding): tapping one opens
+            // Otto's own thread, not whichever agent's thread the list last had open.
+            .onOpenURL { url in
+                if url.scheme == "otto", (url.host ?? "").isEmpty { store.crew.pendingThread = .otto }
             }
             .environment(store)
             .task { Notifier.shared.requestPermission(); await store.start() }

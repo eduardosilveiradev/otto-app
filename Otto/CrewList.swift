@@ -33,6 +33,11 @@ struct CrewRoot: View {
         .onChange(of: path, initial: true) { _, p in
             store.crew.back = p.isEmpty ? nil : { path.removeAll() }
         }
+        .onChange(of: store.crew.pendingThread, initial: true) { _, route in
+            guard let route else { return }
+            path = [route]
+            store.crew.pendingThread = nil
+        }
     }
 }
 
