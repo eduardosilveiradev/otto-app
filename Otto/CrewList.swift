@@ -3,8 +3,9 @@ import SwiftUI
 /// The root once the server runs a crew: Messages-style list, Otto pinned first, one thread per agent.
 struct CrewRoot: View {
     let store: OttoStore
-    enum Route: Hashable { case otto, agent(String) }
-    @State private var path: [Route] = UserDefaults.standard.string(forKey: "crewThread").map { [.agent($0)] } ?? []
+    enum Route: Hashable { case otto, agent(String), overview }
+    @State private var path: [Route] = ProcessInfo.processInfo.arguments.contains("-crewOverview") ? [.overview]
+        : UserDefaults.standard.string(forKey: "crewThread").map { [.agent($0)] } ?? []
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -20,6 +21,8 @@ struct CrewRoot: View {
                         ChatScreen(store: store, agent: id)
                             .ignoresSafeArea(.keyboard)
                             .toolbar(.hidden, for: .navigationBar)
+                    case .overview:
+                        CrewOverview { path.append($0) }
                     }
                 }
         }
@@ -58,6 +61,7 @@ struct ChatListView: View {
                     Row(title: "Otto", line: ottoLine, when: store.messages.last(where: { $0.from != .terminal })?.date, unread: 0)
                 }
             }
+            overviewRow
             ForEach(crew.agents) { a in
                 NavigationLink(value: CrewRoot.Route.agent(a.id)) {
                     HStack(spacing: 12) {
@@ -116,6 +120,22 @@ struct ChatListView: View {
             return n > 0 ? "\(n) \(word)" : nil
         }
         return parts.isEmpty ? "\(a.count) on the crew, all free" : parts.joined(separator: " · ")
+    }
+
+    /// Pinned under Otto: the whole crew's conversation, with the latest speakers as its picture.
+    private var overviewRow: some View {
+        let last = crewMessages(store.crew.threads)
+        let speakers = last.reversed().compactMap(\.from).filter { $0 != "user" }
+        var faces: [String] = []
+        for id in speakers where !faces.contains(id) && faces.count < 3 { faces.append(id) }
+        for a in store.crew.agents where faces.count < 2 && !faces.contains(a.id) { faces.append(a.id) }
+        let line = last.last.map { (($0.from == "user" ? "You" : crewName($0.from ?? $0.agent)) + ": ") + ($0.text ?? "") } ?? "No messages yet"
+        return NavigationLink(value: CrewRoot.Route.overview) {
+            HStack(spacing: 12) {
+                CrewGroupAvatar(ids: faces)
+                Row(title: "Crew", line: line, when: last.last?.date, unread: 0)
+            }
+        }
     }
 
     private var ottoLine: String {
