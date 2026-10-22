@@ -1,4 +1,5 @@
 import SwiftUI
+import ThinkingOrbsKit
 
 @main
 struct OttoApp: App {
@@ -25,17 +26,34 @@ private struct MainRoot: View {
     @Environment(\.scenePhase) private var phase
     /// Offline at launch: stop waiting on the roster and open the single chat, as before.
     @State private var gaveUp = false
+    @State private var splash = Splash.loading
+    enum Splash { case loading, loaded, gone }
+
+    private var ready: Bool { store.crew.known || gaveUp }
 
     var body: some View {
         Group {
-            if !store.crew.known && !gaveUp {
-                Connecting().task { try? await Task.sleep(for: .seconds(6)); gaveUp = true }
+            if !ready {
+                Color(.systemBackground).task { try? await Task.sleep(for: .seconds(6)); gaveUp = true }
             } else if store.crew.hasCrew {
                 CrewRoot(store: store)
             } else {
                 ChatScreen(store: store).ignoresSafeArea(.keyboard)
             }
         }
+            // Over the content, so it is already laid out underneath when the splash fades.
+            .overlay { if splash != .gone { Connecting(loaded: splash == .loaded).transition(.opacity) } }
+            .task {
+                // The reconnecting orb gets at least a second, even on a fast connect, so it reads.
+                try? await Task.sleep(for: .seconds(1))
+                while !ready { try? await Task.sleep(for: .milliseconds(100)) }
+                // Offline there is nothing loaded to show off: just fade to the single chat.
+                if store.crew.known {
+                    withAnimation(.easeInOut(duration: 0.25)) { splash = .loaded }
+                    try? await Task.sleep(for: .seconds(0.7))
+                }
+                withAnimation(.easeOut(duration: 0.4)) { splash = .gone }
+            }
             .environment(store)
             .task { Notifier.shared.requestPermission(); await store.start() }
             .onChange(of: phase, initial: true) { _, p in
@@ -49,11 +67,24 @@ private struct MainRoot: View {
 }
 
 /// Until the server says whether it runs a crew, neither the single chat nor the list is right.
+/// The orb reconnects while that answer is out, then holds still on the searching globe once it is
+/// in, so the screen says "loaded" for a beat before it fades.
 private struct Connecting: View {
+    let loaded: Bool
+
     var body: some View {
         VStack(spacing: 14) {
-            OttoAvatar(size: 72, thinking: true)
+            ZStack {
+                if loaded {
+                    ThinkingOrb(state: .searching, size: .px64, paused: true, displaySize: 96)
+                        .transition(.opacity)
+                } else {
+                    ThinkingOrb(state: .connecting, size: .px64, displaySize: 96)
+                        .transition(.opacity)
+                }
+            }
             Text("Connecting…").font(.footnote).foregroundStyle(.secondary)
+                .opacity(loaded ? 0 : 1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
