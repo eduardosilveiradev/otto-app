@@ -67,7 +67,11 @@ struct ChatListView: View {
                 }
             }
             overviewRow
-            ForEach(crew.agents) { a in
+            // Newest conversation first, like Messages; Otto stays pinned above. Ties keep roster order.
+            ForEach(crew.agents.enumerated().sorted { l, r in
+                let a = crew.latest(l.element), b = crew.latest(r.element)
+                return a == b ? l.offset < r.offset : a > b
+            }.map(\.element)) { a in
                 NavigationLink(value: CrewRoot.Route.agent(a.id)) {
                     HStack(spacing: 12) {
                         CrewAvatar(agent: a, size: 48)

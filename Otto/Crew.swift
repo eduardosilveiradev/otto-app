@@ -77,6 +77,11 @@ final class CrewStore {
     @ObservationIgnored private var foreground: () -> Bool = { true }
 
     var hasCrew: Bool { !agents.isEmpty }
+
+    /// When the agent's thread last moved: its newest held message, or the roster's lastAt (ISO, so it sorts as text).
+    func latest(_ a: CrewAgent) -> String {
+        max(threads[a.id]?.map(\.ts).max() ?? "", a.lastAt ?? "")
+    }
     /// Whether the server's answer on running a crew is in yet; until then the root can't pick a layout.
     var known = false
 
