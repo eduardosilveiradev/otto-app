@@ -14,7 +14,7 @@ struct CrewAgent: Decodable, Identifiable, Hashable {
 }
 
 /// One line of a thread: a message, a tool call or a status change.
-struct CrewEvent: Decodable, Identifiable, Hashable {
+struct CrewEvent: Codable, Identifiable, Hashable {
     let id: String
     let agent: String
     let kind: String
@@ -44,6 +44,11 @@ func crewName(_ id: String) -> String {
     }
 }
 
+/// How a hand-off names its recipient: "@PM", "@Planner", "@Writer1".
+func crewHandle(_ id: String) -> String {
+    id == "pm" ? "PM" : crewName(id).replacing(" ", with: "")
+}
+
 @MainActor @Observable
 final class CrewStore {
     var agents: [CrewAgent] = []
@@ -54,8 +59,16 @@ final class CrewStore {
     var failed: Set<String> = []
     /// Threads whose history has come back at least once (empty or not), so an empty one isn't still loading.
     var loaded: Set<String> = []
-    /// Set by the list while Otto's thread is pushed; the thread's back button calls it.
+    /// Set by the list while a thread is pushed; the thread's back button calls it.
     var back: (() -> Void)?
+    /// Tapbacks and swipe-replies, by event key. The server has no crew route for either, so
+    /// they stay on the phone; a reply's quote also goes to the agent as a "> " line.
+    var reactions = UserDefaults.standard.dictionary(forKey: "crewReactions") as? [String: String] ?? [:] {
+        didSet { UserDefaults.standard.set(reactions, forKey: "crewReactions") }
+    }
+    var replies = UserDefaults.standard.dictionary(forKey: "crewReplies") as? [String: String] ?? [:] {
+        didSet { UserDefaults.standard.set(replies, forKey: "crewReplies") }
+    }
     private var seen: [String: String] = [:]
     @ObservationIgnored private var backend: OttoBackend?
     @ObservationIgnored private var foreground: () -> Bool = { true }
@@ -95,6 +108,7 @@ final class CrewStore {
     private func append(_ e: CrewEvent, foreground: Bool) {
         guard !(threads[e.agent] ?? []).contains(where: { $0.key == e.key }) else { return }
         threads[e.agent, default: []].append(e)
+        if open == e.agent { markSeen(e.agent) }
         if e.kind == "message", let from = e.from, from == e.agent, from != "user", from != "otto",
            !foreground || open != e.agent {
             Notifier.shared.post(title: crewName(from), body: e.text ?? "", thread: "crew:\(from)", id: "crew/\(e.id)")
@@ -122,11 +136,18 @@ final class CrewStore {
             }
         }
         threads[id] = all.sorted { $0.ts < $1.ts }
+        if open == id { markSeen(id) }
     }
 
-    func send(_ id: String, text: String) async {
+    /// `reply`: the wireID and text of the message a swipe picked to answer.
+    func send(_ id: String, text: String, reply: (id: String, text: String)? = nil) async {
         guard let backend else { return }
         let cid = String(UUID().uuidString.lowercased().replacing("-", with: "").prefix(8))
+        var text = text
+        if let reply {
+            replies[id + "/" + cid] = reply.id
+            text = "> " + String(reply.text.prefix(120)).replacing("\n", with: " ") + "\n" + text
+        }
         let local = CrewEvent(id: cid, agent: id, kind: "message", ts: Self.now(), from: "user", to: id,
                               text: text, tool: nil, summary: nil, status: nil, note: nil)
         threads[id, default: []].append(local)

@@ -16,7 +16,10 @@ struct CrewRoot: View {
                             .ignoresSafeArea(.keyboard)
                             .toolbar(.hidden, for: .navigationBar)
                     case .agent(let id):
-                        CrewThreadView(id: id)
+                        // Otto's own chat, on this agent's thread.
+                        ChatScreen(store: store, agent: id)
+                            .ignoresSafeArea(.keyboard)
+                            .toolbar(.hidden, for: .navigationBar)
                     }
                 }
         }
@@ -25,7 +28,7 @@ struct CrewRoot: View {
         .overlay { if ProcessInfo.processInfo.arguments.contains("-crewMoods") { MoodGallery() } }
         #endif
         .onChange(of: path, initial: true) { _, p in
-            store.crew.back = p.contains(.otto) ? { path.removeAll() } : nil
+            store.crew.back = p.isEmpty ? nil : { path.removeAll() }
         }
     }
 }

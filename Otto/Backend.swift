@@ -4,7 +4,8 @@ import Foundation
 
 /// `terminal` is a prompt you typed into Otto's terminal on the Mac: a system line in the
 /// thread (its first few words), not a bubble, and nothing to notify, answer or react to.
-enum Sender: String, Codable { case me, otto, terminal }
+/// `system` is a crew thread's status line or run of tool calls (`steps`), never saved.
+enum Sender: String, Codable { case me, otto, terminal, system }
 
 struct ActionButton: Identifiable, Hashable, Codable {
     var id: String { data ?? url ?? copy ?? label }
@@ -51,6 +52,13 @@ struct Message: Identifiable, Codable {
     /// "email-scan", "nudge:loops", …) and in plain words. Nil on replies: no "Why this?" for those.
     var src: String? = nil
     var why: String? = nil
+    /// Crew threads only (see CrewThread), so never in a saved thread: who wrote it when
+    /// that isn't the thread's agent, the agent a hand-off is addressed to, the tool calls
+    /// a `system` row stands for, and a send the server never took.
+    var caption: String? = nil
+    var mention: String? = nil
+    var steps: [CrewEvent]? = nil
+    var failed: Bool? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }
