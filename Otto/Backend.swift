@@ -316,7 +316,7 @@ final class MockBackend: OttoBackend {
     // MARK: Crew sample data, only with `-crew` (or `-crewThread <id>`)
 
     private var crewOn: Bool {
-        ProcessInfo.processInfo.arguments.contains("-crew") || UserDefaults.standard.string(forKey: "crewThread") != nil
+        ProcessInfo.processInfo.arguments.contains("-crew") || ProcessInfo.processInfo.arguments.contains("-crewOverview") || UserDefaults.standard.string(forKey: "crewThread") != nil
     }
 
     func crew() async -> [CrewAgent]? {
@@ -377,14 +377,15 @@ final class MockBackend: OttoBackend {
             ("writer-1", "writer", "working", "planner", "Ticket docs/tickets/crew-launcher.md is yours; repo ../otto-core, branch crew/crew-launcher", 38),
             ("writer-2", "writer", "waiting", "writer-2", "Ready for review: .crew/crew-mcp, branch crew/crew-mcp, 14 tests green", 12),
             ("writer-3", "writer", "idle", nil, nil, 0),
-            ("reviewer-1", "reviewer", "error", "writer-2", "Ready for review: .crew/crew-mcp, branch crew/crew-mcp, 14 tests green", 7),
+            ("reviewer-1", "reviewer", "error", "writer-2", "Ready for review: .crew/crew-mcp, branch crew/crew-mcp, 14 tests green", 12),
         ]
         roster = rows.map { CrewAgent(id: $0.0, role: $0.1, name: crewName($0.0), status: $0.2, lastLine: $0.4, lastFrom: $0.3, lastAt: $0.4 == nil ? nil : Self.iso($0.5)) }
         let next = ["planner": "writer-1", "writer-1": "reviewer-1", "writer-2": "reviewer-1"]
         for (id, _, status, from, line, ago) in rows {
             func e(_ n: Int, _ m: Double, _ kind: String, from: String? = nil, to: String? = nil, text: String? = nil,
                    tool: String? = nil, summary: String? = nil, status: String? = nil, note: String? = nil) -> CrewEvent {
-                Self.crewEvent(id, "\(id.prefix(2))\(String(format: "%06x", n))", m, kind, from: from, to: to, text: text, tool: tool, summary: summary, status: status, note: note)
+                // A message between two agents is one event in both threads: its id says who, to whom, and when.
+                Self.crewEvent(id, kind == "message" ? "m-\(from ?? "")-\(to ?? "")-\(Int(m))" : "\(id)#\(n)", m, kind, from: from, to: to, text: text, tool: tool, summary: summary, status: status, note: note)
             }
             guard let line else {
                 crewThreads[id] = [e(1, 120, "status", status: "idle")]
@@ -407,5 +408,18 @@ final class MockBackend: OttoBackend {
                                          : e(10, 5, "status", status: status, note: status == "working" ? "run 1" : nil))
             crewThreads[id] = ev
         }
+        // You asking writer-1 for an update, so the overview has a message of yours.
+        crewThreads["writer-1", default: []].append(Self.crewEvent("writer-1", "m-user-writer-1-22", 22, "message", from: "user", to: "writer-1",
+                                                                  text: "Tell me when the launcher tests pass."))
+        // The other end of every agent-to-agent message gets the same event.
+        for (id, events) in crewThreads {
+            for e in events where e.kind == "message" {
+                guard let other = e.from == id ? e.to : e.from, other != id, crewThreads[other] != nil,
+                      !crewThreads[other]!.contains(where: { $0.id == e.id }) else { continue }
+                crewThreads[other]!.append(CrewEvent(id: e.id, agent: other, kind: e.kind, ts: e.ts, from: e.from, to: e.to, text: e.text,
+                                                     tool: nil, summary: nil, status: nil, note: nil))
+            }
+        }
+        for id in crewThreads.keys { crewThreads[id]!.sort { $0.ts < $1.ts } }
     }
 }
