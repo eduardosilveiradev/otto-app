@@ -6,7 +6,38 @@ import LinkPresentation
 import ThinkingOrbsKit
 import VoiceGlowKit
 
+/// What ChatView, Composer and Row need from a conversation: Otto's (OttoStore) or one
+/// crew agent's (CrewThread). Everything else on screen is Otto's and shows only on his.
+@MainActor protocol ChatThread: AnyObject {
+    /// Who's on the other end, for the composer's placeholder and its reply bar.
+    var name: String { get }
+    /// Otto's own thread: calls, the gate card, approvals, details, photos and voice notes.
+    /// The crew takes text only.
+    var isOtto: Bool { get }
+    var messages: [Message] { get }
+    /// The thinking bubble, and the step it shows.
+    var typing: Bool { get }
+    var typingStatus: String? { get }
+    var connected: Bool { get }
+    /// Off while the first history lands, so it appears at once instead of popping in.
+    var animated: Bool { get }
+    /// The message a swipe picked to answer; the composer shows it until you send or cancel.
+    var replyingTo: Message.ID? { get set }
+    func send(_ text: String)
+    func react(_ emoji: String, on id: Message.ID)
+    func tap(_ button: ActionButton, on id: Message.ID)
+}
+
+extension OttoStore: ChatThread {
+    var name: String { "Otto" }
+    var isOtto: Bool { true }
+    var typing: Bool { ottoTyping }
+    var typingStatus: String? { ottoStatus }
+    func send(_ text: String) { send(text, shared: false) }
+}
+
 /// The whole app is one Messages-style conversation. Tapping Otto's name opens details.
+/// A crew agent's thread is the same view under its own header.
 struct ChatView: View {
     @Environment(OttoStore.self) private var store
     @State private var showDetails = ProcessInfo.processInfo.arguments.contains("-details")
@@ -25,6 +56,10 @@ struct ChatView: View {
     @Environment(\.openURL) private var openURL
     /// Shared with the composer, which lives in its own hosting controller (see KeyboardDock).
     let ui: ComposerUI
+    let thread: any ChatThread
+    private var crew: CrewThread? { thread as? CrewThread }
+    /// CrewThread reads it from the defaults; held here so flipping it redraws the thread.
+    @AppStorage("crewShowTools") private var showTools = false
     private var focused: Bool { ui.focused }
     @State private var scroll = ScrollPosition(edge: .bottom)
     /// The thread's bottom margin; follows ui.bottomInset, but lags it while the keyboard closes.
@@ -41,34 +76,38 @@ struct ChatView: View {
     @State private var shown = Self.page
     private static let page = 60
 
-    private var lastMine: Message.ID? { store.messages.last(where: { $0.from == .me })?.id }
+    private var lastMine: Message.ID? { thread.messages.last(where: { $0.from == .me })?.id }
 
     /// "Read" once Otto has taken the message in (or answered after it); until then it
     /// may be sitting in his queue, which is "Delivered".
-    private func receipt(for i: Int) -> Bool {
-        store.messages[i].read == true || store.messages[(i + 1)...].contains { $0.from == .otto }
+    private func receipt(for i: Int, in messages: [Message]) -> Bool {
+        messages[i].read == true || messages[(i + 1)...].contains { $0.from == .otto }
     }
 
     var body: some View {
-        let byWire = Dictionary(store.messages.map { ($0.wireID, $0) }, uniquingKeysWith: { a, _ in a })
+        // Once per pass: a crew thread builds its messages from events on every read.
+        let messages = thread.messages
+        let byWire = Dictionary(messages.map { ($0.wireID, $0) }, uniquingKeysWith: { a, _ in a })
         ScrollView {
                 // Not lazy: rows materialised lazily went blank while UIKit animated the
                 // thread's frame with the keyboard. A chat is short enough to lay out whole.
                 VStack(spacing: 0) {
-                    ForEach(Array(store.messages.enumerated()).suffix(shown), id: \.element.id) { i, m in
-                        let prev = i > 0 ? store.messages[i - 1] : nil
-                        let next = i + 1 < store.messages.count ? store.messages[i + 1] : nil
+                    ForEach(Array(messages.enumerated()).suffix(shown), id: \.element.id) { i, m in
+                        let prev = i > 0 ? messages[i - 1] : nil
+                        let next = i + 1 < messages.count ? messages[i + 1] : nil
                         let newBlock = prev.map { m.date.timeIntervalSince($0.date) > 3600 } ?? true
                         if newBlock { Stamp(date: m.date) }
                         if m.from == .terminal {
                             TerminalLine(message: m, afterStamp: newBlock).id(m.id).transition(.opacity)
+                        } else if m.from == .system {
+                            CrewNote(message: m).id(m.id).transition(.opacity)
                         } else {
-                            Row(message: m,
+                            Row(thread: thread, message: m,
                                 quote: m.replyTo.flatMap { byWire[$0] },
                                 tail: next?.from != m.from || next.map { $0.date.timeIntervalSince(m.date) > 3600 } ?? true,
-                                receipt: m.id == lastMine && m.pending != true ? receipt(for: i) : nil,
-                                onTap: { store.tap($0, on: m.id) })
-                                .padding(.top, newBlock || prev?.from == .terminal ? 0 : (prev?.from == m.from ? 2 : 10))
+                                receipt: m.id == lastMine && m.pending != true && m.failed != true ? receipt(for: i, in: messages) : nil,
+                                onTap: { thread.tap($0, on: m.id) })
+                                .padding(.top, newBlock || prev?.from == .terminal || prev?.from == .system ? 0 : (prev?.from == m.from ? 2 : 10))
                                 .id(m.id)
                                 // New bubbles grow out of their own tail corner, iMessage-style.
                                 .transition(.asymmetric(
@@ -78,13 +117,14 @@ struct ChatView: View {
                                     removal: .opacity))
                         }
                     }
-                    if store.ottoTyping {
-                        Typing(status: store.ottoStatus, connected: store.connected).padding(.top, 10).id("typing")
+                    if thread.typing {
+                        Typing(status: thread.typingStatus, connected: thread.connected).padding(.top, 10).id("typing")
                             .transition(.scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity))
                     }
                 }
-                .animation(store.animated ? .spring(response: 0.38, dampingFraction: 0.72) : nil, value: store.messages.count)
-                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: store.ottoTyping)
+                .animation(thread.animated ? .spring(response: 0.38, dampingFraction: 0.72) : nil, value: messages.count)
+                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typing)
+                .animation(.snappy, value: showTools)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 6)
         }
@@ -114,9 +154,10 @@ struct ChatView: View {
         }
         // Near the top: the next page of older messages. The bottom anchor keeps what's on screen still.
         .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y + $0.contentInsets.top < 600 }) { _, near in
-            guard near, shown < store.messages.count else { return }
+            let messages = thread.messages
+            guard near, shown < messages.count else { return }
             // Keep the oldest bubble on screen where it is, rather than at the top of the new page.
-            let keep = store.messages[store.messages.count - shown].id
+            let keep = messages[messages.count - shown].id
             shown += Self.page
             Task { scroll.scrollTo(id: keep, anchor: .top) }
         }
@@ -151,34 +192,20 @@ struct ChatView: View {
         #endif
         // An empty thread has no width of its own; without this the line wrapped a letter at a time.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay { if store.messages.isEmpty && !store.ottoTyping { EmptyChat(asleep: store.asleep, connected: store.connected, lookingAtCursor: focused) } }
-        .background(Color(.systemBackground))
-        .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(spacing: 8) {
-                header
-                if let live = calls.live {
-                    CallBanner(call: live) { openCall = live }
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                if let card = gate.visible() {
-                    GateBanner(card: card) { showGate = true }
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .animation(.snappy, value: calls.live?.id)
-            .animation(.snappy, value: gate.card?.key)
-            // The header's fade, carried down behind the banner so the thread doesn't show through it.
-            .background(alignment: .top) {
-                if calls.live != nil || gate.visible() != nil {
-                    LinearGradient(colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
-                                   startPoint: UnitPoint(x: 0.5, y: 0.6), endPoint: .bottom)
-                        .padding(.bottom, -16)
-                        .ignoresSafeArea(edges: .top)
-                }
+        .overlay {
+            if let crew {
+                if !crew.loaded { ProgressView() }   // until its history comes back
+            } else if messages.isEmpty && !store.ottoTyping {
+                EmptyChat(asleep: store.asleep, connected: store.connected, lookingAtCursor: focused)
             }
         }
-        .task { await calls.run(store.backend) }
-        .task { await gate.run(store.backend) }
+        .background(Color(.systemBackground))
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let crew { CrewHeader(thread: crew) } else { ottoTop }
+        }
+        .task { if let crew { await crew.appear() } else { await calls.run(store.backend) } }
+        .task { if thread.isOtto { await gate.run(store.backend) } }
+        .onDisappear { crew?.disappear() }
         .sheet(isPresented: $showGate) { GateSheet(watch: gate) }
         // `-openGate`: open the boarding pass as soon as there is one, for screenshots.
         .onChange(of: gate.card?.key, initial: true) {
@@ -190,7 +217,7 @@ struct ChatView: View {
         }
         .sheet(item: $openCall) { CallSheet(call: $0) }
         // Closed only by its own buttons (Later hides it), so the setter has nothing to do.
-        .sheet(item: Binding(get: { store.shownApproval }, set: { _ in })) {
+        .sheet(item: Binding(get: { thread.isOtto ? store.shownApproval : nil }, set: { _ in })) {
             ApprovalSheet(request: $0)
         }
         // The header's fade, mirrored behind the composer: bubbles dissolve into the
@@ -235,6 +262,32 @@ struct ChatView: View {
         c.scheme = "sidestore"; c.host = "install"
         c.queryItems = [URLQueryItem(name: "url", value: ipa)]
         return c.url
+    }
+
+    /// Otto's header, and under it a live call or the flight-day card.
+    private var ottoTop: some View {
+        VStack(spacing: 8) {
+            header
+            if let live = calls.live {
+                CallBanner(call: live) { openCall = live }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+            if let card = gate.visible() {
+                GateBanner(card: card) { showGate = true }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy, value: calls.live?.id)
+        .animation(.snappy, value: gate.card?.key)
+        // The header's fade, carried down behind the banner so the thread doesn't show through it.
+        .background(alignment: .top) {
+            if calls.live != nil || gate.visible() != nil {
+                LinearGradient(colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
+                               startPoint: UnitPoint(x: 0.5, y: 0.6), endPoint: .bottom)
+                    .padding(.bottom, -16)
+                    .ignoresSafeArea(edges: .top)
+            }
+        }
     }
 
     private var header: some View {
@@ -328,6 +381,7 @@ struct ChatView: View {
 struct Composer: View {
     @Environment(OttoStore.self) private var store
     let ui: ComposerUI
+    let thread: any ChatThread
     @State private var draft = ""
     @State private var focused = false
     @State private var attachments: [Attachment] = []
@@ -343,6 +397,7 @@ struct Composer: View {
     var body: some View {
         GlassEffectContainer(spacing: 8) {
         HStack(alignment: .bottom, spacing: 8) {
+            if thread.isOtto {
             Menu {
                 Button("Camera", systemImage: "camera") { showCamera = true }
                     .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
@@ -353,6 +408,7 @@ struct Composer: View {
                     .glassEffect(.regular.interactive(), in: .circle)
             }
             .tint(.secondary)
+            }
 
             VStack(alignment: .leading, spacing: 0) {
                 if let m = replying, recorder.started == nil { replyBar(m) }
@@ -381,16 +437,18 @@ struct Composer: View {
                                 .frame(width: 36, height: 36)
                         }
                     } else {
-                        ComposerTextView(text: $draft, focused: $focused, placeholder: "Text Otto") { images in
+                        ComposerTextView(text: $draft, focused: $focused, placeholder: "Text \(thread.name)") { images in
                             withAnimation(.snappy) { attachments += images.map { Attachment(image: $0) } }
                         }
                         .transition(.opacity)
                         if !canSend {
+                            if thread.isOtto {
                             Button { Task { await recorder.start() } } label: {
                                 Image(systemName: "mic").frame(width: 36, height: 36)
                             }
                             .tint(.secondary)
                             .transition(.scale(scale: 0.6).combined(with: .opacity))
+                            }
                         } else {
                             Button(action: send) {
                                 Image(systemName: "arrow.up.circle.fill")
@@ -421,7 +479,7 @@ struct Composer: View {
         .onChange(of: attachments.count) { ui.relayout() }
         .onChange(of: recorder.started != nil) { ui.recording = recorder.started != nil; ui.relayout() }
         .onAppear { [recorder] in ui.level = { recorder.level() } }
-        .onChange(of: store.replyingTo) { if store.replyingTo != nil { focused = true }; ui.relayout() }
+        .onChange(of: thread.replyingTo) { if thread.replyingTo != nil { focused = true }; ui.relayout() }
         #if DEBUG
         // Layout checks without a keyboard or a server: `-growDraft` types, `-seedDraft`
         // fills the box, `-seedAttachments` adds two photos, `-keyboardDemo` loops focus,
@@ -466,18 +524,18 @@ struct Composer: View {
         }
     }
 
-    private var replying: Message? { store.replyingTo.flatMap { id in store.messages.first { $0.id == id } } }
+    private var replying: Message? { thread.replyingTo.flatMap { id in thread.messages.first { $0.id == id } } }
 
     /// What a swipe picked to answer, with an ✕ to drop it.
     private func replyBar(_ m: Message) -> some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(m.from == .me ? "Replying to yourself" : "Replying to Otto").font(.system(size: 12, weight: .semibold))
+                Text(m.from == .me ? "Replying to yourself" : "Replying to \(m.caption ?? thread.name)").font(.system(size: 12, weight: .semibold))
                 Text(m.text.isEmpty ? (m.image != nil ? "Photo" : "Voice message") : m.text)
                     .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
-            Button { withAnimation(.snappy) { store.replyingTo = nil } } label: {
+            Button { withAnimation(.snappy) { thread.replyingTo = nil } } label: {
                 Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(.secondary)
             }
         }
@@ -517,7 +575,7 @@ struct Composer: View {
         for (i, a) in photos.enumerated() {
             store.sendPhoto(a.image, caption: i == photos.count - 1 ? text : "")
         }
-        if photos.isEmpty { store.send(text) }
+        if photos.isEmpty { thread.send(text) }
         withAnimation(.snappy) { attachments = [] }
         draft = ""
     }
@@ -647,7 +705,7 @@ private struct TerminalLine: View {
 }
 
 private struct Row: View {
-    @Environment(OttoStore.self) private var store
+    let thread: any ChatThread
     let message: Message
     /// The message this one answers, shown small above the bubble.
     let quote: Message?
@@ -661,8 +719,20 @@ private struct Row: View {
     @State private var sharing: URL?
     @State private var whyShown = false
     @State private var preview: LPLinkMetadata?
+    /// A long crew message, opened past its first six lines.
+    @State private var expanded = false
+    private static let foldAt = 280
     @Environment(\.openURL) private var openURL
     private var mine: Bool { message.from == .me }
+
+    /// The text, after a crew hand-off's small grey "@Name", the way a mention reads.
+    private var text: AttributedString {
+        guard let to = message.mention else { return Self.linked(message.text) }
+        var at = AttributedString("@\(to) ")
+        at.font = .system(size: 14, weight: .medium)
+        at.foregroundColor = .secondary
+        return at + Self.linked(message.text)
+    }
 
     /// The text with its URLs marked as links (underlined, so they read on either bubble colour).
     /// A long one shows as its start and "…"; the link itself stays whole.
@@ -713,8 +783,16 @@ private struct Row: View {
                 VoiceRow(message: message, mine: mine)
                 if !mine, !message.text.isEmpty { Text(Self.linked(message.text)).font(.system(size: 13)).foregroundStyle(.secondary) }
             }
+        } else if !thread.isOtto && message.text.count > Self.foldAt {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(text).lineLimit(expanded ? nil : 6)
+                Button(expanded ? "Show less" : "Read more") { withAnimation(.snappy) { expanded.toggle() } }
+                    .font(.system(size: 15, weight: .semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(mine ? .white : .blue)
+            }
         } else {
-            Text(Self.linked(message.text))
+            Text(text)
         }
     }
 
@@ -750,6 +828,10 @@ private struct Row: View {
 
     var body: some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 6) {
+            // Who wrote it, in a crew thread, when it isn't the thread's own agent.
+            if let c = message.caption {
+                Text(c).font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, -4)
+            }
             if let quote {
                 Text(quote.text.isEmpty ? (quote.image != nil ? "Photo" : "Voice message") : quote.text)
                     .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
@@ -782,16 +864,16 @@ private struct Row: View {
                 .background(BubbleShape(mine: mine, tail: tail).fill(mine ? Color.blue : Color(.systemGray5)))
                 .contentShape(.contextMenuPreview, BubbleShape(mine: mine, tail: false))
                 // Double-tap: ❤️ straight away, no menu. Again takes it off.
-                .onTapGesture(count: 2) { store.react("❤️", on: message.id) }
+                .onTapGesture(count: 2) { thread.react("❤️", on: message.id) }
                 .sensoryFeedback(.impact(weight: .light), trigger: message.reaction)
                 .contextMenu {
                     // Palette: one row of emoji, like Messages. A plain ControlGroup caps at three
                     // across and stacks the rest down the menu.
                     ControlGroup {
-                        ForEach(Self.tapbacks, id: \.self) { e in Button(e) { store.react(e, on: message.id) } }
+                        ForEach(Self.tapbacks, id: \.self) { e in Button(e) { thread.react(e, on: message.id) } }
                     }
                     .controlGroupStyle(.palette)
-                    Button("Reply", systemImage: "arrowshape.turn.up.left") { store.replyingTo = message.id }
+                    Button("Reply", systemImage: "arrowshape.turn.up.left") { thread.replyingTo = message.id }
                     Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
                     Button("Select Text", systemImage: "selection.pin.in.out") { selecting = true }
                     if !mine, message.why != nil {
@@ -851,7 +933,10 @@ private struct Row: View {
                 .padding(.leading, 12)
             }
 
-            if message.pending == true {
+            if message.failed == true {
+                Text("Not delivered").font(.system(size: 11)).foregroundStyle(.red)
+                    .padding(.trailing, 4)
+            } else if message.pending == true {
                 Text("Sending…").font(.system(size: 11)).foregroundStyle(.secondary)
                     .padding(.trailing, 4)
             } else if let receipt {
@@ -889,7 +974,7 @@ private struct Row: View {
                     swipe = min(g.translation.width, Self.replyAt + 20)
                 }
                 .onEnded { _ in
-                    if swipe >= Self.replyAt { store.replyingTo = message.id }
+                    if swipe >= Self.replyAt { thread.replyingTo = message.id }
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { swipe = 0 }
                 }
         )
@@ -1410,7 +1495,11 @@ private struct ScreenGlow: View {
 /// drag-to-dismiss — SwiftUI's keyboard safe area jumps there instead.
 struct ChatScreen: UIViewControllerRepresentable {
     let store: OttoStore
-    func makeUIViewController(context: Context) -> KeyboardDock { KeyboardDock(store: store) }
+    /// A crew agent's id for its thread; nil is Otto's.
+    var agent: String? = nil
+    func makeUIViewController(context: Context) -> KeyboardDock {
+        KeyboardDock(store: store, thread: agent.map { CrewThread(store: store, id: $0) } ?? store)
+    }
     func updateUIViewController(_ vc: KeyboardDock, context: Context) {}
 }
 
@@ -1422,11 +1511,11 @@ final class KeyboardDock: UIViewController {
     private var composerHeight: NSLayoutConstraint!
     private var glowBottom: NSLayoutConstraint!
 
-    init(store: OttoStore) {
+    init(store: OttoStore, thread chat: any ChatThread) {
         let ui = ComposerUI()
         self.ui = ui
-        thread = UIHostingController(rootView: AnyView(ChatView(ui: ui).environment(store)))
-        composer = UIHostingController(rootView: AnyView(Composer(ui: ui).environment(store)))
+        thread = UIHostingController(rootView: AnyView(ChatView(ui: ui, thread: chat).environment(store)))
+        composer = UIHostingController(rootView: AnyView(Composer(ui: ui, thread: chat).environment(store)))
         glow = UIHostingController(rootView: AnyView(ScreenGlow(ui: ui)))
         super.init(nibName: nil, bundle: nil)
     }
