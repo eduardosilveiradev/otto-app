@@ -61,11 +61,8 @@ struct CrewThreadView: View {
         let mine = e.from == "user"
         let sameRun = prev?.kind == "message" && prev?.from == e.from
         VStack(alignment: mine ? .trailing : .leading, spacing: 2) {
-            if !mine, let from = e.from, !sameRun {
-                if from != id { caption(crewName(from)) }
-                else if let to = e.to, to != "user" { caption("to \(crewName(to))") }
-            }
-            Text(e.text ?? "")
+            if !mine, let from = e.from, from != id, !sameRun { caption(crewName(from)) }
+            Text(body(e))
                 .font(.system(size: 17))
                 .foregroundStyle(mine ? .white : .primary)
                 .padding(.horizontal, 12).padding(.vertical, 7)
@@ -77,6 +74,17 @@ struct CrewThreadView: View {
         }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         .padding(.top, sameRun ? 0 : 8)
+    }
+
+    /// Its own message to someone else opens with a small grey "@Name", the way a mention reads.
+    private func body(_ e: CrewEvent) -> AttributedString {
+        var text = AttributedString(e.text ?? "")
+        guard e.from == id, let to = e.to, to != "user" else { return text }
+        var at = AttributedString("@\(crewName(to).replacing(" ", with: "")) ")
+        at.font = .system(size: 14, weight: .medium)
+        at.foregroundColor = .secondary
+        text.insert(at, at: text.startIndex)
+        return text
     }
 
     private func caption(_ s: String) -> some View {
