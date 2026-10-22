@@ -5,6 +5,7 @@ struct CrewThreadView: View {
     let id: String
     @Environment(OttoStore.self) private var store
     @AppStorage("crewShowTools") private var showTools = false
+    @Environment(\.dismiss) private var dismiss
     @State private var draft = ""
     /// `-crewCard`: open on the contact card, for screenshots.
     @State private var card = ProcessInfo.processInfo.arguments.contains("-crewCard")
@@ -39,27 +40,10 @@ struct CrewThreadView: View {
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: list.count) { withAnimation(.snappy) { proxy.scrollTo("end", anchor: .bottom) } }
         }
-        .safeAreaInset(edge: .bottom) { composer }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Button { card = true } label: {
-                    VStack(spacing: 2) {
-                        if let agent { CrewAvatar(agent: agent, size: 40) }
-                        Text(crewName(id)).font(.system(size: 11, weight: .medium))
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Opens the contact card")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Toggle("Show tool calls", isOn: $showTools)
-                    Button("Stop", role: .destructive) { Task { await store.crew.stop(id) } }
-                        .disabled(agent?.status != "working")
-                } label: { Image(systemName: "ellipsis.circle") }
-            }
-        }
+        .safeAreaInset(edge: .top, spacing: 0) { header }
+        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        // Otto's own header and composer, not the system bar: every thread looks like his.
+        .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $card) { CrewContactCard(id: id) }
         .task {
             store.crew.open = id
@@ -116,23 +100,82 @@ struct CrewThreadView: View {
             .frame(maxWidth: .infinity).padding(.vertical, 6)
     }
 
-    private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message \(crewName(id))", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .padding(.horizontal, 14).padding(.vertical, 8)
-                .background(Capsule().fill(Color(.systemGray6)))
-            Button {
-                let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                draft = ""
-                Task { await store.crew.send(id, text: text) }
-            } label: {
-                Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
+    /// Mirrors Otto's header (ChatView): glass back and menu buttons, the face with a name pill under it.
+    private var header: some View {
+        ZStack {
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
+                        .frame(width: 40, height: 40)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .tint(.primary)
+                .accessibilityLabel("Messages")
+                Spacer()
+                Menu {
+                    Toggle("Show tool calls", isOn: $showTools)
+                    Button("Stop", role: .destructive) { Task { await store.crew.stop(id) } }
+                        .disabled(agent?.status != "working")
+                } label: {
+                    Image(systemName: "ellipsis").font(.system(size: 17))
+                        .frame(width: 40, height: 40)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .tint(.primary)
             }
-            .tint(.blue)
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button { card = true } label: {
+                VStack(spacing: 4) {
+                    if let agent { CrewAvatar(agent: agent, size: 56) }
+                    HStack(spacing: 3) {
+                        Text(crewName(id)).font(.system(size: 12, weight: .medium))
+                        Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                }
+            }
+            .tint(.primary)
+            .accessibilityHint("Opens the contact card")
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.bar)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 6)
+        .background(alignment: .top) {
+            LinearGradient(colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
+                           startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea(edges: .top)
+        }
+    }
+
+    private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// Otto's composer, minus photos and voice: the crew only takes text for now.
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 0) {
+            TextField("Text \(crewName(id))", text: $draft, axis: .vertical)
+                .font(.system(size: 17))
+                .lineLimit(1...6)
+                .padding(.leading, 14).padding(.vertical, 8)
+                .frame(minHeight: 36)
+            if canSend {
+                Button {
+                    let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    draft = ""
+                    Task { await store.crew.send(id, text: text) }
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 28))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, Color.blue)
+                        .frame(width: 36, height: 36)
+                }
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.22), value: canSend)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
     }
 }
