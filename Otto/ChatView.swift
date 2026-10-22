@@ -1139,11 +1139,12 @@ struct Typing: View {
             ThinkingOrb(state: !connected ? .connecting : Self.orb(for: status), size: .px20)
             // A status from before the drop would be stale; say what's actually happening.
             if let status = connected ? status : "Reconnecting…" {
+                // The same view, re-texted: each step rolls into the next letter by letter,
+                // the way the chat list's busy line does.
                 Text(status)
                     .font(.system(size: 14))
                     .fixedSize(horizontal: false, vertical: true)
-                    .contentTransition(.opacity)
-                    .id(status)
+                    .contentTransition(.numericText())
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
         }
