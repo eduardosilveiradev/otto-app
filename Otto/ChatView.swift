@@ -1233,13 +1233,15 @@ struct Typing: View {
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
         }
-        .animation(.snappy(duration: 0.25), value: status)
-        .animation(.snappy(duration: 0.25), value: connected)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14).padding(.vertical, 12)
         .background(BubbleShape(mine: false, tail: true).fill(Color(.systemGray5)))
         .padding(.trailing, 64)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Last, so the bubble behind the text is inside the animation too: it grows and
+        // shrinks with a longer or shorter step instead of jumping to the new size.
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: status)
+        .animation(.snappy(duration: 0.25), value: connected)
     }
 }
 
