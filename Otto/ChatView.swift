@@ -1221,7 +1221,7 @@ struct Typing: View {
     var body: some View {
         // Top-aligned so the orb stays on the first line when a long status wraps.
         HStack(alignment: .top, spacing: 8) {
-            ThinkingOrb(state: !connected ? .connecting : Self.orb(for: status), size: .px20)
+            MorphingOrb(state: !connected ? .connecting : Self.orb(for: status))
             // A status from before the drop would be stale; say what's actually happening.
             if let status = connected ? status : "Reconnecting…" {
                 // The same view, re-texted: each step rolls into the next letter by letter,
