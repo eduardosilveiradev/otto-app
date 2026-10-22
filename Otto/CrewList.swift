@@ -20,6 +20,10 @@ struct CrewRoot: View {
                     }
                 }
         }
+        #if DEBUG
+        // `-crewMoods`: every role in every mood, for screenshots.
+        .overlay { if ProcessInfo.processInfo.arguments.contains("-crewMoods") { MoodGallery() } }
+        #endif
         .onChange(of: path, initial: true) { _, p in
             store.crew.back = p.contains(.otto) ? { path.removeAll() } : nil
         }
@@ -115,20 +119,12 @@ func shortWhen(_ d: Date) -> String {
     return d.formatted(date: .numeric, time: .omitted)
 }
 
-/// The role's symbol in a muted disc, with the status dot ringed onto its corner.
+/// The role's mascot, its face following the agent's status, with the status dot ringed onto its corner.
+/// A run that finishes gets a couple of seconds of happy before it settles.
 struct CrewAvatar: View {
     let agent: CrewAgent
     let size: CGFloat
-
-    private var symbol: String {
-        switch agent.role {
-        case "pm": "person.badge.key"
-        case "planner": "list.bullet.rectangle"
-        case "designer": "paintbrush"
-        case "writer": "hammer"
-        default: "magnifyingglass"
-        }
-    }
+    @State private var cheer = false
 
     static func color(_ status: String) -> Color {
         switch status {
@@ -140,9 +136,8 @@ struct CrewAvatar: View {
     }
 
     var body: some View {
-        Circle().fill(Color(.systemGray5))
-            .frame(width: size, height: size)
-            .overlay(Image(systemName: symbol).font(.system(size: size * 0.4)).foregroundStyle(.secondary))
+        CrewMascot(role: agent.role, index: Int(agent.id.split(separator: "-").last ?? "") ?? 1,
+                   mood: cheer ? .happy : .init(status: agent.status), size: size)
             .overlay(alignment: .bottomTrailing) {
                 let dot = max(10, size * 0.25)
                 Circle().fill(Self.color(agent.status))
@@ -150,6 +145,33 @@ struct CrewAvatar: View {
                     .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
                     .offset(x: 1, y: 1)
             }
+            .onChange(of: agent.status) { old, new in
+                guard old == "working", new == "idle" else { return }
+                cheer = true
+                Task { try? await Task.sleep(for: .seconds(2.5)); cheer = false }
+            }
+            .accessibilityElement()
             .accessibilityLabel("\(agent.name), \(agent.status)")
     }
 }
+
+#if DEBUG
+private struct MoodGallery: View {
+    var body: some View {
+        Grid(horizontalSpacing: 14, verticalSpacing: 18) {
+            GridRow {
+                Color.clear.frame(width: 1, height: 1)
+                ForEach(CrewMascot.Mood.allCases, id: \.self) { Text($0.rawValue).font(.caption2).foregroundStyle(.secondary) }
+            }
+            ForEach(["pm", "planner", "designer", "writer", "reviewer"], id: \.self) { role in
+                GridRow {
+                    Text(role).font(.caption2).foregroundStyle(.secondary)
+                    ForEach(CrewMascot.Mood.allCases, id: \.self) { CrewMascot(role: role, mood: $0, size: 52) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
+    }
+}
+#endif

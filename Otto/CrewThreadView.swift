@@ -6,6 +6,8 @@ struct CrewThreadView: View {
     @Environment(OttoStore.self) private var store
     @AppStorage("crewShowTools") private var showTools = false
     @State private var draft = ""
+    /// `-crewCard`: open on the contact card, for screenshots.
+    @State private var card = ProcessInfo.processInfo.arguments.contains("-crewCard")
 
     private var agent: CrewAgent? { store.crew.agents.first { $0.id == id } }
     private var events: [CrewEvent] {
@@ -41,10 +43,14 @@ struct CrewThreadView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                VStack(spacing: 2) {
-                    if let agent { CrewAvatar(agent: agent, size: 40) }
-                    Text(crewName(id)).font(.system(size: 11, weight: .medium))
+                Button { card = true } label: {
+                    VStack(spacing: 2) {
+                        if let agent { CrewAvatar(agent: agent, size: 40) }
+                        Text(crewName(id)).font(.system(size: 11, weight: .medium))
+                    }
                 }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens the contact card")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -54,6 +60,7 @@ struct CrewThreadView: View {
                 } label: { Image(systemName: "ellipsis.circle") }
             }
         }
+        .sheet(isPresented: $card) { CrewContactCard(id: id) }
         .task {
             store.crew.open = id
             await store.crew.load(id)
