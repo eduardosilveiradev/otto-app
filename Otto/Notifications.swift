@@ -105,6 +105,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             Task { @MainActor in OttoStore.shared.send(text); done() }
             return
         }
+        // A tap on the banner opens the thread it belongs to: an agent's for crew:<id>, Otto's for the
+        // rest. Held on the store like a Bark link, since a cold launch has no chat list to push yet.
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            let thread = response.notification.request.content.threadIdentifier
+            Task { @MainActor in
+                OttoStore.shared.crew.pendingThread = thread.hasPrefix("crew:") ? .agent(String(thread.dropFirst(5))) : .otto
+                done()
+            }
+            return
+        }
         done()
     }
 
