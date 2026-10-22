@@ -23,10 +23,14 @@ struct OttoApp: App {
 private struct MainRoot: View {
     @State private var store = OttoStore.shared
     @Environment(\.scenePhase) private var phase
+    /// Offline at launch: stop waiting on the roster and open the single chat, as before.
+    @State private var gaveUp = false
 
     var body: some View {
         Group {
-            if store.crew.hasCrew {
+            if !store.crew.known && !gaveUp {
+                Connecting().task { try? await Task.sleep(for: .seconds(6)); gaveUp = true }
+            } else if store.crew.hasCrew {
                 CrewRoot(store: store)
             } else {
                 ChatScreen(store: store).ignoresSafeArea(.keyboard)
@@ -41,6 +45,18 @@ private struct MainRoot: View {
                 Grace.update(background: p == .background)
                 Keepalive.update(background: p == .background)
             }
+    }
+}
+
+/// Until the server says whether it runs a crew, neither the single chat nor the list is right.
+private struct Connecting: View {
+    var body: some View {
+        VStack(spacing: 14) {
+            OttoAvatar(size: 72, thinking: true)
+            Text("Connecting…").font(.footnote).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
     }
 }
 
@@ -182,7 +198,10 @@ final class OttoStore {
                 Task { await resendPending() }
                 Task { await reportHealth("connect") }
             }
-            if live != connected { connected = live }
+            if live != connected {
+                connected = live
+                if live { Task { await crew.settle() } }
+            }
             if !live != asleep { asleep = !live }
             try? await Task.sleep(for: .seconds(1))
         }

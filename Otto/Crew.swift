@@ -74,6 +74,8 @@ final class CrewStore {
     @ObservationIgnored private var foreground: () -> Bool = { true }
 
     var hasCrew: Bool { !agents.isEmpty }
+    /// Whether the server's answer on running a crew is in yet; until then the root can't pick a layout.
+    var known = false
 
     /// Messages newer than the last time the thread was open, not yours.
     func unread(_ id: String) -> Int {
@@ -94,16 +96,26 @@ final class CrewStore {
         Task {
             for await a in backend.crewAgents {
                 agents = a
+                known = true
                 for x in a where Self.stale(x, threads[x.id]) { await load(x.id, notify: true) }
             }
         }
         Task { for await e in backend.crewEvents { append(e, foreground: foreground()) } }
-        agents = await backend.crew() ?? []
+        let roster = await backend.crew()
+        agents = roster ?? []
+        if roster != nil || backend is MockBackend { known = true }
         // Unread counts need every thread, not just the one opened.
         for a in agents { await load(a.id) }
     }
 
-    func refresh() async { if let a = await backend?.crew() { agents = a } }
+    func refresh() async { if let a = await backend?.crew() { agents = a; known = true } }
+
+    /// Asked once the socket is up: no roster from a connected server means it runs no crew.
+    func settle() async {
+        guard !known else { return }
+        await refresh()
+        known = true
+    }
 
     private func append(_ e: CrewEvent, foreground: Bool) {
         guard !(threads[e.agent] ?? []).contains(where: { $0.key == e.key }) else { return }
