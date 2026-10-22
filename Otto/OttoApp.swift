@@ -2,25 +2,40 @@ import SwiftUI
 
 @main
 struct OttoApp: App {
-    @State private var store = OttoStore.shared
-    @Environment(\.scenePhase) private var phase
+    /// Already paired means already set up: an install from before onboarding existed skips it.
+    @AppStorage("onboarded") private var onboarded = UserDefaults.standard.string(forKey: "serverURL")?.isEmpty == false
 
-    init() { Notifier.shared.register() }   // the background task must be registered before launch ends
+    init() {
+        Notifier.shared.register()   // the background task must be registered before launch ends
+        #if DEBUG
+        if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
+        #endif
+    }
 
     var body: some Scene {
         WindowGroup {
-            ChatScreen(store: store)
+            // The store is made only once onboarding is over, so it starts on the server just paired.
+            if onboarded { MainRoot() } else { OnboardingFlow { withAnimation { onboarded = true } } }
+        }
+    }
+}
+
+private struct MainRoot: View {
+    @State private var store = OttoStore.shared
+    @Environment(\.scenePhase) private var phase
+
+    var body: some View {
+        ChatScreen(store: store)
             .ignoresSafeArea(.keyboard)
             .environment(store)
             .task { Notifier.shared.requestPermission(); await store.start() }
-        }
-        .onChange(of: phase) { _, p in
-            store.foreground = p == .active
-            if p == .active { store.sendShared() }
-            if p == .background { store.flush(); Notifier.scheduleRefresh() }
-            Grace.update(background: p == .background)
-            Keepalive.update(background: p == .background)
-        }
+            .onChange(of: phase, initial: true) { _, p in
+                store.foreground = p == .active
+                if p == .active { store.sendShared() }
+                if p == .background { store.flush(); Notifier.scheduleRefresh() }
+                Grace.update(background: p == .background)
+                Keepalive.update(background: p == .background)
+            }
     }
 }
 

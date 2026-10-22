@@ -48,8 +48,10 @@ handy for poking at the UI.
 1. Open `Otto.xcodeproj`, pick your own team under Signing & Capabilities,
    and change the bundle identifier (`dev.otto.app`) to one you own.
 2. Run it on your phone.
-3. Tap Otto's name, then enter the server URL (for example
-   `https://your-mac.your-tailnet.ts.net`) and the token.
+3. The first launch walks you through setup. To pair, run
+   `bun otto/apptokens.ts new iPhone --server https://your-mac.your-tailnet.ts.net`
+   on the server and scan the QR code it opens (or paste its `otto://pair` link,
+   or type the URL and token in). Later changes go in Otto's contact card.
 
 Optional, also in the contact card: a phone number for Otto's line. In-app
 calls need a Vapi public key and assistant id, which have no settings screen
