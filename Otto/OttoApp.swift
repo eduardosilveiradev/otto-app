@@ -25,8 +25,13 @@ private struct MainRoot: View {
     @Environment(\.scenePhase) private var phase
 
     var body: some View {
-        ChatScreen(store: store)
-            .ignoresSafeArea(.keyboard)
+        Group {
+            if store.crew.hasCrew {
+                CrewRoot(store: store)
+            } else {
+                ChatScreen(store: store).ignoresSafeArea(.keyboard)
+            }
+        }
             .environment(store)
             .task { Notifier.shared.requestPermission(); await store.start() }
             .onChange(of: phase, initial: true) { _, p in
@@ -46,6 +51,8 @@ final class OttoStore {
     static let shared = OttoStore(backend: LiveBackend.fromDefaults() ?? MockBackend())
 
     let backend: OttoBackend
+    /// The specialist agents behind Otto; empty (and invisible) unless the server runs a crew.
+    let crew = CrewStore()
     /// While false, Otto's messages also go out as local notifications.
     var foreground = true
     var messages: [Message] = [] { didSet { save() } }
@@ -215,6 +222,9 @@ final class OttoStore {
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
         if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift" }
         #endif
+        let crew = crew, backend = backend
+        let isFront = { [weak self] in self?.foreground ?? true }
+        Task { await crew.start(backend, foreground: isFront) }
         // Anything the server has that's newer than what's saved here, e.g. replies
         // that landed while the app was closed.
         // The mock's canned thread is only a seed for an empty chat.

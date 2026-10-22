@@ -240,6 +240,16 @@ struct ChatView: View {
     private var header: some View {
         ZStack {
             HStack {
+                // Only with a crew: Otto's thread is then one pushed screen of the chat list.
+                if store.crew.hasCrew, let back = store.crew.back {
+                    Button(action: back) {
+                        Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
+                            .frame(width: 40, height: 40)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                    }
+                    .tint(.primary)
+                    .accessibilityLabel("Messages")
+                }
                 if let u = store.update, let link = Self.sideStoreInstall(u.ipa) {
                     // SideStore downloads, re-signs and installs; it asks before replacing the app.
                     Button { openURL(link) } label: {
@@ -606,7 +616,7 @@ final class PastingTextView: UITextView {
 
 // MARK: - Pieces (Unchanged)
 
-private struct Stamp: View {
+struct Stamp: View {
     let date: Date
     var body: some View {
         let day = Calendar.current.isDateInToday(date) ? "Today" : date.formatted(.dateTime.weekday(.wide))
@@ -1068,7 +1078,7 @@ private struct VoiceRow: View {
 }
 
 /// Rounded bubble; the last one in a run gets a tail curling out of its bottom corner.
-private struct BubbleShape: Shape {
+struct BubbleShape: Shape {
     let mine: Bool
     let tail: Bool
 
