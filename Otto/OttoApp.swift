@@ -50,7 +50,7 @@ private struct MainRoot: View {
                 // Offline there is nothing loaded to show off: just fade to the single chat.
                 if store.crew.known {
                     withAnimation(.easeInOut(duration: 0.25)) { splash = .loaded }
-                    try? await Task.sleep(for: .seconds(0.7))
+                    try? await Task.sleep(for: .seconds(1.4))   // the 0.9s morph, then the still globe for a beat
                 }
                 withAnimation(.easeOut(duration: 0.4)) { splash = .gone }
             }
@@ -74,15 +74,8 @@ private struct Connecting: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            ZStack {
-                if loaded {
-                    ThinkingOrb(state: .searching, size: .px64, paused: true, displaySize: 96)
-                        .transition(.opacity)
-                } else {
-                    ThinkingOrb(state: .connecting, size: .px64, displaySize: 96)
-                        .transition(.opacity)
-                }
-            }
+            // The reconnecting web draws in and the globe blooms out of it, then holds still.
+            MorphingOrb(state: loaded ? .searching : .connecting, size: .px64, morph: 0.9, paused: loaded, displaySize: 96)
             Text("Connecting…").font(.footnote).foregroundStyle(.secondary)
                 .opacity(loaded ? 0 : 1)
         }

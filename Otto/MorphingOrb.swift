@@ -10,6 +10,10 @@ struct MorphingOrb: View {
     let state: OrbState
     var size: OrbSize = .px20
     var morph: Double = 0.9
+    /// Hold the current state on one still frame (the one reduced motion shows); a state on its way out keeps moving.
+    var paused = false
+    /// Draw at this point size from the `size` preset's geometry, scaled inside the canvas so it stays crisp.
+    var displaySize: Double?
 
     @State private var from: OrbState?
     @State private var shown: OrbState
@@ -18,28 +22,31 @@ struct MorphingOrb: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(state: OrbState, size: OrbSize = .px20, morph: Double = 0.9) {
+    init(state: OrbState, size: OrbSize = .px20, morph: Double = 0.9, paused: Bool = false, displaySize: Double? = nil) {
         self.state = state
         self.size = size
         self.morph = morph
+        self.paused = paused
+        self.displaySize = displaySize
         _shown = State(initialValue: state)
     }
 
     var body: some View {
-        let side = Double(size.rawValue)
+        let side = displaySize ?? Double(size.rawValue)
         Group {
             if reduceMotion {
-                ThinkingOrb(state: state, size: size)
+                ThinkingOrb(state: state, size: size, paused: paused, displaySize: displaySize)
             } else {
                 TimelineView(.animation) { timeline in
                     let now = timeline.date
                     Canvas(rendersAsynchronously: false) { context, _ in
+                        if side != Double(size.rawValue) { context.scaleBy(x: side / Double(size.rawValue), y: side / Double(size.rawValue)) }
                         let u = now.timeIntervalSince(since) / morph
                         if let from, u < 1 {
                             draw(condense(frame(from, now), k: ease(u / 0.55), alpha: 1 - ease((u - 0.4) / 0.25)), in: &context)
-                            draw(condense(frame(shown, now), k: 1 - ease((u - 0.45) / 0.55), alpha: ease((u - 0.35) / 0.25)), in: &context)
+                            draw(condense(frame(shown, now, still: paused), k: 1 - ease((u - 0.45) / 0.55), alpha: ease((u - 0.35) / 0.25)), in: &context)
                         } else {
-                            draw(frame(shown, now), in: &context)
+                            draw(frame(shown, now, still: paused), in: &context)
                         }
                     }
                 }
@@ -56,9 +63,10 @@ struct MorphingOrb: View {
         .accessibilityAddTraits(.isImage)
     }
 
-    private func frame(_ s: OrbState, _ date: Date) -> OrbFrame {
+    /// `still`: the package's reduced-motion instant (0.6s in), so a held state matches the one it shows.
+    private func frame(_ s: OrbState, _ date: Date, still: Bool = false) -> OrbFrame {
         let preset = resolvePreset(s, size)
-        return orbFrame(preset, size: Double(size.rawValue), t: date.timeIntervalSinceReferenceDate * preset.speed)
+        return orbFrame(preset, size: Double(size.rawValue), t: (still ? 0.6 : date.timeIntervalSinceReferenceDate) * preset.speed)
     }
 
     /// Pull every mark toward the ring (k 0 untouched, 1 on it) and scale its opacity.
