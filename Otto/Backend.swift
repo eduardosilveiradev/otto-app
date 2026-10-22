@@ -372,7 +372,7 @@ final class MockBackend: OttoBackend {
         // id, role, status, last line's sender, last line, minutes ago
         let rows: [(String, String, String, String?, String?, Double)] = [
             ("pm", "pm", "idle", nil, nil, 0),
-            ("planner", "planner", "waiting", "planner", "3 tickets assigned: launcher, message tool, app protocol", 95),
+            ("planner", "planner", "waiting", "planner", "Ticket docs/tickets/crew-launcher.md is yours; repo ../otto-core, branch crew/crew-launcher", 38),
             ("designer", "designer", "idle", nil, nil, 0),
             ("writer-1", "writer", "working", "planner", "Ticket docs/tickets/crew-launcher.md is yours; repo ../otto-core, branch crew/crew-launcher", 38),
             ("writer-2", "writer", "waiting", "writer-2", "Ready for review: .crew/crew-mcp, branch crew/crew-mcp, 14 tests green", 12),
@@ -411,12 +411,15 @@ final class MockBackend: OttoBackend {
         // You asking writer-1 for an update, so the overview has a message of yours.
         crewThreads["writer-1", default: []].append(Self.crewEvent("writer-1", "m-user-writer-1-22", 22, "message", from: "user", to: "writer-1",
                                                                   text: "Tell me when the launcher tests pass."))
-        // The other end of every agent-to-agent message gets the same event.
+        // The other end of every agent-to-agent message gets the same event: id, text and ts. The sender's copy wins.
+        var canon: [String: CrewEvent] = [:]
         for (id, events) in crewThreads {
-            for e in events where e.kind == "message" {
-                guard let other = e.from == id ? e.to : e.from, other != id, crewThreads[other] != nil,
-                      !crewThreads[other]!.contains(where: { $0.id == e.id }) else { continue }
-                crewThreads[other]!.append(CrewEvent(id: e.id, agent: other, kind: e.kind, ts: e.ts, from: e.from, to: e.to, text: e.text,
+            for e in events where e.kind == "message" && (canon[e.id] == nil || e.from == id) { canon[e.id] = e }
+        }
+        for e in canon.values {
+            for party in Set([e.from, e.to].compactMap { $0 }) where crewThreads[party] != nil {
+                crewThreads[party]!.removeAll { $0.id == e.id }
+                crewThreads[party]!.append(CrewEvent(id: e.id, agent: party, kind: e.kind, ts: e.ts, from: e.from, to: e.to, text: e.text,
                                                      tool: nil, summary: nil, status: nil, note: nil))
             }
         }
