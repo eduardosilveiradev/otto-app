@@ -216,6 +216,16 @@ final class OttoStore {
         try? JSONEncoder().encode(messages).write(to: file, options: .atomic)
     }
 
+    /// A reply whose voice never came (the server restarted mid-synthesis, so neither the frame nor
+    /// history will ever carry it) stops waiting after 90s and stays as plain text.
+    private func expireVoiceWaits() {
+        let cutoff = Date().addingTimeInterval(-90)
+        for i in messages.indices where messages[i].from == .otto && messages[i].isVoice
+            && messages[i].audio == nil && messages[i].date < cutoff {
+            messages[i].isVoice = false
+        }
+    }
+
     /// isLive isn't observable, so re-read it every second.
     private func tick() async {
         var seen = backend.connections
@@ -232,6 +242,7 @@ final class OttoStore {
                 Task { await resendPending() }
                 Task { await reportHealth("connect") }
             }
+            expireVoiceWaits()
             if live != connected {
                 connected = live
                 if live { Task { await crew.settle() } }
@@ -459,7 +470,15 @@ final class OttoStore {
     private func catchUp(notify: Bool, background: Bool = false) async {
         guard !(backend is MockBackend) else { return }
         let last = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
-        let fresh = unseen(await backend.history(background: background).filter { $0.from != .me }, after: last)
+        let history = await backend.history(background: background).filter { $0.from != .me }
+        // A reply that came as text with its voice to follow: the "voice" frame may have gone into a
+        // socket iOS had frozen, and history carries the clip, so fill the waiting bar from it.
+        for h in history where h.audio != nil {
+            if let i = messages.firstIndex(where: { $0.wireID == h.wireID && $0.isVoice && $0.audio == nil }) {
+                messages[i].audio = h.audio
+            }
+        }
+        let fresh = unseen(history, after: last)
         guard !fresh.isEmpty else { return }
         if !serverTyping && fresh.contains(where: { $0.from == .otto }) { ottoTyping = false }
         messages += fresh
