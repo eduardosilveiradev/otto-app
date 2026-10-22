@@ -56,6 +56,7 @@ final class CrewStore {
     var back: (() -> Void)?
     private var seen: [String: String] = [:]
     @ObservationIgnored private var backend: OttoBackend?
+    @ObservationIgnored private var foreground: () -> Bool = { true }
 
     var hasCrew: Bool { !agents.isEmpty }
 
@@ -73,7 +74,14 @@ final class CrewStore {
 
     func start(_ backend: OttoBackend, foreground: @escaping () -> Bool) async {
         self.backend = backend
-        Task { for await a in backend.crewAgents { agents = a } }
+        self.foreground = foreground
+        // Every socket open sends a snapshot; frames sent while it was down are gone, so refetch the stale threads.
+        Task {
+            for await a in backend.crewAgents {
+                agents = a
+                for x in a where Self.stale(x, threads[x.id]) { await load(x.id, notify: true) }
+            }
+        }
         Task { for await e in backend.crewEvents { append(e, foreground: foreground()) } }
         agents = await backend.crew() ?? []
         // Unread counts need every thread, not just the one opened.
@@ -91,11 +99,25 @@ final class CrewStore {
         }
     }
 
-    func load(_ id: String) async {
+    /// The roster's last line is newer than anything the thread holds.
+    private static func stale(_ a: CrewAgent, _ thread: [CrewEvent]?) -> Bool {
+        guard let at = a.lastAt else { return false }
+        return at > (thread?.map(\.ts).max() ?? "")
+    }
+
+    /// `notify`: a refetch after a gap. Only for a thread already held, so a first load never replays old history.
+    func load(_ id: String, notify: Bool = false) async {
         guard let rows = await backend?.crewHistory(id, limit: 200) else { return }
+        let held = !(threads[id] ?? []).isEmpty
+        let mark = seen[id] ?? UserDefaults.standard.string(forKey: "crewSeen.\(id)") ?? ""
         var have = Set((threads[id] ?? []).map(\.key))
         var all = threads[id] ?? []
-        for e in rows where have.insert(e.key).inserted { all.append(e) }
+        for e in rows where have.insert(e.key).inserted {
+            all.append(e)
+            if notify, held, e.kind == "message", e.from == id, e.ts > mark, open != id || !foreground() {
+                Notifier.shared.post(title: crewName(id), body: e.text ?? "", thread: "crew:\(id)", id: "crew/\(e.id)")
+            }
+        }
         threads[id] = all.sorted { $0.ts < $1.ts }
     }
 

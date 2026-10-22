@@ -15,14 +15,25 @@ struct CrewRoot: View {
                         ChatScreen(store: store)
                             .ignoresSafeArea(.keyboard)
                             .toolbar(.hidden, for: .navigationBar)
-                            .onAppear { store.crew.back = { path.removeAll() } }
-                            .onDisappear { store.crew.back = nil }
                     case .agent(let id):
                         CrewThreadView(id: id)
                     }
                 }
         }
+        .onChange(of: path, initial: true) { _, p in
+            store.crew.back = p.contains(.otto) ? { path.removeAll() } : nil
+        }
     }
+}
+
+// Hiding the bar drops the edge-swipe pop; restore it for every stack.
+extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
+    override open func viewDidLoad() {
+        super.viewDidLoad()
+        interactivePopGestureRecognizer?.delegate = self
+    }
+
+    public func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool { viewControllers.count > 1 }
 }
 
 struct ChatListView: View {
