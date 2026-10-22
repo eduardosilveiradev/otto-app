@@ -159,6 +159,13 @@ protocol OttoBackend: AnyObject {
     func gate() async -> GateReply?
     /// The passport page (`/app/stamps`); nil when the Mac didn't answer.
     func stamps() async -> StampsReply?
+    /// The crew (docs/crew-protocol.md). Nil from `crew()` means the server runs none.
+    var crewAgents: AsyncStream<[CrewAgent]> { get }
+    var crewEvents: AsyncStream<CrewEvent> { get }
+    func crew() async -> [CrewAgent]?
+    func crewHistory(_ id: String, limit: Int) async -> [CrewEvent]?
+    func crewSend(_ id: String, text: String, clientID: String) async -> CrewEvent?
+    func crewStop(_ id: String) async -> CrewAgent?
 }
 
 extension OttoBackend {
@@ -174,6 +181,12 @@ extension OttoBackend {
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
     func decide(approval id: String, approve: Bool) async {}
+    var crewAgents: AsyncStream<[CrewAgent]> { AsyncStream { _ in } }
+    var crewEvents: AsyncStream<CrewEvent> { AsyncStream { _ in } }
+    func crew() async -> [CrewAgent]? { nil }
+    func crewHistory(_ id: String, limit: Int) async -> [CrewEvent]? { nil }
+    func crewSend(_ id: String, text: String, clientID: String) async -> CrewEvent? { nil }
+    func crewStop(_ id: String) async -> CrewAgent? { nil }
 }
 
 /// One switch on the Mac's settings page; `section` is otto, recurring or connectors.
@@ -202,7 +215,18 @@ final class MockBackend: OttoBackend {
     let reads = AsyncStream<[String]> { _ in }
     private let out: AsyncStream<Message>.Continuation
 
-    init() { (incoming, out) = AsyncStream.makeStream() }
+    let crewAgents: AsyncStream<[CrewAgent]>
+    let crewEvents: AsyncStream<CrewEvent>
+    private let crewAgentsOut: AsyncStream<[CrewAgent]>.Continuation
+    private let crewEventsOut: AsyncStream<CrewEvent>.Continuation
+    private var roster: [CrewAgent] = []
+    private var crewThreads: [String: [CrewEvent]] = [:]
+
+    init() {
+        (incoming, out) = AsyncStream.makeStream()
+        (crewAgents, crewAgentsOut) = AsyncStream.makeStream()
+        (crewEvents, crewEventsOut) = AsyncStream.makeStream()
+    }
 
     func react(to id: String, emoji: String) async {}
     func file(_ id: String) async -> Data? { nil }
@@ -287,5 +311,101 @@ final class MockBackend: OttoBackend {
             triggers: [Trigger(title: "Morning brief", next: cal.date(byAdding: .day, value: 1, to: today(8, 57))!),
                        Trigger(title: "Bill reminder", next: cal.date(byAdding: .day, value: 1, to: today(9))!)]
         )
+    }
+
+    // MARK: Crew sample data, only with `-crew` (or `-crewThread <id>`)
+
+    private var crewOn: Bool {
+        ProcessInfo.processInfo.arguments.contains("-crew") || UserDefaults.standard.string(forKey: "crewThread") != nil
+    }
+
+    func crew() async -> [CrewAgent]? {
+        guard crewOn else { return nil }
+        if roster.isEmpty { seedCrew() }
+        return roster
+    }
+
+    func crewHistory(_ id: String, limit: Int) async -> [CrewEvent]? {
+        guard crewOn else { return nil }
+        if roster.isEmpty { seedCrew() }
+        return crewThreads[id]
+    }
+
+    func crewSend(_ id: String, text: String, clientID: String) async -> CrewEvent? {
+        guard crewOn else { return nil }
+        try? await Task.sleep(for: .milliseconds(300))
+        let echo = Self.crewEvent(id, clientID, 0, "message", from: "user", to: id, text: text)
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            crewEventsOut.yield(Self.crewEvent(id, String(UUID().uuidString.lowercased().prefix(8)), 0, "message", from: id, to: "user",
+                                               text: "(mock) on it — I'll report when the tests are green."))
+            setStatus(id, "working")
+            crewAgentsOut.yield(roster)
+        }
+        return echo
+    }
+
+    func crewStop(_ id: String) async -> CrewAgent? {
+        guard crewOn else { return nil }
+        setStatus(id, "idle")
+        return roster.first { $0.id == id }
+    }
+
+    private func setStatus(_ id: String, _ status: String) {
+        guard let i = roster.firstIndex(where: { $0.id == id }) else { return }
+        let a = roster[i]
+        roster[i] = CrewAgent(id: a.id, role: a.role, name: a.name, status: status, lastLine: a.lastLine, lastFrom: a.lastFrom, lastAt: a.lastAt)
+    }
+
+    private static func crewEvent(_ agent: String, _ id: String, _ minutesAgo: Double, _ kind: String, from: String? = nil, to: String? = nil,
+                                  text: String? = nil, tool: String? = nil, summary: String? = nil, status: String? = nil, note: String? = nil) -> CrewEvent {
+        CrewEvent(id: id, agent: agent, kind: kind, ts: iso(minutesAgo), from: from, to: to, text: text, tool: tool, summary: summary, status: status, note: note)
+    }
+
+    private static func iso(_ minutesAgo: Double) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.string(from: Date().addingTimeInterval(-minutesAgo * 60))
+    }
+
+    private func seedCrew() {
+        // id, role, status, last line's sender, last line, minutes ago
+        let rows: [(String, String, String, String?, String?, Double)] = [
+            ("pm", "pm", "idle", nil, nil, 0),
+            ("planner", "planner", "waiting", "planner", "3 tickets assigned: launcher, message tool, app protocol", 95),
+            ("designer", "designer", "idle", nil, nil, 0),
+            ("writer-1", "writer", "working", "planner", "Ticket docs/tickets/crew-launcher.md is yours; repo ../otto-core, branch crew/crew-launcher", 38),
+            ("writer-2", "writer", "waiting", "writer-2", "Ready for review: .crew/crew-mcp, branch crew/crew-mcp, 14 tests green", 12),
+            ("writer-3", "writer", "idle", nil, nil, 0),
+            ("reviewer-1", "reviewer", "error", "writer-2", "Ready for review: .crew/crew-mcp, branch crew/crew-mcp, 14 tests green", 7),
+        ]
+        roster = rows.map { CrewAgent(id: $0.0, role: $0.1, name: crewName($0.0), status: $0.2, lastLine: $0.4, lastFrom: $0.3, lastAt: $0.4 == nil ? nil : Self.iso($0.5)) }
+        let next = ["planner": "writer-1", "writer-1": "reviewer-1", "writer-2": "reviewer-1"]
+        for (id, _, status, from, line, ago) in rows {
+            func e(_ n: Int, _ m: Double, _ kind: String, from: String? = nil, to: String? = nil, text: String? = nil,
+                   tool: String? = nil, summary: String? = nil, status: String? = nil, note: String? = nil) -> CrewEvent {
+                Self.crewEvent(id, "\(id.prefix(2))\(String(format: "%06x", n))", m, kind, from: from, to: to, text: text, tool: tool, summary: summary, status: status, note: note)
+            }
+            guard let line else {
+                crewThreads[id] = [e(1, 120, "status", status: "idle")]
+                continue
+            }
+            var ev = [e(1, 118, "status", status: "working", note: "run 1")]
+            ev.append(from == id ? e(2, 117, "message", from: id == "planner" ? "otto" : "planner", to: id, text: "Take docs/tickets/\(id).md and report when it is ready for review.")
+                                 : e(2, ago, "message", from: from, to: id, text: line))
+            if id != "reviewer-1" {
+                ev += [e(3, 116, "tool", tool: "Read", summary: "docs/crew-spec.md"),
+                       e(4, 115, "tool", tool: "Glob", summary: "**/*.test.ts"),
+                       e(5, 110, "tool", tool: "Edit", summary: "otto/crew.ts"),
+                       e(6, 104, "tool", tool: "Bash", summary: "bun test"),
+                       e(7, 100, "tool", tool: "Edit", summary: "otto/tests/crew.test.ts"),
+                       e(8, 96, "tool", tool: "Bash", summary: "bun test otto/tests/crew.test.ts")]
+                ev.append(e(9, from == id ? ago : 30, "message", from: id, to: next[id] ?? "pm",
+                            text: from == id ? line : "Starting on it: otto/crew.ts first, then tests. I'll tell reviewer-1 when they pass."))
+            }
+            ev.append(id == "reviewer-1" ? e(10, 6, "status", status: "error", note: "crashed twice (exit 1)")
+                                         : e(10, 5, "status", status: status, note: status == "working" ? "run 1" : nil))
+            crewThreads[id] = ev
+        }
     }
 }

@@ -15,6 +15,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let refreshTask = "dev.otto.app.refresh"
     private static let category = "OTTO_MESSAGE"
     private static let replyAction = "OTTO_REPLY"
+    /// A crew agent's message: no inline Reply, which would land in Otto's thread.
+    private static let crewCategory = "OTTO_CREW"
 
     /// Before launch finishes: notification delegate + reply action, background task handler.
     func register() {
@@ -23,8 +25,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // Unlock first: a "yes" typed on a locked phone can approve a draft or an install.
         let reply = UNTextInputNotificationAction(identifier: Self.replyAction, title: "Reply", options: [.authenticationRequired],
                                                   textInputButtonTitle: "Send", textInputPlaceholder: "Message Otto")
-        center.setNotificationCategories([UNNotificationCategory(identifier: Self.category, actions: [reply],
-                                                                 intentIdentifiers: [], options: [])])
+        center.setNotificationCategories([UNNotificationCategory(identifier: Self.category, actions: [reply], intentIdentifiers: [], options: []),
+                                          UNNotificationCategory(identifier: Self.crewCategory, actions: [], intentIdentifiers: [], options: [])])
 
         BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.refreshTask, using: nil) { task in
             Self.scheduleRefresh()   // chain the next wake-up first
@@ -74,17 +76,22 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func post(_ m: Message) {
-        let content = UNMutableNotificationContent()
-        content.title = "Otto"
-        content.body = m.text
-        content.sound = .default
-        content.categoryIdentifier = Self.category
-        // One subject per stack, so an Apple Intelligence summary of the stack is about one thing.
-        content.threadIdentifier = m.thread ?? "otto"
         // Time Sensitive needs an entitlement a free team can't have, so urgency rides on the
         // relevance score instead: it orders the scheduled summary, and may inform Priority Notifications.
-        content.relevanceScore = m.level == "timeSensitive" ? 1 : m.thread == "chat" ? 0.8 : 0.5
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: m.id.uuidString, content: content, trigger: nil))
+        // One subject per stack, so an Apple Intelligence summary of the stack is about one thing.
+        post(title: "Otto", body: m.text, thread: m.thread ?? "otto", id: m.id.uuidString,
+             relevance: m.level == "timeSensitive" ? 1 : m.thread == "chat" ? 0.8 : 0.5)
+    }
+
+    func post(title: String, body: String, thread: String, id: String, relevance: Double = 0.7) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = thread.hasPrefix("crew:") ? Self.crewCategory : Self.category
+        content.threadIdentifier = thread
+        content.relevanceScore = relevance
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 
     // MARK: UNUserNotificationCenterDelegate

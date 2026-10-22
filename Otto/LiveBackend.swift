@@ -24,6 +24,11 @@ import Foundation
 ///   POST <server>/app/ask     {"id","text","via":"siri"|"here","place"?} -> {"reply"?:{"id","text","buttons"}}  (Siri; waits for Otto's first reply)
 ///   POST <server>/app/photo?snap=1&id=<uuid>  JPEG body -> the same answer, for the Snap intent
 ///   POST <server>/app/health  JSON {notifications, backgroundRefresh, keepAwake, shareConfigured, lastRefresh?, build, version, ios, reason} -> 204
+///   GET  <server>/app/crew                         -> {"agents":[CrewAgent]}  (404/[] = no crew)
+///   GET  <server>/app/crew/<id>/history?limit=200  -> {"events":[CrewEvent]}
+///   POST <server>/app/crew/<id>/send  {"text","id"} -> {"event":CrewEvent};  POST .../stop -> {"agent":CrewAgent}
+///     otto -> app  {"type":"crew_agents","agents":[CrewAgent]}   the whole roster, on open and on any change
+///                  {"type":"crew","event":CrewEvent}             every line of every thread; dedupe on agent/id
 ///   <server>/app/dash/*         the web dashboard's API (otto/dash-types.ts), same token
 final class LiveBackend: OttoBackend {
     let name = "Otto server"
@@ -40,6 +45,8 @@ final class LiveBackend: OttoBackend {
     let typing: AsyncStream<Bool>
     let approvalUpdates: AsyncStream<ApprovalUpdate>
     let voices: AsyncStream<(String, RemoteFile?)>
+    let crewAgents: AsyncStream<[CrewAgent]>
+    let crewEvents: AsyncStream<CrewEvent>
 
     private let base: URL       // http(s)://host:port
     private let token: String
@@ -50,6 +57,8 @@ final class LiveBackend: OttoBackend {
     private let typingOn: AsyncStream<Bool>.Continuation
     private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
     private let voiceOut: AsyncStream<(String, RemoteFile?)>.Continuation
+    private let crewAgentsOut: AsyncStream<[CrewAgent]>.Continuation
+    private let crewEventsOut: AsyncStream<CrewEvent>.Continuation
     private let session = URLSession(configuration: .default)
     /// The socket's own session, replaced on every drop. After iOS suspends the app a
     /// session can be left where every new websocket handshake fails while plain HTTP on
@@ -77,6 +86,8 @@ final class LiveBackend: OttoBackend {
         (typing, typingOn) = AsyncStream.makeStream()
         (approvalUpdates, approvalOut) = AsyncStream.makeStream()
         (voices, voiceOut) = AsyncStream.makeStream()
+        (crewAgents, crewAgentsOut) = AsyncStream.makeStream()
+        (crewEvents, crewEventsOut) = AsyncStream.makeStream()
         loop = Task { [weak self] in await self?.run() }
     }
 
@@ -275,6 +286,16 @@ final class LiveBackend: OttoBackend {
         if let k = try? JSONDecoder().decode(Kind.self, from: data) {
             if k.type == "approval" { if let a = try? JSONDecoder().decode(ApprovalRequest.self, from: data) { approvalOut.yield(.show(a)) }; return }
             if k.type == "approval_done", let id = k.id { approvalOut.yield(.done(id)); return }
+            if k.type == "crew_agents" {
+                struct F: Decodable { let agents: [CrewAgent] }
+                if let f = try? JSONDecoder().decode(F.self, from: data) { crewAgentsOut.yield(f.agents) }
+                return
+            }
+            if k.type == "crew" {
+                struct F: Decodable { let event: CrewEvent }
+                if let f = try? JSONDecoder().decode(F.self, from: data) { crewEventsOut.yield(f.event) }
+                return
+            }
         }
         guard let f = try? JSONDecoder().decode(WireMessage.self, from: data) else { return }
         if f.type == "react", let id = f.id, let emoji = f.emoji { reacted.yield((id, emoji)); return }
@@ -306,6 +327,31 @@ final class LiveBackend: OttoBackend {
     }
 
     func release() async -> Release? { await get("app/update") }
+
+    func crew() async -> [CrewAgent]? {
+        struct R: Decodable { let agents: [CrewAgent] }
+        let r: R? = await get("app/crew")
+        return r?.agents
+    }
+
+    func crewHistory(_ id: String, limit: Int) async -> [CrewEvent]? {
+        struct R: Decodable { let events: [CrewEvent] }
+        let r: R? = await get("app/crew/\(id)/history", query: [URLQueryItem(name: "limit", value: String(limit))])
+        return r?.events
+    }
+
+    func crewSend(_ id: String, text: String, clientID: String) async -> CrewEvent? {
+        struct R: Decodable { let event: CrewEvent }
+        guard let body = try? JSONSerialization.data(withJSONObject: ["text": text, "id": clientID]),
+              let data = await post("app/crew/\(id)/send", body) else { return nil }
+        return (try? JSONDecoder().decode(R.self, from: data))?.event
+    }
+
+    func crewStop(_ id: String) async -> CrewAgent? {
+        struct R: Decodable { let agent: CrewAgent }
+        guard let data = await post("app/crew/\(id)/stop", Data("{}".utf8)) else { return nil }
+        return (try? JSONDecoder().decode(R.self, from: data))?.agent
+    }
 
     func gate() async -> GateReply? { await get("app/gate") }
     func stamps() async -> StampsReply? { await get("app/stamps") }
@@ -371,8 +417,10 @@ final class LiveBackend: OttoBackend {
 
     // MARK: HTTP
 
-    private func get<T: Decodable>(_ path: String, background: Bool = false) async -> T? {
-        var req = URLRequest(url: base.appendingPathComponent(path))
+    private func get<T: Decodable>(_ path: String, background: Bool = false, query: [URLQueryItem] = []) async -> T? {
+        var c = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty { c.queryItems = query }
+        var req = URLRequest(url: c.url!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if background { req.setValue("1", forHTTPHeaderField: "X-Otto-Background") }
         guard let (data, resp) = try? await session.data(for: req),
