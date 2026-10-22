@@ -283,18 +283,19 @@ struct CrewContactCard: View {
                                 .labelStyle(StatusLabel(color: CrewAvatar.color(agent.status)))
                                 .padding(.top, 2)
                         }
+                        // The actions sit inside the header, not as a row of their own: a bare row
+                        // spans the list's full width and gets a separator above it.
+                        HStack(spacing: 10) {
+                            action("Message", "message.fill") { dismiss() }
+                            action("Stop", "stop.fill", disabled: agent?.status != "working") {
+                                Task { await store.crew.stop(id) }
+                            }
+                        }
+                        .padding(.top, 10)
                     }
                     .frame(maxWidth: .infinity)
                     .listRowBackground(Color.clear)
-
-                    HStack(spacing: 10) {
-                        action("Message", "message.fill") { dismiss() }
-                        action("Stop", "stop.fill", disabled: agent?.status != "working") {
-                            Task { await store.crew.stop(id) }
-                        }
-                    }
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
                 }
 
                 Section("Can") {
