@@ -222,6 +222,9 @@ struct ChatView: View {
         .sheet(isPresented: $showDetails) { DetailsView() }
         .fullScreenCover(isPresented: $webCall) { CallView() }
         .fullScreenCover(isPresented: Binding(get: { WalkieLauncher.shared.open }, set: { WalkieLauncher.shared.open = $0 })) { WalkieView() }
+        .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
+            MediaViewerView(store: store).presentationBackground(.clear)
+        }
         .alert("Calling Otto", isPresented: $showCall) {
             Button("OK", role: .cancel) {}
         } message: { Text("Add Otto's phone number in details (tap Otto's name).") }
@@ -747,6 +750,7 @@ private struct Row: View {
                 Image(uiImage: img).resizable().scaledToFit()
                     .frame(maxWidth: 240, maxHeight: 320)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
+                    .onTapGesture { MediaViewer.shared.start = message.id.uuidString }
             }
             ForEach(message.files ?? [], id: \.id) { f in if StudySet.isStudy(f) { StudyBubble(file: f) } else { RemoteFileView(file: f) } }
             if (message.image == nil || !message.text.isEmpty) && !hidesText {
@@ -883,15 +887,13 @@ private struct Row: View {
     }
 }
 
-/// A photo or file Otto sent. Photos show inline; anything else opens in Quick Look.
+/// A photo or file Otto sent. Photos show inline and open in the media viewer; anything else opens in Quick Look.
 private struct RemoteFileView: View {
     @Environment(OttoStore.self) private var store
     let file: RemoteFile
     @State private var data: Data?
     @State private var missing = false
     @State private var preview: URL?
-    /// The thread lays out whole, so every row asks at once; fetch each file once.
-    @MainActor private static var cache: [String: Data] = [:]
 
     var body: some View {
         Group {
@@ -899,7 +901,7 @@ private struct RemoteFileView: View {
                 Image(uiImage: img).resizable().scaledToFit()
                     .frame(maxWidth: 240, maxHeight: 320)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
-                    .onTapGesture { open() }
+                    .onTapGesture { MediaViewer.shared.start = file.id }
             } else {
                 Button(action: open) {
                     Label(missing ? "\(file.name) — no longer available" : file.name,
@@ -913,7 +915,7 @@ private struct RemoteFileView: View {
             }
         }
         .task(id: file.id) {
-            if let hit = Self.cache[file.id] { data = hit; return }
+            if let hit = MediaCache.data[file.id] { data = hit; return }
             guard file.kind == "image" else { return }
             await load()
         }
@@ -921,7 +923,8 @@ private struct RemoteFileView: View {
     }
 
     private func load() async {
-        if let d = await store.backend.file(file.id) { Self.cache[file.id] = d; data = d } else { missing = true }
+        // The thread lays out whole, so every row asks at once; MediaCache fetches each file once.
+        if let d = await MediaCache.load(file, from: store.backend) { data = d } else { missing = true }
     }
 
     private func open() {

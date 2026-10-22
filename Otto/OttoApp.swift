@@ -190,6 +190,13 @@ final class OttoStore {
             messages = (0..<8).map { Message(from: $0 % 2 == 0 ? .me : .otto, text: $0 == 7 ? "LAST https://www.ovs.it and https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=1234567890&scope=openid " + long : long) }
             messages.insert(Message(from: .terminal, text: "check why the dashboard build fails…"), at: 6)
         }
+        // `-mediaThread`: three photos, for the media viewer.
+        if ProcessInfo.processInfo.arguments.contains("-mediaThread") {
+            messages = [UIColor.systemOrange, .systemTeal, .systemPurple].enumerated().map { i, c in
+                let img = UIGraphicsImageRenderer(size: CGSize(width: 600, height: i == 1 ? 900 : 450)).image { ctx in c.setFill(); ctx.fill(ctx.format.bounds) }
+                return Message(from: .me, text: "photo \(i + 1)", image: img.jpegData(compressionQuality: 0.8))
+            }
+        }
         // `-demoThread`: the conversation the website shows, for screen recordings.
         if ProcessInfo.processInfo.arguments.contains("-demoThread") {
             messages = [
