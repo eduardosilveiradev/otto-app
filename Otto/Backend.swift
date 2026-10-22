@@ -129,6 +129,8 @@ protocol OttoBackend: AnyObject {
     var typing: AsyncStream<Bool> { get }
     /// Approval screens the server raised, and ones it settled or dropped.
     var approvalUpdates: AsyncStream<ApprovalUpdate> { get }
+    /// A reply's voice, landing after its text: (wireID, the clip, or nil when none is coming).
+    var voices: AsyncStream<(String, RemoteFile?)> { get }
     func decide(approval id: String, approve: Bool) async
     func history(background: Bool) async -> [Message]
     /// True once the server has the message; false means try again later.
@@ -160,6 +162,7 @@ protocol OttoBackend: AnyObject {
 }
 
 extension OttoBackend {
+    var voices: AsyncStream<(String, RemoteFile?)> { AsyncStream { _ in } }
     func release() async -> Release? { nil }
     func snooze(_ change: SnoozeChange?) async -> Snooze? { nil }
     func setLoop(_ id: String, done: Bool) async -> Bool { !isLive }

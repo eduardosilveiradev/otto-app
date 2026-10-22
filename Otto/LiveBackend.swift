@@ -14,6 +14,8 @@ import Foundation
 ///                  {"type":"status","text":"Reading ChatView.swift"}   while a reply is in the works
 ///                  {"type":"read","ids":["<uuid>"]}   your messages Otto has taken in
 ///                  {"type":"terminal","text":"first six words…","ts":"<ISO>"}   a prompt typed in Otto's terminal
+///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
+///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
 ///   GET  <server>/app/brief    brief JSON
 ///   GET  <server>/app/history  [{"dir":"in"|"out","text","ts","id"?,"kind":"terminal"?, and on Otto's: "files","voice","reply_to","buttons"?,"src"?,"why"?}]   (X-Otto-Background: 1 from the background refresh)
 ///   GET  <server>/app/file/<id>  a file or voice clip from a message
@@ -37,6 +39,7 @@ final class LiveBackend: OttoBackend {
     let reads: AsyncStream<[String]>
     let typing: AsyncStream<Bool>
     let approvalUpdates: AsyncStream<ApprovalUpdate>
+    let voices: AsyncStream<(String, RemoteFile?)>
 
     private let base: URL       // http(s)://host:port
     private let token: String
@@ -46,6 +49,7 @@ final class LiveBackend: OttoBackend {
     private let readIDs: AsyncStream<[String]>.Continuation
     private let typingOn: AsyncStream<Bool>.Continuation
     private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
+    private let voiceOut: AsyncStream<(String, RemoteFile?)>.Continuation
     private let session = URLSession(configuration: .default)
     /// The socket's own session, replaced on every drop. After iOS suspends the app a
     /// session can be left where every new websocket handshake fails while plain HTTP on
@@ -72,6 +76,7 @@ final class LiveBackend: OttoBackend {
         (reads, readIDs) = AsyncStream.makeStream()
         (typing, typingOn) = AsyncStream.makeStream()
         (approvalUpdates, approvalOut) = AsyncStream.makeStream()
+        (voices, voiceOut) = AsyncStream.makeStream()
         loop = Task { [weak self] in await self?.run() }
     }
 
@@ -195,6 +200,7 @@ final class LiveBackend: OttoBackend {
         while !Task.isCancelled {
             var url = URLComponents(url: base.appendingPathComponent("app"), resolvingAgainstBaseURL: false)!
             url.scheme = url.scheme == "https" ? "wss" : "ws"
+            url.queryItems = [URLQueryItem(name: "voiceLater", value: "1")]   // text first, its voice after
             var req = URLRequest(url: url.url!)
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let task = lock.withLock { wsSession }.webSocketTask(with: req)
@@ -276,10 +282,11 @@ final class LiveBackend: OttoBackend {
         if f.type == "read", let ids = f.ids { readIDs.yield(ids); return }
         if f.type == "typing", let on = f.on { typingOn.yield(on); return }
         if f.type == "terminal", let text = f.text, let ts = f.ts { out.yield(Self.terminal(text, ts: ts)); return }
+        if f.type == "voice", let id = f.id { voiceOut.yield((id, f.voice)); return }
         guard f.type == "message", let text = f.text else { return }
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
                           buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
-                          isVoice: f.voice != nil, serverID: f.id, replyTo: f.reply_to,
+                          isVoice: f.voice != nil || f.voicePending == true, serverID: f.id, replyTo: f.reply_to,
                           files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why))
     }
 
@@ -400,6 +407,7 @@ final class LiveBackend: OttoBackend {
         let type: String; let id: String?; let text: String?; let ts: String?; let buttons: [WireButton]?
         let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let emoji: String?; let ids: [String]?; let on: Bool?
         let thread: String?; let level: String?; let src: String?; let why: String?
+        let voicePending: Bool?
     }
     /// Otto's entries carry what the live frame did, so a message that arrived while the
     /// socket was asleep still has its photos, voice and buttons.

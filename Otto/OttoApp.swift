@@ -240,6 +240,13 @@ final class OttoStore {
             }
         }
         Task {
+            for await (id, audio) in backend.voices {
+                guard let i = messages.firstIndex(where: { $0.wireID == id }) else { continue }
+                messages[i].audio = audio
+                messages[i].isVoice = audio != nil
+            }
+        }
+        Task {
             for await (id, emoji) in backend.reactions {
                 // A tapback can be Otto's whole answer, so it ends the typing dots too.
                 if !serverTyping { ottoTyping = false }

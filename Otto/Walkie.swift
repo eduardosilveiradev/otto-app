@@ -38,6 +38,8 @@ struct WalkieView: View {
     @State private var holding = false
     @State private var sentAt: Date?
     @State private var reply: Message?
+    /// The reply already played or read out, so a later change doesn't start it again.
+    @State private var heard: UUID?
     @State private var levels: [CGFloat] = Array(repeating: 0, count: 28)
     @State private var speech = AVSpeechSynthesizer()
     private var player: AudioPlayer { .shared }
@@ -105,6 +107,7 @@ struct WalkieView: View {
         .task { await meter() }
         .onChange(of: store.messages.last?.id) { pickUpReply() }
         .onChange(of: store.messages.last?.audio?.id) { pickUpReply() }
+        .onChange(of: store.messages.last?.isVoice) { pickUpReply() }
         .sensoryFeedback(.impact(weight: .medium), trigger: holding)
         .sensoryFeedback(.success, trigger: reply?.id)
     }
@@ -171,22 +174,21 @@ struct WalkieView: View {
     /// The first thing Otto says after the note went up. Plays its voice when it has one;
     /// a text-only answer is read out on the phone so you never have to look.
     private func pickUpReply() {
-        guard let since = sentAt,
-              let m = store.messages.last(where: { $0.from == .otto && $0.date >= since }) else { return }
-        let fresh = reply?.id != m.id
+        if let since = sentAt, let m = store.messages.last(where: { $0.from == .otto && $0.date >= since }) {
+            sentAt = nil
+            reply = m
+        }
+        guard let id = reply?.id, heard != id, let m = store.messages.first(where: { $0.id == id }) else { return }
         reply = m
         if let a = m.audio {
-            if player.playing != a.id { Task { await player.toggle(a.id) { await store.backend.file(a.id) } } }
-        } else if fresh, !m.text.isEmpty {
-            // Wait a beat: the spoken version usually follows the text by a moment.
-            Task {
-                try? await Task.sleep(for: .seconds(2.5))
-                guard reply?.id == m.id, reply?.audio == nil else { return }
-                try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])
-                speech.speak(AVSpeechUtterance(string: m.text))
-            }
+            heard = id
+            Task { await player.toggle(a.id) { await store.backend.file(a.id) } }
+        } else if !m.isVoice, !m.text.isEmpty {
+            heard = id
+            try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])
+            speech.speak(AVSpeechUtterance(string: m.text))
         }
-        sentAt = nil
+        // Otherwise its voice is still on the way: the text goes out first and the clip follows.
     }
 
     /// Feeds the waveform: your level while you talk, a bouncing trace while Otto talks.

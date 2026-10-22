@@ -936,6 +936,8 @@ private struct VoiceRow: View {
     var body: some View {
         let playing = player.playing == key
         let ink: Color = mine ? .white : .primary
+        // Otto's text is in, its voice isn't yet: an empty bar that breathes until the clip lands.
+        let waiting = !mine && message.audio == nil
         HStack(spacing: 8) {
             Button { Task { await player.toggle(key, load: load) } } label: {
                 Image(systemName: playing ? "pause.fill" : "play.fill")
@@ -944,14 +946,18 @@ private struct VoiceRow: View {
                     .frame(width: 26, height: 26)
                     .background(ink, in: .circle)
                     .contentTransition(.symbolEffect(.replace))
+                    .opacity(waiting ? 0.4 : 1)
             }
             .buttonStyle(.plain)
-            TimelineView(.animation(paused: !playing)) { _ in
+            .disabled(waiting)
+            TimelineView(.animation(paused: !playing && !waiting)) { tl in
                 let done = playing ? player.progress : 0
                 let bars = levels ?? Array(repeating: 0, count: Self.slices)
+                let t = tl.date.timeIntervalSinceReferenceDate
                 HStack(spacing: 2) {
                     ForEach(bars.indices, id: \.self) { i in
-                        Capsule().fill(ink.opacity(Double(i) / Double(bars.count) < done ? 1 : 0.55))
+                        Capsule().fill(ink.opacity(waiting ? 0.2 + 0.25 * (1 + sin(t * 4 - Double(i) * 0.45)) / 2
+                                                   : Double(i) / Double(bars.count) < done ? 1 : 0.55))
                             .frame(width: 2.5, height: 3 + bars[i] * 17)
                     }
                 }
