@@ -719,6 +719,8 @@ private struct Row: View {
     @State private var sharing: URL?
     @State private var whyShown = false
     @State private var preview: LPLinkMetadata?
+    /// A `crew:` button tapped, waiting on CrewLaunch.
+    @State private var launching: ActionButton?
     /// A long crew message, opened past its first six lines.
     @State private var expanded = false
     private static let foldAt = 280
@@ -924,13 +926,24 @@ private struct Row: View {
             if !message.buttons.isEmpty {
                 HStack(spacing: 16) {
                     ForEach(message.buttons) { b in
-                        Button(b.label) {
-                            if let c = b.copy { UIPasteboard.general.string = c; UINotificationFeedbackGenerator().notificationOccurred(.success) }
-                            else if let u = b.url.flatMap(URL.init(string:)) { openURL(u) } else { onTap(b) }
-                        }.font(.system(size: 15)).tint(.blue)
+                        if b.startsCrew {
+                            // Starting the crew opens its own sheet, behind Face ID.
+                            Button { launching = b } label: {
+                                Label(b.label, systemImage: "person.3.sequence.fill")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .padding(.horizontal, 12).padding(.vertical, 6)
+                                    .background(.blue.opacity(0.12), in: .capsule)
+                            }.tint(.blue)
+                        } else {
+                            Button(b.label) {
+                                if let c = b.copy { UIPasteboard.general.string = c; UINotificationFeedbackGenerator().notificationOccurred(.success) }
+                                else if let u = b.url.flatMap(URL.init(string:)) { openURL(u) } else { onTap(b) }
+                            }.font(.system(size: 15)).tint(.blue)
+                        }
                     }
                 }
                 .padding(.leading, 12)
+                .sheet(item: $launching) { CrewLaunch(button: $0, summary: message.text, send: onTap) }
             }
 
             if message.failed == true {
