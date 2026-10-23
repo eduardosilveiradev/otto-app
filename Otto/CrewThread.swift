@@ -119,13 +119,7 @@ struct CrewHeader: View {
     var body: some View {
         ZStack {
             HStack {
-                Button { store.crew.back?() } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
-                        .frame(width: 40, height: 40)
-                        .glassEffect(.regular.interactive(), in: .circle)
-                }
-                .tint(.primary)
-                .accessibilityLabel("Messages")
+                ThreadBackButton(current: thread.id)
                 Spacer()
                 Menu {
                     Toggle("Show tool calls", isOn: $showTools)

@@ -200,6 +200,34 @@ func shortWhen(_ d: Date) -> String {
     return d.formatted(date: .numeric, time: .omitted)
 }
 
+/// A thread's back button, as Messages draws it: the chevron, plus how many unread messages wait in
+/// the other threads. `current` is the thread on screen, left out of the count; nil (Otto) counts every agent.
+struct ThreadBackButton: View {
+    var current: String?
+    @Environment(OttoStore.self) private var store
+
+    var body: some View {
+        let crew = store.crew
+        let unread = crew.agents.filter { $0.id != current }.reduce(0) { $0 + crew.unread($1.id) }
+        Button { crew.back?() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
+                if unread > 0 {
+                    Text(unread > 99 ? "99+" : "\(unread)")
+                        .font(.system(size: 15, weight: .semibold)).monospacedDigit()
+                        .contentTransition(.numericText())
+                }
+            }
+            .padding(.horizontal, unread > 0 ? 12 : 0)
+            .frame(minWidth: 40, minHeight: 40)
+            .glassEffect(.regular.interactive(), in: .capsule)
+            .animation(.snappy, value: unread)
+        }
+        .tint(.primary)
+        .accessibilityLabel(unread > 0 ? "Messages, \(unread) unread" : "Messages")
+    }
+}
+
 /// The role's mascot, its face following the agent's status, with the status dot ringed onto its corner.
 /// A run that finishes gets a couple of seconds of happy before it settles.
 struct CrewAvatar: View {

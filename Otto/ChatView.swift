@@ -294,14 +294,8 @@ struct ChatView: View {
         ZStack {
             HStack {
                 // Only with a crew: Otto's thread is then one pushed screen of the chat list.
-                if store.crew.hasCrew, let back = store.crew.back {
-                    Button(action: back) {
-                        Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
-                            .frame(width: 40, height: 40)
-                            .glassEffect(.regular.interactive(), in: .circle)
-                    }
-                    .tint(.primary)
-                    .accessibilityLabel("Messages")
+                if store.crew.hasCrew, store.crew.back != nil {
+                    ThreadBackButton()
                 }
                 if let u = store.update, let link = Self.sideStoreInstall(u.ipa) {
                     // SideStore downloads, re-signs and installs; it asks before replacing the app.
