@@ -94,6 +94,26 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 
+    static let crewStatusID = "crew-status"
+
+    /// The crew run as one quiet notification, rewritten in place (same identifier) as it moves:
+    /// passive, so no sound, banner or lit screen. Nil clears it. A real Live Activity needs a widget
+    /// extension, one app ID more than a free team's three.
+    func crewStatus(_ body: String?) {
+        let center = UNUserNotificationCenter.current()
+        guard let body else {
+            center.removeDeliveredNotifications(withIdentifiers: [Self.crewStatusID])
+            return
+        }
+        let content = UNMutableNotificationContent()
+        content.title = "Crew"
+        content.body = body
+        content.interruptionLevel = .passive
+        content.threadIdentifier = "crew"
+        content.relevanceScore = 0.3
+        center.add(UNNotificationRequest(identifier: Self.crewStatusID, content: content, trigger: nil))
+    }
+
     // MARK: UNUserNotificationCenterDelegate
 
     /// Inline reply from the notification goes out like any typed message.
@@ -110,7 +130,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
             let thread = response.notification.request.content.threadIdentifier
             Task { @MainActor in
-                OttoStore.shared.crew.pendingThread = thread.hasPrefix("crew:") ? .agent(String(thread.dropFirst(5))) : .otto
+                OttoStore.shared.crew.pendingThread = thread.hasPrefix("crew:") ? .agent(String(thread.dropFirst(5)))
+                    : thread == "crew" ? .overview : .otto
                 done()
             }
             return

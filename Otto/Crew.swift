@@ -105,6 +105,8 @@ final class CrewStore {
             for await a in backend.crewAgents {
                 agents = a
                 known = true
+                // The run is over: drop its status notification.
+                if !a.contains(where: { $0.status == "working" }) { Notifier.shared.crewStatus(nil) }
                 for x in a where Self.stale(x, threads[x.id]) { await load(x.id, notify: true) }
             }
         }
@@ -133,11 +135,23 @@ final class CrewStore {
     /// Events kept per thread in memory; the server holds the full history (crewHistory loads the last 200).
     private static let keep = 400
 
-    private func append(_ e: CrewEvent, foreground: Bool) {
-        if e.kind == "message", let from = e.from, from == e.agent, from != "user", from != "otto",
-           !foreground || open != e.agent {
-            Notifier.shared.post(title: crewName(from), body: e.text ?? "", thread: "crew:\(from)", id: "crew/\(e.id)")
+    /// Only a message addressed to you gets a real notification. Hand-offs between agents came every
+    /// few seconds during a run, so they now rewrite the one quiet "Crew" status notification instead.
+    private func notify(_ e: CrewEvent, foreground: Bool) {
+        guard e.kind == "message", let from = e.from, from == e.agent, from != "user", from != "otto" else { return }
+        if e.to == "user" {
+            if !foreground || open != e.agent {
+                Notifier.shared.post(title: crewName(from), body: e.text ?? "", thread: "crew:\(from)", id: "crew/\(e.id)")
+            }
+        } else if !foreground {
+            let working = agents.filter { $0.status == "working" }.count
+            let line = (e.text ?? "").replacing("\n", with: " ").prefix(90)
+            Notifier.shared.crewStatus("\(max(working, 1)) working · \(crewName(from)): \(line)")
         }
+    }
+
+    private func append(_ e: CrewEvent, foreground: Bool) {
+        notify(e, foreground: foreground)
         inbox.append(e)
         guard !flushQueued else { return }
         flushQueued = true
@@ -182,9 +196,7 @@ final class CrewStore {
         var all = threads[id] ?? []
         for e in rows where have.insert(e.key).inserted {
             all.append(e)
-            if notify, held, e.kind == "message", e.from == id, e.ts > mark, open != id || !foreground() {
-                Notifier.shared.post(title: crewName(id), body: e.text ?? "", thread: "crew:\(id)", id: "crew/\(e.id)")
-            }
+            if notify, held, e.ts > mark { self.notify(e, foreground: foreground()) }
         }
         threads[id] = all.sorted { $0.ts < $1.ts }
         if open == id { markSeen(id) }
