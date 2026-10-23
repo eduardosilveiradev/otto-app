@@ -12,27 +12,8 @@ struct OttoWidgets: WidgetBundle {
 struct CrewLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: CrewActivityAttributes.self) { context in
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "person.3.sequence.fill")
-                    .font(.title3)
-                    .foregroundStyle(.tint)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(context.state.working == 1 ? "Crew · 1 working" : "Crew · \(context.state.working) working")
-                        .font(.headline)
-                    Text(context.state.line.isEmpty ? "Working…" : "\(context.state.who): \(context.state.line)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: 8)
-                Text(context.state.since, style: .timer)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 52)
-            }
-            .padding(16)
-            .widgetURL(URL(string: "otto://crew"))
+            CrewActivityView(state: context.state)
+                .widgetURL(URL(string: "otto://crew"))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -63,5 +44,64 @@ struct CrewLiveActivity: Widget {
             .contentMargins(.top, 8, for: .expanded)
             .widgetURL(URL(string: "otto://crew"))
         }
+    }
+}
+
+/// The Lock Screen banner, and in StandBy (the phone on its side, charging) a full-screen
+/// layout of its own instead of the banner scaled up: the count big, the timer, the last line.
+/// At night StandBy dims and tints the screen red; reduced luminance drops the accent so it reads in that tint.
+private struct CrewActivityView: View {
+    let state: CrewActivityAttributes.ContentState
+    @Environment(\.isActivityFullscreen) private var fullscreen
+    @Environment(\.isLuminanceReduced) private var dimmed
+
+    private var title: String { state.working == 1 ? "1 working" : "\(state.working) working" }
+    private var line: String { state.line.isEmpty ? "Working…" : "\(state.who): \(state.line)" }
+
+    var body: some View {
+        if fullscreen { standBy } else { banner }
+    }
+
+    private var banner: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "person.3.sequence.fill")
+                .font(.title3)
+                .foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Crew · \(title)").font(.headline)
+                Text(line).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            Text(state.since, style: .timer)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 52)
+        }
+        .padding(16)
+    }
+
+    private var standBy: some View {
+        HStack(alignment: .center, spacing: 28) {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Crew", systemImage: "person.3.sequence.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(dimmed ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+                Text("\(state.working)")
+                    .font(.system(size: 96, weight: .bold, design: .rounded).monospacedDigit())
+                    .contentTransition(.numericText())
+                Text("working").font(.title3).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                Text(state.since, style: .timer)
+                    .font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
+                Text(line)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(28)
     }
 }
