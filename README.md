@@ -15,7 +15,6 @@ what Otto knows about your day.
 
 - Text, photos and voice notes to Otto; Otto's replies, photos, files and
   spoken replies back
-- The crew: a chat list with one thread per agent, when the server runs one
 - Swipe to reply, long-press for tapbacks, double-tap for a quick ❤️
 - A live status line in the typing bubble while Otto works, and
   Delivered / Read receipts
@@ -64,13 +63,13 @@ yet: they are read from the app's defaults (`vapiPublicKey`,
 Everything goes through `LiveBackend.swift`: a websocket at `/app` plus a few
 HTTP endpoints, all with `Authorization: Bearer <token>`. The wire protocol is
 documented at the top of that file and in the "App transport" block in
-`otto/server.ts`; the crew's routes and frames are in `docs/crew-protocol.md`.
+`otto/server.ts`.
 It is not stable yet.
 
 ## Debug launch flags
 
 Debug builds accept a few arguments for checking layout without a server:
-`-seedThread`, `-crew` (sample crew list), `-crewThread <id>` (open that agent's thread), `-thinking`, `-keyboardDemo`, `-growDraft`, `-seedDraft`,
+`-seedThread`, `-thinking`, `-keyboardDemo`, `-growDraft`, `-seedDraft`,
 `-seedAttachments`, and `-details -screen <Loops|Memory|People|Money|Trips|Activity|Status|Devices>`
 to open the contact card on one of its pages.
 

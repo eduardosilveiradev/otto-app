@@ -4,8 +4,7 @@ import Foundation
 
 /// `terminal` is a prompt you typed into Otto's terminal on the Mac: a system line in the
 /// thread (its first few words), not a bubble, and nothing to notify, answer or react to.
-/// `system` is a crew thread's status line or run of tool calls (`steps`), never saved.
-enum Sender: String, Codable { case me, otto, terminal, system }
+enum Sender: String, Codable { case me, otto, terminal }
 
 struct ActionButton: Identifiable, Hashable, Codable {
     var id: String { data ?? url ?? copy ?? label }
@@ -52,12 +51,6 @@ struct Message: Identifiable, Codable {
     /// "email-scan", "nudge:loops", …) and in plain words. Nil on replies: no "Why this?" for those.
     var src: String? = nil
     var why: String? = nil
-    /// Crew threads only (see CrewThread), so never in a saved thread: who wrote it when
-    /// that isn't the thread's agent, the agent a hand-off is addressed to, the tool calls
-    /// a `system` row stands for, and a send the server never took.
-    var caption: String? = nil
-    var mention: String? = nil
-    var steps: [CrewEvent]? = nil
     var failed: Bool? = nil
 
     /// The id both ends use for this message.
@@ -167,13 +160,6 @@ protocol OttoBackend: AnyObject {
     func gate() async -> GateReply?
     /// The passport page (`/app/stamps`); nil when the Mac didn't answer.
     func stamps() async -> StampsReply?
-    /// The crew (docs/crew-protocol.md). Nil from `crew()` means the server runs none.
-    var crewAgents: AsyncStream<[CrewAgent]> { get }
-    var crewEvents: AsyncStream<CrewEvent> { get }
-    func crew() async -> [CrewAgent]?
-    func crewHistory(_ id: String, limit: Int) async -> [CrewEvent]?
-    func crewSend(_ id: String, text: String, clientID: String) async -> CrewEvent?
-    func crewStop(_ id: String) async -> CrewAgent?
 }
 
 extension OttoBackend {
@@ -189,12 +175,6 @@ extension OttoBackend {
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
     func decide(approval id: String, approve: Bool) async {}
-    var crewAgents: AsyncStream<[CrewAgent]> { AsyncStream { _ in } }
-    var crewEvents: AsyncStream<CrewEvent> { AsyncStream { _ in } }
-    func crew() async -> [CrewAgent]? { nil }
-    func crewHistory(_ id: String, limit: Int) async -> [CrewEvent]? { nil }
-    func crewSend(_ id: String, text: String, clientID: String) async -> CrewEvent? { nil }
-    func crewStop(_ id: String) async -> CrewAgent? { nil }
 }
 
 /// One switch on the Mac's settings page; `section` is otto, recurring or connectors.
@@ -223,17 +203,8 @@ final class MockBackend: OttoBackend {
     let reads = AsyncStream<[String]> { _ in }
     private let out: AsyncStream<Message>.Continuation
 
-    let crewAgents: AsyncStream<[CrewAgent]>
-    let crewEvents: AsyncStream<CrewEvent>
-    private let crewAgentsOut: AsyncStream<[CrewAgent]>.Continuation
-    private let crewEventsOut: AsyncStream<CrewEvent>.Continuation
-    private var roster: [CrewAgent] = []
-    private var crewThreads: [String: [CrewEvent]] = [:]
-
     init() {
         (incoming, out) = AsyncStream.makeStream()
-        (crewAgents, crewAgentsOut) = AsyncStream.makeStream()
-        (crewEvents, crewEventsOut) = AsyncStream.makeStream()
     }
 
     func react(to id: String, emoji: String) async {}
@@ -319,118 +290,5 @@ final class MockBackend: OttoBackend {
             triggers: [Trigger(title: "Morning brief", next: cal.date(byAdding: .day, value: 1, to: today(8, 57))!),
                        Trigger(title: "Bill reminder", next: cal.date(byAdding: .day, value: 1, to: today(9))!)]
         )
-    }
-
-    // MARK: Crew sample data, only with `-crew` (or `-crewThread <id>`)
-
-    private var crewOn: Bool {
-        ProcessInfo.processInfo.arguments.contains("-crew") || ProcessInfo.processInfo.arguments.contains("-crewOverview") || UserDefaults.standard.string(forKey: "crewThread") != nil
-    }
-
-    func crew() async -> [CrewAgent]? {
-        guard crewOn else { return nil }
-        if roster.isEmpty { seedCrew() }
-        return roster
-    }
-
-    func crewHistory(_ id: String, limit: Int) async -> [CrewEvent]? {
-        guard crewOn else { return nil }
-        if roster.isEmpty { seedCrew() }
-        return crewThreads[id]
-    }
-
-    func crewSend(_ id: String, text: String, clientID: String) async -> CrewEvent? {
-        guard crewOn else { return nil }
-        try? await Task.sleep(for: .milliseconds(300))
-        let echo = Self.crewEvent(id, clientID, 0, "message", from: "user", to: id, text: text)
-        Task {
-            try? await Task.sleep(for: .seconds(2))
-            crewEventsOut.yield(Self.crewEvent(id, String(UUID().uuidString.lowercased().prefix(8)), 0, "message", from: id, to: "user",
-                                               text: "(mock) on it — I'll report when the tests are green."))
-            setStatus(id, "working")
-            crewAgentsOut.yield(roster)
-        }
-        return echo
-    }
-
-    func crewStop(_ id: String) async -> CrewAgent? {
-        guard crewOn else { return nil }
-        setStatus(id, "idle")
-        return roster.first { $0.id == id }
-    }
-
-    private func setStatus(_ id: String, _ status: String) {
-        guard let i = roster.firstIndex(where: { $0.id == id }) else { return }
-        let a = roster[i]
-        roster[i] = CrewAgent(id: a.id, role: a.role, name: a.name, status: status, lastLine: a.lastLine, lastFrom: a.lastFrom, lastAt: a.lastAt)
-    }
-
-    private static func crewEvent(_ agent: String, _ id: String, _ minutesAgo: Double, _ kind: String, from: String? = nil, to: String? = nil,
-                                  text: String? = nil, tool: String? = nil, summary: String? = nil, status: String? = nil, note: String? = nil) -> CrewEvent {
-        CrewEvent(id: id, agent: agent, kind: kind, ts: iso(minutesAgo), from: from, to: to, text: text, tool: tool, summary: summary, status: status, note: note)
-    }
-
-    private static func iso(_ minutesAgo: Double) -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f.string(from: Date().addingTimeInterval(-minutesAgo * 60))
-    }
-
-    private func seedCrew() {
-        // id, role, status, last line's sender, last line, minutes ago
-        let rows: [(String, String, String, String?, String?, Double)] = [
-            ("pm", "pm", "idle", nil, nil, 0),
-            ("planner", "planner", "waiting", "planner", "Ticket docs/tickets/crew-launcher.md is yours; repo ../otto-core, branch crew/crew-launcher", 38),
-            ("designer", "designer", "idle", nil, nil, 0),
-            ("writer-1", "writer", "working", "planner", "Ticket docs/tickets/crew-launcher.md is yours; repo ../otto-core, branch crew/crew-launcher", 38),
-            ("writer-2", "writer", "waiting", "writer-2", "Ready for review: .crew/crew-mcp, branch crew/crew-mcp, 14 tests green", 12),
-            ("writer-3", "writer", "idle", nil, nil, 0),
-            ("reviewer-1", "reviewer", "error", "writer-2", "Ready for review: .crew/crew-mcp, branch crew/crew-mcp, 14 tests green", 12),
-        ]
-        roster = rows.map { CrewAgent(id: $0.0, role: $0.1, name: crewName($0.0), status: $0.2, lastLine: $0.4, lastFrom: $0.3, lastAt: $0.4 == nil ? nil : Self.iso($0.5)) }
-        let next = ["planner": "writer-1", "writer-1": "reviewer-1", "writer-2": "reviewer-1"]
-        for (id, _, status, from, line, ago) in rows {
-            func e(_ n: Int, _ m: Double, _ kind: String, from: String? = nil, to: String? = nil, text: String? = nil,
-                   tool: String? = nil, summary: String? = nil, status: String? = nil, note: String? = nil) -> CrewEvent {
-                // A message between two agents is one event in both threads: its id says who, to whom, and when.
-                Self.crewEvent(id, kind == "message" ? "m-\(from ?? "")-\(to ?? "")-\(Int(m))" : "\(id)#\(n)", m, kind, from: from, to: to, text: text, tool: tool, summary: summary, status: status, note: note)
-            }
-            guard let line else {
-                crewThreads[id] = [e(1, 120, "status", status: "idle")]
-                continue
-            }
-            var ev = [e(1, 118, "status", status: "working", note: "run 1")]
-            ev.append(from == id ? e(2, 117, "message", from: id == "planner" ? "otto" : "planner", to: id, text: "Take docs/tickets/\(id).md and report when it is ready for review.")
-                                 : e(2, ago, "message", from: from, to: id, text: line))
-            if id != "reviewer-1" {
-                ev += [e(3, 116, "tool", tool: "Read", summary: "docs/crew-spec.md"),
-                       e(4, 115, "tool", tool: "Glob", summary: "**/*.test.ts"),
-                       e(5, 110, "tool", tool: "Edit", summary: "otto/crew.ts"),
-                       e(6, 104, "tool", tool: "Bash", summary: "bun test"),
-                       e(7, 100, "tool", tool: "Edit", summary: "otto/tests/crew.test.ts"),
-                       e(8, 96, "tool", tool: "Bash", summary: "bun test otto/tests/crew.test.ts")]
-                ev.append(e(9, from == id ? ago : 30, "message", from: id, to: next[id] ?? "pm",
-                            text: from == id ? line : "Starting on it: otto/crew.ts first, then tests. I'll tell reviewer-1 when they pass."))
-            }
-            ev.append(id == "reviewer-1" ? e(10, 6, "status", status: "error", note: "crashed twice (exit 1)")
-                                         : e(10, 5, "status", status: status, note: status == "working" ? "run 1" : nil))
-            crewThreads[id] = ev
-        }
-        // You asking writer-1 for an update, so the overview has a message of yours.
-        crewThreads["writer-1", default: []].append(Self.crewEvent("writer-1", "m-user-writer-1-22", 22, "message", from: "user", to: "writer-1",
-                                                                  text: "Tell me when the launcher tests pass."))
-        // The other end of every agent-to-agent message gets the same event: id, text and ts. The sender's copy wins.
-        var canon: [String: CrewEvent] = [:]
-        for (id, events) in crewThreads {
-            for e in events where e.kind == "message" && (canon[e.id] == nil || e.from == id) { canon[e.id] = e }
-        }
-        for e in canon.values {
-            for party in Set([e.from, e.to].compactMap { $0 }) where crewThreads[party] != nil {
-                crewThreads[party]!.removeAll { $0.id == e.id }
-                crewThreads[party]!.append(CrewEvent(id: e.id, agent: party, kind: e.kind, ts: e.ts, from: e.from, to: e.to, text: e.text,
-                                                     tool: nil, summary: nil, status: nil, note: nil))
-            }
-        }
-        for id in crewThreads.keys { crewThreads[id]!.sort { $0.ts < $1.ts } }
     }
 }

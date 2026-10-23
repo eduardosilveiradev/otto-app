@@ -15,8 +15,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let refreshTask = "dev.otto.app.refresh"
     private static let category = "OTTO_MESSAGE"
     private static let replyAction = "OTTO_REPLY"
-    /// A crew agent's message: no inline Reply, which would land in Otto's thread.
-    private static let crewCategory = "OTTO_CREW"
 
     /// Before launch finishes: notification delegate + reply action, background task handler.
     func register() {
@@ -25,8 +23,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // Unlock first: a "yes" typed on a locked phone can approve a draft or an install.
         let reply = UNTextInputNotificationAction(identifier: Self.replyAction, title: "Reply", options: [.authenticationRequired],
                                                   textInputButtonTitle: "Send", textInputPlaceholder: "Message Otto")
-        center.setNotificationCategories([UNNotificationCategory(identifier: Self.category, actions: [reply], intentIdentifiers: [], options: []),
-                                          UNNotificationCategory(identifier: Self.crewCategory, actions: [], intentIdentifiers: [], options: [])])
+        center.setNotificationCategories([UNNotificationCategory(identifier: Self.category, actions: [reply], intentIdentifiers: [], options: [])])
 
         BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.refreshTask, using: nil) { task in
             Self.scheduleRefresh()   // chain the next wake-up first
@@ -88,30 +85,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.title = title
         content.body = body
         content.sound = .default
-        content.categoryIdentifier = thread.hasPrefix("crew:") ? Self.crewCategory : Self.category
+        content.categoryIdentifier = Self.category
         content.threadIdentifier = thread
         content.relevanceScore = relevance
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
-    }
-
-    static let crewStatusID = "crew-status"
-
-    /// The crew run as one quiet notification, rewritten in place (same identifier) as it moves:
-    /// passive, so no sound, banner or lit screen. Nil clears it. A real Live Activity needs a widget
-    /// extension, one app ID more than a free team's three.
-    func crewStatus(_ body: String?) {
-        let center = UNUserNotificationCenter.current()
-        guard let body else {
-            center.removeDeliveredNotifications(withIdentifiers: [Self.crewStatusID])
-            return
-        }
-        let content = UNMutableNotificationContent()
-        content.title = "Crew"
-        content.body = body
-        content.interruptionLevel = .passive
-        content.threadIdentifier = "crew"
-        content.relevanceScore = 0.3
-        center.add(UNNotificationRequest(identifier: Self.crewStatusID, content: content, trigger: nil))
     }
 
     // MARK: UNUserNotificationCenterDelegate
@@ -123,17 +100,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
            let text = (response as? UNTextInputNotificationResponse)?.userText.trimmingCharacters(in: .whitespacesAndNewlines),
            !text.isEmpty {
             Task { @MainActor in OttoStore.shared.send(text); done() }
-            return
-        }
-        // A tap on the banner opens the thread it belongs to: an agent's for crew:<id>, Otto's for the
-        // rest. Held on the store like a Bark link, since a cold launch has no chat list to push yet.
-        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            let thread = response.notification.request.content.threadIdentifier
-            Task { @MainActor in
-                OttoStore.shared.crew.pendingThread = thread.hasPrefix("crew:") ? .agent(String(thread.dropFirst(5)))
-                    : thread == "crew" ? .overview : .otto
-                done()
-            }
             return
         }
         done()

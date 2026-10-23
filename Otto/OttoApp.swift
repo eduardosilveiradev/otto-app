@@ -24,13 +24,13 @@ struct OttoApp: App {
 private struct MainRoot: View {
     @State private var store = OttoStore.shared
     @Environment(\.scenePhase) private var phase
-    /// Offline at launch: stop waiting on the roster and open the single chat. 12s, not less: a phone
+    /// Offline at launch: stop waiting on the connection and open the chat. 12s, not less: a phone
     /// reaching the Mac through the tunnel can take several seconds, and that is still loading.
     @State private var gaveUp = false
     @State private var splash = Splash.loading
     enum Splash { case loading, loaded, gone }
 
-    private var ready: Bool { store.crew.known || gaveUp }
+    private var ready: Bool { store.connected || !store.backend.isLive || gaveUp }
 
     var body: some View {
         // A ZStack, not a Group: a Group hands its modifiers to whichever child is showing, so the
@@ -38,8 +38,6 @@ private struct MainRoot: View {
         ZStack {
             if !ready {
                 Color(.systemBackground).task { try? await Task.sleep(for: .seconds(12)); gaveUp = true }
-            } else if store.crew.hasCrew {
-                CrewRoot(store: store)
             } else {
                 ChatScreen(store: store).ignoresSafeArea(.keyboard)
             }
@@ -52,19 +50,12 @@ private struct MainRoot: View {
                     try await Task.sleep(for: .seconds(1))
                     while !ready { try await Task.sleep(for: .milliseconds(100)) }
                     // Offline there is nothing loaded to show off: just fade to the single chat.
-                    if store.crew.known {
+                    if store.connected {
                         withAnimation(.easeInOut(duration: 0.25)) { splash = .loaded }
                         try await Task.sleep(for: .seconds(1.7))   // the 0.9s morph, then the still globe for 0.8s
                     }
                 } catch { return }   // cancelled: leave the splash to whoever runs next
                 withAnimation(.easeOut(duration: 0.4)) { splash = .gone }
-            }
-            // Bark pushes carry a bare otto:// (otto://pair belongs to onboarding): tapping one opens
-            // Otto's own thread, not whichever agent's thread the list last had open.
-            .onOpenURL { url in
-                if url.scheme == "otto", (url.host ?? "").isEmpty { store.crew.pendingThread = .otto }
-                // The crew Live Activity.
-                if url.scheme == "otto", url.host == "crew" { store.crew.pendingThread = .overview }
             }
             .environment(store)
             .task { Notifier.shared.requestPermission(); await store.start() }
@@ -78,8 +69,7 @@ private struct MainRoot: View {
     }
 }
 
-/// Until the server says whether it runs a crew, neither the single chat nor the list is right.
-/// The orb reconnects while that answer is out, then holds still on the searching globe once it is
+/// The orb reconnects until the server answers, then holds still on the searching globe once it is
 /// in, so the screen says "loaded" for a beat before it fades.
 private struct Connecting: View {
     let loaded: Bool
@@ -103,8 +93,6 @@ final class OttoStore {
     static let shared = OttoStore(backend: LiveBackend.fromDefaults() ?? MockBackend())
 
     let backend: OttoBackend
-    /// The specialist agents behind Otto; empty (and invisible) unless the server runs a crew.
-    let crew = CrewStore()
     /// While false, Otto's messages also go out as local notifications.
     var foreground = true
     var messages: [Message] = [] { didSet { save() } }
@@ -245,10 +233,7 @@ final class OttoStore {
                 Task { await reportHealth("connect") }
             }
             expireVoiceWaits()
-            if live != connected {
-                connected = live
-                if live { Task { await crew.settle() } }
-            }
+            if live != connected { connected = live }
             if !live != asleep { asleep = !live }
             try? await Task.sleep(for: .seconds(1))
         }
@@ -288,9 +273,6 @@ final class OttoStore {
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
         if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift" }
         #endif
-        let crew = crew, backend = backend
-        let isFront = { [weak self] in self?.foreground ?? true }
-        Task { await crew.start(backend, foreground: isFront) }
         // Anything the server has that's newer than what's saved here, e.g. replies
         // that landed while the app was closed.
         // The mock's canned thread is only a seed for an empty chat.
