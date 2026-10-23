@@ -58,6 +58,9 @@ struct CrewLiveActivity: Widget {
             } minimal: {
                 Image(systemName: "person.3.sequence.fill")
             }
+            // The island's ends are round: without inset margins the line and the timer ran under the curve.
+            .contentMargins(.horizontal, 16, for: .expanded)
+            .contentMargins(.top, 8, for: .expanded)
             .widgetURL(URL(string: "otto://crew"))
         }
     }

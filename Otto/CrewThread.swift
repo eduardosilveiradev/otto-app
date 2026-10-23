@@ -30,12 +30,27 @@ import CryptoKit
         return CrewStep(event: t).doing
     }
 
+    /// The chat view reads `messages` several times per redraw, and a long crew thread made rebuilding it
+    /// every time the lag. It is rebuilt only when something it is made of changed. Reading the inputs
+    /// here also keeps the views observing them.
+    @ObservationIgnored private var cache: (key: [AnyHashable], messages: [Message])?
+
     var messages: [Message] {
+        let events = crew.threads[id] ?? []
+        let key: [AnyHashable] = [events.count, events.last?.key, UserDefaults.standard.bool(forKey: "crewShowTools"),
+                                  crew.replies, crew.reactions, crew.failed]
+        if let cache, cache.key == key { return cache.messages }
+        let built = build(events)
+        cache = (key, built)
+        return built
+    }
+
+    private func build(_ events: [CrewEvent]) -> [Message] {
         let showTools = UserDefaults.standard.bool(forKey: "crewShowTools")
         var out: [Message] = []
         /// Who wrote the message before, so a run from one sender is captioned once.
         var lastFrom: String?
-        for e in crew.threads[id] ?? [] {
+        for e in events {
             switch e.kind {
             case "message":
                 let mine = e.from == "user"
