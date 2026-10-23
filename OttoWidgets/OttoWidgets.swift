@@ -81,27 +81,31 @@ private struct CrewActivityView: View {
         .padding(16)
     }
 
+    // StandBy draws this at about twice its point size, so the sizes are Lock Screen sizes, and
+    // everything may shrink rather than clip.
     private var standBy: some View {
-        HStack(alignment: .center, spacing: 28) {
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 0) {
                 Label("Crew", systemImage: "person.3.sequence.fill")
-                    .font(.title3.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(dimmed ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
                 Text("\(state.working)")
-                    .font(.system(size: 96, weight: .bold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 44, weight: .bold, design: .rounded).monospacedDigit())
                     .contentTransition(.numericText())
-                Text("working").font(.title3).foregroundStyle(.secondary)
+                Text("working").font(.caption).foregroundStyle(.secondary)
             }
-            VStack(alignment: .leading, spacing: 12) {
+            .fixedSize()
+            VStack(alignment: .leading, spacing: 4) {
                 Text(state.since, style: .timer)
-                    .font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 22, weight: .semibold, design: .rounded).monospacedDigit())
                 Text(line)
-                    .font(.title3)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .lineLimit(4)
+                    .lineLimit(3)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(28)
+        .minimumScaleFactor(0.7)
+        .padding(14)
     }
 }
