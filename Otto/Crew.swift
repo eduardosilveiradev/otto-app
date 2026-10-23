@@ -125,14 +125,45 @@ final class CrewStore {
         known = true
     }
 
+    /// Live events waiting for the next flush. A busy crew sends several tool calls a second, and every
+    /// write to `threads` redraws the whole chat list (sort, unread counts, the overview's merged history),
+    /// which left the main thread too busy to track a swipe. So they land in one write per beat instead.
+    @ObservationIgnored private var inbox: [CrewEvent] = []
+    @ObservationIgnored private var flushQueued = false
+    /// Events kept per thread in memory; the server holds the full history (crewHistory loads the last 200).
+    private static let keep = 400
+
     private func append(_ e: CrewEvent, foreground: Bool) {
-        guard !(threads[e.agent] ?? []).contains(where: { $0.key == e.key }) else { return }
-        threads[e.agent, default: []].append(e)
-        if open == e.agent { markSeen(e.agent) }
         if e.kind == "message", let from = e.from, from == e.agent, from != "user", from != "otto",
            !foreground || open != e.agent {
             Notifier.shared.post(title: crewName(from), body: e.text ?? "", thread: "crew:\(from)", id: "crew/\(e.id)")
         }
+        inbox.append(e)
+        guard !flushQueued else { return }
+        flushQueued = true
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            self?.flush()
+        }
+    }
+
+    private func flush() {
+        flushQueued = false
+        guard !inbox.isEmpty else { return }
+        let batch = inbox
+        inbox = []
+        var all = threads
+        var touched = Set<String>()
+        for (agent, events) in Dictionary(grouping: batch, by: \.agent) {
+            var list = all[agent] ?? []
+            var have = Set(list.map(\.key))
+            for e in events where have.insert(e.key).inserted { list.append(e) }
+            if list.count > Self.keep { list.removeFirst(list.count - Self.keep) }
+            all[agent] = list
+            touched.insert(agent)
+        }
+        threads = all
+        if let open, touched.contains(open) { markSeen(open) }
     }
 
     /// The roster's last line is newer than anything the thread holds.

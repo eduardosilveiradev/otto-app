@@ -71,8 +71,13 @@ import CryptoKit
 
     /// The same key always makes the same id, so a rebuilt thread keeps its rows (and their animations).
     private static func uuid(_ key: String) -> UUID {
-        UUID(uuid: Insecure.MD5.hash(data: Data(key.utf8)).withUnsafeBytes { $0.load(as: uuid_t.self) })
+        if let id = ids[key] { return id }
+        let id = UUID(uuid: Insecure.MD5.hash(data: Data(key.utf8)).withUnsafeBytes { $0.load(as: uuid_t.self) })
+        ids[key] = id
+        return id
     }
+    /// `messages` is rebuilt on every redraw; hashing each key once keeps that cheap.
+    private static var ids: [String: UUID] = [:]
 
     func send(_ text: String) {
         let quote = replyingTo.flatMap { r in messages.first { $0.id == r } }
