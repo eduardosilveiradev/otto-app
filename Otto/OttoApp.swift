@@ -63,6 +63,8 @@ private struct MainRoot: View {
             // Otto's own thread, not whichever agent's thread the list last had open.
             .onOpenURL { url in
                 if url.scheme == "otto", (url.host ?? "").isEmpty { store.crew.pendingThread = .otto }
+                // The crew Live Activity.
+                if url.scheme == "otto", url.host == "crew" { store.crew.pendingThread = .overview }
             }
             .environment(store)
             .task { Notifier.shared.requestPermission(); await store.start() }

@@ -105,8 +105,14 @@ final class CrewStore {
             for await a in backend.crewAgents {
                 agents = a
                 known = true
-                // The run is over: drop its status notification.
-                if !a.contains(where: { $0.status == "working" }) { Notifier.shared.crewStatus(nil) }
+                // A run starts its Live Activity (iOS lets the app start one only while in front); its end drops it.
+                let busy = a.filter { $0.status == "working" }.count
+                if busy == 0 {
+                    Notifier.shared.crewStatus(nil)
+                    CrewLive.end()
+                } else {
+                    CrewLive.update(working: busy)
+                }
                 for x in a where Self.stale(x, threads[x.id]) { await load(x.id, notify: true) }
             }
         }
@@ -143,10 +149,14 @@ final class CrewStore {
             if !foreground || open != e.agent {
                 Notifier.shared.post(title: crewName(from), body: e.text ?? "", thread: "crew:\(from)", id: "crew/\(e.id)")
             }
-        } else if !foreground {
+        } else {
             let working = agents.filter { $0.status == "working" }.count
-            let line = (e.text ?? "").replacing("\n", with: " ").prefix(90)
-            Notifier.shared.crewStatus("\(max(working, 1)) working · \(crewName(from)): \(line)")
+            let line = String((e.text ?? "").replacing("\n", with: " ").prefix(90))
+            // The Live Activity carries the run; without one (none started yet, or Live Activities
+            // off), the quiet status notification does, and only when the app isn't on screen.
+            if !CrewLive.update(working: working, who: crewName(from), line: line), !foreground {
+                Notifier.shared.crewStatus("\(max(working, 1)) working · \(crewName(from)): \(line)")
+            }
         }
     }
 
