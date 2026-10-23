@@ -92,6 +92,11 @@ struct ChatListView: View {
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
                     Toggle("Show tool calls", isOn: $showTools)
+                    if crew.agents.contains(where: { crew.unread($0.id) > 0 }) {
+                        Button("Mark All as Read", systemImage: "envelope.open") {
+                            for a in crew.agents { crew.markSeen(a.id) }
+                        }
+                    }
                     let busy = crew.agents.filter { $0.status == "working" }
                     if !busy.isEmpty {
                         Button("Stop all", systemImage: "stop.fill", role: .destructive) {
