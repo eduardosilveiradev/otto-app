@@ -102,11 +102,11 @@ final class LiveBackend: OttoBackend {
         return rows.map { r in
             r.kind == "terminal" ? Self.terminal(r.text, ts: r.ts)
             : r.dir == "in"
-                ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date())
+                ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date(), shared: r.shared)
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
                           buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: r.voice != nil, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
-                          thread: r.thread, level: r.level, src: r.src, why: r.why)
+                          thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled)
         }
     }
 
@@ -287,7 +287,7 @@ final class LiveBackend: OttoBackend {
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
                           buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: f.voice != nil || f.voicePending == true, serverID: f.id, replyTo: f.reply_to,
-                          files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why))
+                          files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why, scheduled: f.scheduled))
     }
 
     private func write(_ frame: [String: String]) async {
@@ -409,14 +409,15 @@ final class LiveBackend: OttoBackend {
         let type: String; let id: String?; let text: String?; let ts: String?; let buttons: [WireButton]?
         let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let emoji: String?; let ids: [String]?; let on: Bool?
         let thread: String?; let level: String?; let src: String?; let why: String?
-        let voicePending: Bool?
+        let voicePending: Bool?; let scheduled: [DashTrigger]?
     }
     /// Otto's entries carry what the live frame did, so a message that arrived while the
     /// socket was asleep still has its photos, voice and buttons.
     private struct WireHistory: Decodable {
         let dir: String; let text: String; let ts: String; let id: String?; let kind: String?
         let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let buttons: [WireButton]?
-        let thread: String?; let level: String?; let src: String?; let why: String?
+        let thread: String?; let level: String?; let src: String?; let why: String?; let scheduled: [DashTrigger]?
+        let shared: Bool?
     }
     private struct WireBrief: Decodable {
         struct Event: Decodable { let title: String; let start: String; let minutes: Int }

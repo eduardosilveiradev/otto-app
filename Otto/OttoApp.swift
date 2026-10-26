@@ -255,6 +255,13 @@ final class OttoStore {
                 return Message(from: .me, text: "photo \(i + 1)", image: img.jpegData(compressionQuality: 0.8))
             }
         }
+        // `-scheduleThread`: a reply carrying a schedule chip, against MockBackend's triggers.
+        if ProcessInfo.processInfo.arguments.contains("-scheduleThread") {
+            messages = [
+                Message(from: .me, text: "fix the voice thing at 3am while i'm sleeping", read: true),
+                Message(from: .otto, text: "on it. it runs at 3, and you'll get one line on it in the morning.", scheduled: [MockBackend.triggers[0]]),
+            ]
+        }
         // `-demoThread`: the conversation the website shows, for screen recordings.
         if ProcessInfo.processInfo.arguments.contains("-demoThread") {
             messages = [
@@ -450,11 +457,18 @@ final class OttoStore {
 
     /// Otto's replies (and terminal lines) from the server's history that this phone doesn't
     /// have yet. Not yours: they're already here, and the server's copy of them is
-    /// stamped a moment later, so merging those would show every message twice.
+    /// stamped a moment later, so merging those would show every message twice. The
+    /// exception is what you sent from the share sheet, which went straight to the Mac:
+    /// those come in by id, each in its place by time.
     private func catchUp(notify: Bool, background: Bool = false) async {
         guard !(backend is MockBackend) else { return }
         let last = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
-        let history = await backend.history(background: background).filter { $0.from != .me }
+        let all = await backend.history(background: background)
+        let have = Set(messages.map(\.id))
+        for s in all where s.from == .me && s.shared == true && !have.contains(s.id) {
+            messages.insert(s, at: messages.firstIndex { $0.date > s.date } ?? messages.endIndex)
+        }
+        let history = all.filter { $0.from != .me }
         // A reply that came as text with its voice to follow: the "voice" frame may have gone into a
         // socket iOS had frozen, and history carries the clip, so fill the waiting bar from it.
         for h in history where h.audio != nil {

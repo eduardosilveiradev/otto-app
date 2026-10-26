@@ -800,7 +800,10 @@ private struct Row: View {
             }
             ForEach(message.files ?? [], id: \.id) { f in if StudySet.isStudy(f) { StudyBubble(file: f) } else { RemoteFileView(file: f) } }
             if (message.image == nil || !message.text.isEmpty) && !hidesText {
-            content
+            VStack(alignment: .leading, spacing: 8) {
+                content
+                ForEach(message.scheduled ?? []) { ScheduleChip(trigger: $0) }
+            }
                 .font(.system(size: 17))
                 .tint(mine ? .white : .blue)
                 // A tapped link asks what to do with it rather than leaving the app.

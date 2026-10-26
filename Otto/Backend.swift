@@ -52,6 +52,8 @@ struct Message: Identifiable, Codable {
     var src: String? = nil
     var why: String? = nil
     var failed: Bool? = nil
+    /// What Otto armed while writing this, shown as a chip in the bubble (Schedules.swift).
+    var scheduled: [DashTrigger]? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }
@@ -209,6 +211,27 @@ final class MockBackend: OttoBackend {
 
     func react(to id: String, emoji: String) async {}
     func file(_ id: String) async -> Data? { nil }
+
+    static let triggers: [DashTrigger] = {
+        let h: Double = 3_600_000, now = Date().timeIntervalSince1970 * 1000
+        return [
+            DashTrigger(id: "a1", type: "cron", schedule: nil, gist: "overnight voice fix", repeating: false, enabled: true, nextRun: now + 14 * h, lastFired: nil),
+            DashTrigger(id: "a2", type: "cron", schedule: "57 8 * * *", gist: "morning brief", repeating: true, enabled: true, nextRun: now + 20 * h, lastFired: nil),
+            DashTrigger(id: "a3", type: "cron", schedule: "0 18 * * 1-5", gist: "homework run", repeating: true, enabled: true, nextRun: now + 5 * h, lastFired: nil),
+            DashTrigger(id: "a4", type: "email", schedule: nil, gist: "tell me when the landlord replies", repeating: false, enabled: true, nextRun: nil, lastFired: nil),
+            DashTrigger(id: "a5", type: "cron", schedule: nil, gist: "desk google login reminder", repeating: false, enabled: false, nextRun: nil, lastFired: "2026-10-26T07:00:28Z"),
+        ]
+    }()
+
+    func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data? {
+        let enc = JSONEncoder()
+        if path == "triggers" { return try? enc.encode(["triggers": Self.triggers]) }
+        guard path == "triggers/item", let t = Self.triggers.first(where: { $0.id == query.first?.value }) else { return nil }
+        var o = (try? JSONSerialization.jsonObject(with: enc.encode(t))) as? [String: Any] ?? [:]
+        o["action"] = "Overnight fix the user asked for: replies in the app sound robotic. Find out why from the voice daemon's own log, fix it on a branch, self-test it, and leave one line in the morning."
+        o["createdAt"] = "2026-10-26T12:19:40Z"
+        return try? JSONSerialization.data(withJSONObject: o)
+    }
 
     func history(background: Bool) async -> [Message] {
         return []

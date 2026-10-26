@@ -6,7 +6,7 @@ import SwiftUI
 
 // MARK: - Wire types (the parts the app shows)
 
-struct DashTrigger: Decodable, Identifiable {
+struct DashTrigger: Codable, Hashable, Identifiable {
     let id: String; let type: String; let schedule: String?; let gist: String
     let repeating: Bool; let enabled: Bool; let nextRun: Double?; let lastFired: String?
 }
