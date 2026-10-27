@@ -56,6 +56,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let info = Bundle.main.infoDictionary
         var h: [String: Any] = [
             "reason": reason, "notifications": auth, "backgroundRefresh": bg,
+            // Announce Notifications reads a banner aloud in Siri's voice, which sounds nothing like Otto's.
+            "announce": s.announcementSetting == .enabled ? "enabled" : s.announcementSetting == .disabled ? "disabled" : "notSupported",
             "keepAwake": Keepalive.enabled, "shareConfigured": ShareDirect.load() != nil,
             "build": info?["CFBundleVersion"] as? String ?? "0",
             "version": info?["CFBundleShortVersionString"] as? String ?? "0",
