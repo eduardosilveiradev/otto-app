@@ -20,7 +20,7 @@ struct ActionButton: Identifiable, Hashable, Codable {
 struct Message: Identifiable, Codable {
     var id = UUID()
     let from: Sender
-    let text: String
+    var text: String
     var date = Date()
     var buttons: [ActionButton] = []
     var isVoice = false
@@ -134,6 +134,8 @@ protocol OttoBackend: AnyObject {
     var approvalUpdates: AsyncStream<ApprovalUpdate> { get }
     /// A reply's voice, landing after its text: (wireID, the clip, or nil when none is coming).
     var voices: AsyncStream<(String, RemoteFile?)> { get }
+    /// Otto rewriting a message it already sent: (wireID, new text).
+    var edits: AsyncStream<(String, String)> { get }
     func decide(approval id: String, approve: Bool) async
     func history(background: Bool) async -> [Message]
     /// True once the server has the message; false means try again later.
@@ -166,6 +168,7 @@ protocol OttoBackend: AnyObject {
 
 extension OttoBackend {
     var voices: AsyncStream<(String, RemoteFile?)> { AsyncStream { _ in } }
+    var edits: AsyncStream<(String, String)> { AsyncStream { _ in } }
     func release() async -> Release? { nil }
     func snooze(_ change: SnoozeChange?) async -> Snooze? { nil }
     func setLoop(_ id: String, done: Bool) async -> Bool { !isLive }

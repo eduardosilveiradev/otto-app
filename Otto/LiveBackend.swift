@@ -11,6 +11,7 @@ import Foundation
 ///                   "files":[{"id","name","kind"}]?,"voice":{"id","name","kind"}?,"reply_to":"<id>"?,
 ///                   "src"?,"why"?  (only on messages Otto sent unprompted)}
 ///                  {"type":"react","id":"<id>","emoji":"👍"}
+///                  {"type":"edit","id":"<id>","text":"..."}   Otto rewrote a message it sent
 ///                  {"type":"status","text":"Reading ChatView.swift"}   while a reply is in the works
 ///                  {"type":"read","ids":["<uuid>"]}   your messages Otto has taken in
 ///                  {"type":"terminal","text":"first six words…","ts":"<ISO>"}   a prompt typed in Otto's terminal
@@ -40,6 +41,7 @@ final class LiveBackend: OttoBackend {
     let typing: AsyncStream<Bool>
     let approvalUpdates: AsyncStream<ApprovalUpdate>
     let voices: AsyncStream<(String, RemoteFile?)>
+    let edits: AsyncStream<(String, String)>
 
     private let base: URL       // http(s)://host:port
     private let token: String
@@ -50,6 +52,7 @@ final class LiveBackend: OttoBackend {
     private let typingOn: AsyncStream<Bool>.Continuation
     private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
     private let voiceOut: AsyncStream<(String, RemoteFile?)>.Continuation
+    private let edited: AsyncStream<(String, String)>.Continuation
     private let session = URLSession(configuration: .default)
     /// The socket's own session, replaced on every drop. After iOS suspends the app a
     /// session can be left where every new websocket handshake fails while plain HTTP on
@@ -77,6 +80,7 @@ final class LiveBackend: OttoBackend {
         (typing, typingOn) = AsyncStream.makeStream()
         (approvalUpdates, approvalOut) = AsyncStream.makeStream()
         (voices, voiceOut) = AsyncStream.makeStream()
+        (edits, edited) = AsyncStream.makeStream()
         loop = Task { [weak self] in await self?.run() }
     }
 
@@ -278,6 +282,7 @@ final class LiveBackend: OttoBackend {
         }
         guard let f = try? JSONDecoder().decode(WireMessage.self, from: data) else { return }
         if f.type == "react", let id = f.id, let emoji = f.emoji { reacted.yield((id, emoji)); return }
+        if f.type == "edit", let id = f.id, let text = f.text { edited.yield((id, text)); return }
         if f.type == "status", let text = f.text { status.yield(text); return }
         if f.type == "read", let ids = f.ids { readIDs.yield(ids); return }
         if f.type == "typing", let on = f.on { typingOn.yield(on); return }

@@ -334,6 +334,11 @@ final class OttoStore {
             }
         }
         Task {
+            for await (id, text) in backend.edits {
+                if let i = messages.firstIndex(where: { $0.wireID == id }) { messages[i].text = text }
+            }
+        }
+        Task {
             for await (id, emoji) in backend.reactions {
                 // A tapback can be Otto's whole answer, so it ends the typing dots too.
                 if !serverTyping { ottoTyping = false }
@@ -475,6 +480,11 @@ final class OttoStore {
             if let i = messages.firstIndex(where: { $0.wireID == h.wireID && $0.isVoice && $0.audio == nil }) {
                 messages[i].audio = h.audio
             }
+        }
+        // History carries the edited text, for an edit frame that never reached a frozen socket.
+        // ponytail: history cuts text at 1500 chars, so a prefix is a cut, not an edit; an edit that only trims is missed.
+        for h in history where h.from == .otto {
+            if let i = messages.firstIndex(where: { $0.wireID == h.wireID && !$0.text.hasPrefix(h.text) }) { messages[i].text = h.text }
         }
         let fresh = unseen(history, after: last)
         guard !fresh.isEmpty else { return }
