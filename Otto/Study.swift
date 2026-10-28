@@ -102,7 +102,7 @@ struct CardsRun {
     var seen: Int { known.count + missed.count }
 }
 
-/// Flip a card, then say whether you knew it. Missed cards come back at the end of the pile
+/// Flip a card, then say whether you knew it. Missed cards come back three cards later
 /// until each one is known.
 private struct CardsPane: View {
     let cards: [StudySet.Card]
