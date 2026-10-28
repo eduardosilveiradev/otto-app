@@ -24,6 +24,45 @@
 		<string>fetch</string>
 		<string>audio</string>
 		<string>voip</string>
+		<string>processing</string>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+		<string>external-accessory</string>
 	</array>
+	<key>UISupportedExternalAccessoryProtocols</key>
+	<array>
+		<string>com.meta.ar.wearable</string>
+	</array>
+	<key>MWDAT</key>
+	<dict>
+		<key>AppLinkURLScheme</key>
+		<string>otto://</string>
+		<!-- 0 = no app ID: works while Developer Mode is on in the Meta AI app. For a build that
+		     works without it, put the App ID and Client Token from wearables.developer.meta.com here. -->
+		<key>MetaAppID</key>
+		<string>0</string>
+		<key>ClientToken</key>
+		<string></string>
+		<key>TeamID</key>
+		<string>$(DEVELOPMENT_TEAM)</string>
+		<key>Analytics</key>
+		<dict>
+			<key>OptOut</key>
+			<true/>
+		</dict>
+	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Otto connects to your Meta glasses to show what their camera sees.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Otto reaches your glasses over Wi-Fi, and sends their camera to your Mac.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_bonjour._tcp</string>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

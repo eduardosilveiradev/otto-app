@@ -55,6 +55,7 @@ struct DetailsView: View {
                 Section {
                     NavigationLink { StatusScreen() } label: { Label("Status", systemImage: "gauge.with.dots.needle.33percent") }
                     NavigationLink { DevicesScreen() } label: { Label("Devices", systemImage: "iphone") }
+                    NavigationLink { GlassesScreen() } label: { Label("Glasses", systemImage: "eyeglasses") }
                 }
 
                 Section {

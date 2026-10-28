@@ -1,3 +1,4 @@
+import MWDATCore
 import SwiftUI
 import ThinkingOrbsKit
 
@@ -8,6 +9,7 @@ struct OttoApp: App {
 
     init() {
         Notifier.shared.register()   // the background task must be registered before launch ends
+        try? Wearables.configure()
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
         #endif
@@ -16,7 +18,12 @@ struct OttoApp: App {
     var body: some Scene {
         WindowGroup {
             // The store is made only once onboarding is over, so it starts on the server just paired.
-            if onboarded { MainRoot() } else { OnboardingFlow { withAnimation { onboarded = true } } }
+            Group { if onboarded { MainRoot() } else { OnboardingFlow { withAnimation { onboarded = true } } } }
+                // Meta AI comes back here after connecting the glasses; anything else isn't the SDK's.
+                .onOpenURL { url in
+                    guard url.query()?.contains("metaWearablesAction") == true else { return }
+                    Task { _ = try? await Wearables.shared.handleUrl(url) }
+                }
         }
     }
 }
