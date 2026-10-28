@@ -1,9 +1,11 @@
+import CoreMedia
 import MWDATCamera
 import MWDATCore
 import SwiftUI
 
 /// The Ray-Ban Meta camera, live: a preview here, and each frame the network can take POSTed as a
-/// JPEG to `glassesReceiver` + /frame on the Mac. A frame that arrives while
+/// JPEG to `glassesReceiver` + /frame on the Mac, with its capture time on the glasses' clock in
+/// X-Capture-Time (seconds). A frame that arrives while
 /// the last one is still uploading is dropped, so a slow link lowers the rate instead of lagging.
 @MainActor @Observable
 final class Glasses {
@@ -54,7 +56,8 @@ final class Glasses {
             cam.stream.errorPublisher.listen { [weak self] e in Task { @MainActor in self?.error = e.localizedDescription } }.store(in: tokens)
             cam.stream.videoFramePublisher.listen { [weak self] f in
                 guard let image = f.makeUIImage() else { return }
-                Task { @MainActor in self?.show(image) }
+                let at = CMSampleBufferGetPresentationTimeStamp(f.sampleBuffer).seconds
+                Task { @MainActor in self?.show(image, at: at) }
             }.store(in: tokens)
             cam.stream.start()
         } catch {
@@ -77,7 +80,7 @@ final class Glasses {
         frame = nil
     }
 
-    private func show(_ image: UIImage) {
+    private func show(_ image: UIImage, at: Double) {
         frame = image
         guard !posting, let base = UserDefaults.standard.string(forKey: "glassesReceiver"), !base.isEmpty,
               let url = URL(string: base.trimmingCharacters(in: .whitespaces) + "/frame") else { return }
@@ -88,6 +91,7 @@ final class Glasses {
                 var req = URLRequest(url: url, timeoutInterval: 2)
                 req.httpMethod = "POST"
                 req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+                if at.isFinite { req.setValue(String(at), forHTTPHeaderField: "X-Capture-Time") }
                 ok = (try? await URLSession.shared.upload(for: req, from: jpeg)) != nil
             }
             await MainActor.run { [weak self] in
