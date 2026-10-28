@@ -146,7 +146,12 @@ private struct CardsPane: View {
         withAnimation(.snappy) {
             run.flipped = false
             if knew { run.known.insert(i); run.queue = Array(queue.dropFirst()) }
-            else { run.missed.insert(i); run.queue = Array(queue.dropFirst()) + [i] }
+            else {
+                // Three cards later, not the end of the pile: at the end it read as a skip.
+                var rest = Array(queue.dropFirst())
+                rest.insert(i, at: min(3, rest.count))
+                run.missed.insert(i); run.queue = rest
+            }
         }
     }
 }
