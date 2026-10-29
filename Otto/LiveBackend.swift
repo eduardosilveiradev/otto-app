@@ -16,6 +16,7 @@ import Foundation
 ///                  {"type":"read","ids":["<uuid>"]}   your messages Otto has taken in
 ///                  {"type":"terminal","text":"first six words…","ts":"<ISO>"}   a prompt typed in Otto's terminal
 ///                  {"type":"echo","id","text","ts","shared"?}   yours, from the share sheet or the dashboard
+///                  {"type":"todos","items":[{"text","status":"pending"|"in_progress"|"completed"}]}   Otto's to-do list while it works; [] when done
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
 ///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
 ///   GET  <server>/app/brief    brief JSON
@@ -38,6 +39,7 @@ final class LiveBackend: OttoBackend {
     let incoming: AsyncStream<Message>
     let reactions: AsyncStream<(String, String)>
     let statuses: AsyncStream<String>
+    let todoLists: AsyncStream<[TodoItem]>
     let reads: AsyncStream<[String]>
     let typing: AsyncStream<Bool>
     let approvalUpdates: AsyncStream<ApprovalUpdate>
@@ -49,6 +51,7 @@ final class LiveBackend: OttoBackend {
     private let out: AsyncStream<Message>.Continuation
     private let reacted: AsyncStream<(String, String)>.Continuation
     private let status: AsyncStream<String>.Continuation
+    private let todosOut: AsyncStream<[TodoItem]>.Continuation
     private let readIDs: AsyncStream<[String]>.Continuation
     private let typingOn: AsyncStream<Bool>.Continuation
     private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
@@ -77,6 +80,7 @@ final class LiveBackend: OttoBackend {
         (incoming, out) = AsyncStream.makeStream()
         (reactions, reacted) = AsyncStream.makeStream()
         (statuses, status) = AsyncStream.makeStream()
+        (todoLists, todosOut) = AsyncStream.makeStream()
         (reads, readIDs) = AsyncStream.makeStream()
         (typing, typingOn) = AsyncStream.makeStream()
         (approvalUpdates, approvalOut) = AsyncStream.makeStream()
@@ -285,6 +289,7 @@ final class LiveBackend: OttoBackend {
         if f.type == "react", let id = f.id, let emoji = f.emoji { reacted.yield((id, emoji)); return }
         if f.type == "edit", let id = f.id, let text = f.text { edited.yield((id, text)); return }
         if f.type == "status", let text = f.text { status.yield(text); return }
+        if f.type == "todos" { todosOut.yield(f.items ?? []); return }
         if f.type == "read", let ids = f.ids { readIDs.yield(ids); return }
         if f.type == "typing", let on = f.on { typingOn.yield(on); return }
         if f.type == "terminal", let text = f.text, let ts = f.ts { out.yield(Self.terminal(text, ts: ts)); return }
@@ -421,6 +426,7 @@ final class LiveBackend: OttoBackend {
         let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let emoji: String?; let ids: [String]?; let on: Bool?
         let thread: String?; let level: String?; let src: String?; let why: String?
         let voicePending: Bool?; let scheduled: [DashTrigger]?; let shared: Bool?
+        let items: [TodoItem]?
     }
     /// Otto's entries carry what the live frame did, so a message that arrived while the
     /// socket was asleep still has its photos, voice and buttons.

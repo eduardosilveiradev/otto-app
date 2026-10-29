@@ -16,6 +16,8 @@ import VoiceGlowKit
     /// The thinking bubble, and the step it shows.
     var typing: Bool { get }
     var typingStatus: String? { get }
+    /// Otto's to-do list for the reply, shown in the bubble under the step.
+    var typingTodos: [TodoItem] { get }
     var connected: Bool { get }
     /// Off while the first history lands, so it appears at once instead of popping in.
     var animated: Bool { get }
@@ -31,6 +33,7 @@ extension OttoStore: ChatThread {
     var isOtto: Bool { true }
     var typing: Bool { ottoTyping }
     var typingStatus: String? { ottoStatus }
+    var typingTodos: [TodoItem] { ottoTodos }
     func send(_ text: String) { send(text, shared: false) }
 }
 
@@ -109,7 +112,7 @@ struct ChatView: View {
                         }
                     }
                     if thread.typing {
-                        Typing(status: thread.typingStatus, connected: thread.connected).padding(.top, 10).id("typing")
+                        Typing(status: thread.typingStatus, todos: thread.typingTodos, connected: thread.connected).padding(.top, 10).id("typing")
                             .transition(.scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity))
                     }
                 }
@@ -1159,6 +1162,8 @@ private struct Tapback: View {
 struct Typing: View {
     /// What Otto is doing, shown beside the orb; nil is just the orb.
     let status: String?
+    /// The list Otto is working through, under the step; empty shows nothing.
+    var todos: [TodoItem] = []
     /// Off while the server is unreachable: the orb shows it's reconnecting instead of thinking.
     let connected: Bool
 
@@ -1180,14 +1185,17 @@ struct Typing: View {
         HStack(alignment: .top, spacing: 8) {
             MorphingOrb(state: !connected ? .connecting : Self.orb(for: status))
             // A status from before the drop would be stale; say what's actually happening.
-            if let status = connected ? status : "Reconnecting…" {
-                // The same view, re-texted: each step rolls into the next letter by letter,
-                // the way the chat list's busy line does.
-                Text(status)
-                    .font(.system(size: 14))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .contentTransition(.numericText())
-                    .transition(.opacity.combined(with: .offset(y: 6)))
+            VStack(alignment: .leading, spacing: 8) {
+                if let status = connected ? status : "Reconnecting…" {
+                    // The same view, re-texted: each step rolls into the next letter by letter,
+                    // the way the chat list's busy line does.
+                    Text(status)
+                        .font(.system(size: 14))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .contentTransition(.numericText())
+                        .transition(.opacity.combined(with: .offset(y: 6)))
+                }
+                if connected && !todos.isEmpty { TodoList(items: todos).transition(.opacity) }
             }
         }
         .foregroundStyle(.secondary)
@@ -1198,7 +1206,44 @@ struct Typing: View {
         // Last, so the bubble behind the text is inside the animation too: it grows and
         // shrinks with a longer or shorter step instead of jumping to the new size.
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: status)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: todos)
         .animation(.snappy(duration: 0.25), value: connected)
+    }
+}
+
+/// Otto's to-do list inside the thinking bubble: done ones ticked and faded, the current one in full ink.
+struct TodoList: View {
+    let items: [TodoItem]
+
+    var body: some View {
+        let done = items.filter { $0.status == .completed }.count
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Image(systemName: icon(item.status))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(item.status == .in_progress ? Color.accentColor : .secondary)
+                        .symbolEffect(.pulse, isActive: item.status == .in_progress)
+                        .frame(width: 14)
+                    Text(item.text)
+                        .font(.system(size: 13, weight: item.status == .in_progress ? .medium : .regular))
+                        .foregroundStyle(item.status == .in_progress ? .primary : .secondary)
+                        .strikethrough(item.status == .completed, color: .secondary)
+                        .opacity(item.status == .completed ? 0.7 : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("\(done) of \(items.count) done")
+    }
+
+    private func icon(_ s: TodoItem.Status) -> String {
+        switch s {
+        case .completed: "checkmark.circle.fill"
+        case .in_progress: "circle.dotted.circle"
+        case .pending: "circle"
+        }
     }
 }
 

@@ -104,12 +104,14 @@ final class OttoStore {
     /// so they give up after three minutes; a real answer can take that long, rarely longer.
     var ottoTyping = false {
         didSet {
-            if !ottoTyping { ottoStatus = nil }
+            if !ottoTyping { ottoStatus = nil; ottoTodos = [] }
             if ottoTyping && !oldValue { armTypingTimeout() }
         }
     }
     /// The live line inside the dots bubble: the tool Otto is running right now.
     var ottoStatus: String?
+    /// Otto's to-do list for this reply, under the live line; empty for most replies.
+    var ottoTodos: [TodoItem] = []
     /// Approval screens waiting on you, newest last; `Later` hides one until the next launch.
     var approvals: [ApprovalRequest] = []
     var hiddenApprovals: Set<String> = []
@@ -278,7 +280,12 @@ final class OttoStore {
         // `-scriptDemo`: a scripted session for the launch film; see scriptDemo().
         if ProcessInfo.processInfo.arguments.contains("-scriptDemo") { Task { await scriptDemo() } }
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
-        if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift" }
+        if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift"
+            if ProcessInfo.processInfo.arguments.contains("-todos") {
+                ottoTodos = [TodoItem(text: "Read the share-sheet code", status: .completed),
+                             TodoItem(text: "Echoing shares to the open app", status: .in_progress),
+                             TodoItem(text: "Build and push", status: .pending)]
+            } }
         #endif
         // Anything the server has that's newer than what's saved here, e.g. replies
         // that landed while the app was closed.
@@ -302,6 +309,12 @@ final class OttoStore {
                 ottoTyping = true
                 ottoStatus = text
                 armTypingTimeout()
+            }
+        }
+        Task {
+            for await items in backend.todoLists {
+                if !items.isEmpty { ottoTyping = true; armTypingTimeout() }
+                ottoTodos = items
             }
         }
         Task {

@@ -6,6 +6,13 @@ import Foundation
 /// thread (its first few words), not a bubble, and nothing to notify, answer or react to.
 enum Sender: String, Codable { case me, otto, terminal }
 
+/// One line of the list Otto keeps while it works, shown inside the thinking bubble.
+struct TodoItem: Codable, Hashable {
+    enum Status: String, Codable { case pending, in_progress, completed }
+    let text: String
+    let status: Status
+}
+
 struct ActionButton: Identifiable, Hashable, Codable {
     var id: String { data ?? url ?? copy ?? label }
     let label: String
@@ -126,6 +133,8 @@ protocol OttoBackend: AnyObject {
     var reactions: AsyncStream<(String, String)> { get }
     /// What Otto is doing right now ("Reading ChatView.swift"), while a reply is on its way.
     var statuses: AsyncStream<String> { get }
+    /// Otto's to-do list for the reply on its way, whole each time; empty when it's over.
+    var todoLists: AsyncStream<[TodoItem]> { get }
     /// wireIDs of your messages Otto has just taken in.
     var reads: AsyncStream<[String]> { get }
     /// Whether Otto is working on something you sent, as the server sees it.
@@ -205,6 +214,7 @@ final class MockBackend: OttoBackend {
     let incoming: AsyncStream<Message>
     let reactions = AsyncStream<(String, String)> { _ in }
     let statuses = AsyncStream<String> { _ in }
+    let todoLists = AsyncStream<[TodoItem]> { _ in }
     let reads = AsyncStream<[String]> { _ in }
     private let out: AsyncStream<Message>.Continuation
 
