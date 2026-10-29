@@ -15,6 +15,7 @@ import Foundation
 ///                  {"type":"status","text":"Reading ChatView.swift"}   while a reply is in the works
 ///                  {"type":"read","ids":["<uuid>"]}   your messages Otto has taken in
 ///                  {"type":"terminal","text":"first six words…","ts":"<ISO>"}   a prompt typed in Otto's terminal
+///                  {"type":"echo","id","text","ts","shared"?}   yours, from the share sheet or the dashboard
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
 ///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
 ///   GET  <server>/app/brief    brief JSON
@@ -288,6 +289,11 @@ final class LiveBackend: OttoBackend {
         if f.type == "typing", let on = f.on { typingOn.yield(on); return }
         if f.type == "terminal", let text = f.text, let ts = f.ts { out.yield(Self.terminal(text, ts: ts)); return }
         if f.type == "voice", let id = f.id { voiceOut.yield((id, f.voice)); return }
+        // Yours, sent from somewhere other than this thread (the share sheet, the dashboard). Same id as /app/history gives it.
+        if f.type == "echo", let text = f.text {
+            out.yield(Message(id: f.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: text, date: Self.date(f.ts) ?? Date(), shared: f.shared))
+            return
+        }
         guard f.type == "message", let text = f.text else { return }
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
                           buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
@@ -414,7 +420,7 @@ final class LiveBackend: OttoBackend {
         let type: String; let id: String?; let text: String?; let ts: String?; let buttons: [WireButton]?
         let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let emoji: String?; let ids: [String]?; let on: Bool?
         let thread: String?; let level: String?; let src: String?; let why: String?
-        let voicePending: Bool?; let scheduled: [DashTrigger]?
+        let voicePending: Bool?; let scheduled: [DashTrigger]?; let shared: Bool?
     }
     /// Otto's entries carry what the live frame did, so a message that arrived while the
     /// socket was asleep still has its photos, voice and buttons.
