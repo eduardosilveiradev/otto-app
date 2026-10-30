@@ -114,7 +114,7 @@ final class LiveBackend: OttoBackend {
                 ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date(), shared: r.shared)
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
                           buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
-                          isVoice: r.voice != nil, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
+                          isVoice: r.voice != nil || r.voicePending == true, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
                           thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled)
         }
     }
@@ -432,7 +432,7 @@ final class LiveBackend: OttoBackend {
     /// socket was asleep still has its photos, voice and buttons.
     private struct WireHistory: Decodable {
         let dir: String; let text: String; let ts: String; let id: String?; let kind: String?
-        let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let buttons: [WireButton]?
+        let files: [RemoteFile]?; let voice: RemoteFile?; let voicePending: Bool?; let reply_to: String?; let buttons: [WireButton]?
         let thread: String?; let level: String?; let src: String?; let why: String?; let scheduled: [DashTrigger]?
         let shared: Bool?
     }
