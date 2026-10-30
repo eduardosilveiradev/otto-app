@@ -21,12 +21,17 @@ final class BoardModel: ObservableObject {
     @Published var dictLevel: Float = 0
 
     var style: KeyStyle { settings.style.followsSystem ? .system(dark: dark) : settings.style }
-    // iOS pads ~16pt above any third-party keyboard; a 28pt bar puts suggestions and keys where Apple's are.
+    /// iOS 26 pads ~16pt above any third-party keyboard, so a 28pt bar puts the keys where Apple's are.
     /// Three slots or none, like iOS: blanks keep the dividers where they belong.
     var paddedSuggestions: [Suggestion] {
         suggestions.isEmpty ? [] : Array((suggestions + Array(repeating: Suggestion(text: ""), count: 3)).prefix(3))
     }
-    var barHeight: CGFloat { mode == .settings || mode == .emoji || mode == .clipboard ? 0 : otto == .closed ? 28 : 76 }
+    /// iOS 27 draws the keyboard as a rounded sheet with no band, so the bar brings its own inset.
+    static let sheet = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+    static let barInset: CGFloat = sheet ? 12 : 0
+    var barHeight: CGFloat {
+        mode == .settings || mode == .emoji || mode == .clipboard ? 0 : (otto == .closed ? 28 : 76) + Self.barInset
+    }
     /// Panels own the bar's space too; settings also get room to breathe instead of a cramped scroll.
     var extraHeight: CGFloat { mode == .settings ? 170 : mode == .keys ? 0 : 28 }
 
@@ -81,6 +86,8 @@ struct TopBar: View {
             if m.dictation == .listening || m.dictation == .working { dictationRow(s) }
             else if m.otto == .closed { suggestionRow(s) } else { ottoRows(s) }
         }
+        .padding(.top, BoardModel.barInset)
+        .padding(.horizontal, BoardModel.sheet ? 8 : 0)   // clear of the sheet's curved corners
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(s.text.color)
         // Rows crossfade as the keyboard grows or shrinks around them, instead of snapping.
