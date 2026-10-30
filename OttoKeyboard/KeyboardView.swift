@@ -6,7 +6,8 @@ protocol KeyboardViewDelegate: AnyObject {
     func typed(_ s: String)
     func tapped(_ kind: KeyKind)
     func deleteRepeat(words: Bool)
-    func swiped(_ path: [CGPoint])
+    /// False when no word fits the path; the board then types the key it started on.
+    func swiped(_ path: [CGPoint]) -> Bool
     func moveCursor(_ by: Int)
     func shiftChanged()
     func keyDown()
@@ -193,7 +194,8 @@ final class KeyboardView: UIView {
             switch tr.mode {
             case .tap: fire(tr)
             case .swipe:
-                delegate?.swiped(tr.path)
+                // A hurried tap that slid reads as a swipe; with no word in it, it was a tap.
+                if delegate?.swiped(tr.path) != true { fire(tr) }
                 trail.end()
             case .variants:
                 if let s = popup?.selected { delegate?.typed(s) }
@@ -204,15 +206,10 @@ final class KeyboardView: UIView {
         }
     }
 
+    /// iOS cancels a touch when its edge gestures look at it (keys by the screen's sides
+    /// and bottom). The finger still pressed the key, so finish it like a lift.
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        for t in touches {
-            guard let tr = tracks.removeValue(forKey: t) else { continue }
-            tr.timer?.invalidate()
-            tr.key.pressed = false
-        }
-        keys.forEach { $0.dimmed = false }
-        hidePopup()
-        trail.end()
+        touchesEnded(touches, with: event)
     }
 
     private func fire(_ tr: Track) {

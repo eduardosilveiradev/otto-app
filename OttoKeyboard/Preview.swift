@@ -27,6 +27,14 @@ extension KeyboardViewController {
             if c.hasPrefix("style:"), let p = KeyStyle.presets.first(where: { $0.name == c.dropFirst(6) }) { previewModel.settings.style = p }
             if c.hasPrefix("lang:") { previewModel.settings.languages = c.dropFirst(5).split(separator: ",").compactMap { Lang(rawValue: String($0)) } }
             if c.hasPrefix("swipe:") { swipeWord = String(c.dropFirst(6)) }
+            if c.hasPrefix("type:") {
+                // Fast typing, 60 ms a key, through the same calls a tap makes; `_` is the space bar.
+                for (i, ch) in c.dropFirst(5).enumerated() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 + Double(i) * 0.06) { [self] in
+                        ch == "_" ? tapped(.space) : typed(String(ch))
+                    }
+                }
+            }
             if c.hasPrefix("press:") {
                 let ch = String(c.dropFirst(6))
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in previewPress(ch) }

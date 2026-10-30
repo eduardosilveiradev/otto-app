@@ -134,6 +134,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // The system's edge-gesture recognizers hold back touches near the screen's sides and
+        // bottom until they give up, so a's, q's and p's arrive late or out of order. Keyboards
+        // can't opt out of the gestures, only out of the hold.
+        view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.panelHost(.emoji) }
         #if DEBUG
         _ = runPreviewCommands()
@@ -246,8 +250,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         }
         refreshClipboard()
         updateShift()
-        refreshSuggestions()
+        // Suggestions run the lexicon and the spell checker; once per burst of keys is enough.
+        guard !suggestionsQueued else { return }
+        suggestionsQueued = true
+        DispatchQueue.main.async { [weak self] in self?.suggestionsQueued = false; self?.refreshSuggestions() }
     }
+    private var suggestionsQueued = false
 
     private func updateShift() {
         guard board.shift != .locked else { return }
@@ -401,10 +409,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         refreshContext()
     }
 
-    func swiped(_ path: [CGPoint]) {
-        guard let lex = lexicon else { return }
+    @discardableResult
+    func swiped(_ path: [CGPoint]) -> Bool {
+        guard let lex = lexicon else { return false }
         let words = lex.decode(path: path, centers: board.letterCenters, unit: board.unitWidth)
-        guard var word = words.first else { return }
+        guard var word = words.first else { return false }
         let capitalize = board.shift != .off
         func cased(_ w: String) -> String { board.shift == .locked ? w.uppercased() : capitalize ? w.prefix(1).uppercased() + w.dropFirst() : w }
         word = cased(word)
@@ -412,7 +421,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
             if let last = model.prompt.last, last != " " { model.prompt += " " }
             model.prompt += word
             updateShift()
-            return
+            return true
         }
         clearOttoAfterglow()
         let ctx = before
@@ -423,6 +432,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         pendingSpace = true
         if board.shift == .once { board.shift = .off }
         refreshSuggestions()
+        return true
     }
 
     func moveCursor(_ by: Int) {
