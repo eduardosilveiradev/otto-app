@@ -21,7 +21,10 @@ final class BoardModel: ObservableObject {
     @Published var dictLevel: Float = 0
 
     var style: KeyStyle { settings.style.followsSystem ? .system(dark: dark) : settings.style }
-    var barHeight: CGFloat { otto == .closed ? 44 : 92 }
+    // iOS pads ~16pt above any third-party keyboard; a 28pt bar puts suggestions and keys where Apple's are.
+    var barHeight: CGFloat { mode == .settings ? 0 : otto == .closed ? 28 : 76 }
+    /// Settings get room to breathe instead of a cramped scroll at keyboard height.
+    var extraHeight: CGFloat { mode == .settings ? 170 : 0 }
 
     // Wired by the controller.
     var pick: (Suggestion) -> Void = { _ in }
@@ -66,7 +69,7 @@ struct TopBar: View {
 
     private func suggestionRow(_ s: KeyStyle) -> some View {
         HStack(spacing: 0) {
-            Button { m.otto = .composing; m.prompt = "" } label: { OttoMark(size: 30) }
+            Button { m.otto = .composing; m.prompt = "" } label: { OttoMark(size: 26) }
                 .padding(.leading, 8).padding(.trailing, 4)
                 .accessibilityLabel("Ask Otto")
             HStack(spacing: 0) {
@@ -93,20 +96,13 @@ struct TopBar: View {
             .frame(maxWidth: .infinity)   // keeps Otto left and settings right with nothing to suggest
             Button { m.toggleDictation() } label: {
                 Image(systemName: "waveform").font(.system(size: 15, weight: .semibold)).foregroundStyle(.black)
-                    .frame(width: 32, height: 32).background(Circle().fill(.white))
+                    .frame(width: 28, height: 28).background(Circle().fill(.white))
                     .shadow(color: .black.opacity(0.15), radius: 1, y: 0.5)
-                    .frame(width: 40, height: 44)
+                    .frame(width: 40, height: 28)
             }
             .accessibilityLabel("Dictate")
-            Button { m.mode = m.mode == .clipboard ? .keys : .clipboard } label: {
-                Image(systemName: "list.clipboard").font(.system(size: 16)).frame(width: 36, height: 44)
-            }
-            .accessibilityLabel("Clipboard")
-            Button { m.mode = m.mode == .settings ? .keys : .settings } label: {
-                Image(systemName: "slider.horizontal.3").font(.system(size: 16)).frame(width: 40, height: 44)
-            }
-            .accessibilityLabel("Keyboard settings")
         }
+        .padding(.trailing, 2)
         .buttonStyle(.plain)
     }
 
@@ -174,6 +170,14 @@ struct TopBar: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
+                    ForEach([("list.clipboard", BoardModel.Mode.clipboard, "Clipboard"), ("slider.horizontal.3", .settings, "Settings")], id: \.0) { icon, mode, name in
+                        Button { m.otto = .closed; m.mode = mode } label: {
+                            Image(systemName: icon).font(.system(size: 14, weight: .medium))
+                                .frame(width: 36, height: 30).background(Capsule().fill(s.specialKey.color))
+                        }
+                        .accessibilityLabel(name)
+                    }
+                    Rectangle().fill(s.text.color.opacity(0.15)).frame(width: 1, height: 20)
                     ForEach(Self.chips, id: \.0) { title, prompt in
                         Button { m.ask(prompt) } label: {
                             Text(title).font(Font(s.uiFont(14, weight: .medium)))
@@ -187,7 +191,7 @@ struct TopBar: View {
             .disabled(m.otto == .thinking)
             .opacity(m.otto == .thinking ? 0.4 : 1)
         }
-        .padding(.horizontal, 8).padding(.top, 6)
+        .padding(.horizontal, 8).padding(.top, 2)
         .buttonStyle(.plain)
     }
 
@@ -353,7 +357,7 @@ struct SettingsPanel: View {
             }
             .padding(.horizontal, 14).frame(height: 44)
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 20) {
                     section("Languages · pick one or two") {
                         HStack(spacing: 8) {
                             ForEach(Lang.allCases, id: \.self) { l in
@@ -415,10 +419,14 @@ struct SettingsPanel: View {
         .background(boardBackground(s))
     }
 
+    /// iOS Settings-style group: a caption, then the rows on a rounded card.
     private func section<C: View>(_ title: String, @ViewBuilder _ c: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased()).font(.system(size: 11, weight: .semibold)).opacity(0.6)
-            c()
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased()).font(.system(size: 12, weight: .regular)).opacity(0.55).padding(.leading, 14)
+            VStack(alignment: .leading, spacing: 10) { c() }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(m.style.key.color.opacity(m.style.seeThrough ? 0.9 : 0.95)))
         }
     }
 

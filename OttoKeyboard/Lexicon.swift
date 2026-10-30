@@ -72,7 +72,8 @@ final class Lexicon {
             if sorted[i] != p, let e = byWord[Self.fold(sorted[i])] { found.append(e) }
             i += 1
         }
-        return found.sorted { $0.rank < $1.rank }.prefix(limit).map(\.word)
+        // Only words common enough to be meant: "hey" shouldn't offer "heywood".
+        return found.filter { $0.rank < 8_000 }.sorted { $0.rank < $1.rank }.prefix(limit).map(\.word)
     }
 
     /// The word they most likely meant, or nil when what they typed is fine.

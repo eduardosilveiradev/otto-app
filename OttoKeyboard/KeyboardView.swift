@@ -346,7 +346,7 @@ final class KeyView: UIView {
         switch def.kind {
         case .char(let s):
             label.text = shift == .off ? s : s.uppercased()
-            label.font = style.uiFont(s.first!.isLetter ? 23 : 22, weight: .light)
+            label.font = style.uiFont(s.first!.isLetter ? 25 : 23)
             if style.numberHints, row == 0, let d = Layout.digits[s] {
                 hint.text = d
                 hint.font = style.uiFont(10)
@@ -357,7 +357,7 @@ final class KeyView: UIView {
         case .globe: setIcon("globe")
         case .emoji: setIcon("face.smiling")
         case .otto: setIcon("sparkles")
-        case .space: label.text = spaceTitle; label.font = style.uiFont(15)
+        case .space: label.text = spaceTitle; label.font = style.uiFont(14); label.alpha = 0.55
         case .ret:
             switch returnTitle {
             case "return": setIcon("return.left")
@@ -366,7 +366,7 @@ final class KeyView: UIView {
             case "send": setIcon("arrow.up")
             default: label.text = returnTitle; label.font = style.uiFont(15, weight: .medium)
             }
-        case .page(let p): label.text = p == .letters ? "ABC" : p == .numbers ? "123" : "#+="; label.font = style.uiFont(15)
+        case .page(let p): label.text = p == .letters ? "ABC" : p == .numbers ? "123" : "#+="; label.font = style.uiFont(17)
         }
         let textColor = returnAccent && def.kind == .ret ? UIColor.white : style.text.ui
         label.textColor = textColor

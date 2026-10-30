@@ -38,12 +38,13 @@ struct KeyStyle: Codable, Equatable {
     /// The default style, resolved for light or dark.
     static func system(dark: Bool) -> KeyStyle {
         dark
-            ? KeyStyle(name: "System", background: [RGBA(0.10, 0.10, 0.11)], key: RGBA(0.42, 0.42, 0.44),
-                       specialKey: RGBA(0.27, 0.27, 0.29), text: RGBA(1, 1, 1), shadow: RGBA(0, 0, 0, 0.6),
-                       accent: RGBA(1, 0.62, 0.24), followsSystem: true)
+            // iOS 26: every key the same fill, rounder corners, no darker special keys.
+            ? KeyStyle(name: "System", background: [RGBA(0.10, 0.10, 0.11)], key: RGBA(0.27, 0.27, 0.29),
+                       specialKey: RGBA(0.27, 0.27, 0.29), text: RGBA(1, 1, 1), shadow: RGBA(0, 0, 0, 0.35),
+                       accent: RGBA(1, 0.62, 0.24), corner: 8.5, followsSystem: true)
             : KeyStyle(name: "System", background: [RGBA(0.82, 0.83, 0.86)], key: RGBA(1, 1, 1),
-                       specialKey: RGBA(0.67, 0.69, 0.73), text: RGBA(0, 0, 0), shadow: RGBA(0.53, 0.54, 0.56),
-                       accent: RGBA(1, 0.58, 0.2), followsSystem: true)
+                       specialKey: RGBA(1, 1, 1), text: RGBA(0, 0, 0), shadow: RGBA(0, 0, 0, 0.12),
+                       accent: RGBA(1, 0.58, 0.2), corner: 8.5, followsSystem: true)
     }
 
     static let presets: [KeyStyle] = [

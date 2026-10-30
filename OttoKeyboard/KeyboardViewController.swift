@@ -38,7 +38,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
 
     override func loadView() {
         inputView = ClickingInputView(frame: .zero, inputViewStyle: .keyboard)
-        inputView?.allowsSelfSizing = true
+        // Sized by our own height constraint only; self-sizing let iOS pad a band above the bar.
+        inputView?.allowsSelfSizing = false
     }
 
     override func viewDidLoad() {
@@ -50,6 +51,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
 
         bar = UIHostingController(rootView: TopBar(m: model))
         bar.view.backgroundColor = .clear
+        bar.view.clipsToBounds = true
         addChild(bar)
         bar.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(bar.view)
@@ -140,7 +142,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         board.style = style
         board.swipeEnabled = s.swipe
         board.popupsEnabled = s.keyPopups
-        board.spaceTitle = s.languages.count > 1 ? s.languages.map(\.label).joined(separator: " · ") : s.languages[0].spaceLabel
+        // Blank like iOS 26's; the languages show for a moment so a bilingual board says what it is.
+        let langs = s.languages.count > 1 ? s.languages.map(\.label).joined(separator: " · ") : s.languages[0].label
+        board.spaceTitle = langs
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            UIView.transition(with: self?.board ?? UIView(), duration: 0.3, options: .transitionCrossDissolve) { self?.board.spaceTitle = "" }
+        }
         if !style.seeThrough { gradient.colors = (style.background.count > 1 ? style.background : style.background + style.background).map { $0.ui.cgColor } }
         // The system's own blur shows through the default style, as on iOS.
         backdrop.isHidden = style.followsSystem || style.seeThrough
@@ -149,7 +156,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
 
     private func layoutForModel() {
         barHeight.constant = model.barHeight
-        height.constant = model.barHeight + Self.keysHeight
+        height.constant = model.barHeight + Self.keysHeight + model.extraHeight
         guard model.mode != panelMode || (panel == nil) != (model.mode == .keys) else { return }
         panelMode = model.mode
         let want: AnyView? = switch model.mode {
