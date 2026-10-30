@@ -475,6 +475,9 @@ struct Composer: View {
                 for _ in 0..<40 { try? await Task.sleep(for: .milliseconds(120)); draft += "typing more words " }
             }
             if args.contains("-recordDemo") { await recorder.start() }
+            // `-kbdDemo <text>`: the Otto keyboard's screenshots. Focuses the box with <text> in it;
+            // a leading "#kbd …" line drives the keyboard's DEBUG preview (OttoKeyboard/Preview.swift).
+            if let i = args.firstIndex(of: "-kbdDemo"), i + 1 < args.count { draft = args[i + 1]; focused = true }
             if args.contains("-seedDraft") {
                 draft = String(repeating: "a long draft that should make the box grow. ", count: 5)
             }
