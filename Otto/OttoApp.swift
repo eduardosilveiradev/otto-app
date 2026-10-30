@@ -8,6 +8,7 @@ struct OttoApp: App {
 
     init() {
         Notifier.shared.register()   // the background task must be registered before launch ends
+        Dictation.shared.setUp()     // the keyboard's mic requests arrive any time
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
         #endif
@@ -16,7 +17,11 @@ struct OttoApp: App {
     var body: some Scene {
         WindowGroup {
             // The store is made only once onboarding is over, so it starts on the server just paired.
-            if onboarded { MainRoot() } else { OnboardingFlow { withAnimation { onboarded = true } } }
+            Group {
+                if onboarded { MainRoot() } else { OnboardingFlow { withAnimation { onboarded = true } } }
+            }
+            .onOpenURL { if $0.host == "dictate" { Dictation.shared.openedFromKeyboard() } }
+            .modifier(DictationCover())
         }
     }
 }

@@ -150,7 +150,8 @@ enum Keepalive {
     static var enabled: Bool { UserDefaults.standard.object(forKey: "stayAwake") as? Bool ?? true }
 
     static func update(background: Bool) {
-        if background && enabled && !CallManager.active && !VoiceRecorder.active { start() } else { stop() }
+        // Dictation's warm mic already keeps the app alive, and owns the session.
+        if background && enabled && !CallManager.active && !VoiceRecorder.active && !Dictation.active { start() } else { stop() }
     }
 
     private static func start() {

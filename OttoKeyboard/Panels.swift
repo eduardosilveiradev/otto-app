@@ -17,6 +17,8 @@ final class BoardModel: ObservableObject {
     @Published var pasteReady = false
     @Published var clips: [String] = (UserDefaults.standard.stringArray(forKey: "clipHistory") ?? [])
     @Published var flash: String?
+    @Published var dictation: DictationBridge.State.Phase = .idle
+    @Published var dictLevel: Float = 0
 
     var style: KeyStyle { settings.style.followsSystem ? .system(dark: dark) : settings.style }
     var barHeight: CGFloat { otto == .closed ? 44 : 92 }
@@ -30,6 +32,7 @@ final class BoardModel: ObservableObject {
     var settingsChanged: () -> Void = {}
     var pasteCurrent: () -> Void = {}
     var copyField: () -> Void = {}
+    var toggleDictation: () -> Void = {}
 
     /// Newest first, no repeats, 25 kept.
     func remember(clip: String) {
@@ -54,7 +57,8 @@ struct TopBar: View {
     var body: some View {
         let s = m.style
         VStack(spacing: 0) {
-            if m.otto == .closed { suggestionRow(s) } else { ottoRows(s) }
+            if m.dictation == .listening || m.dictation == .working { dictationRow(s) }
+            else if m.otto == .closed { suggestionRow(s) } else { ottoRows(s) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(s.text.color)
@@ -87,6 +91,13 @@ struct TopBar: View {
                 }
             }
             .frame(maxWidth: .infinity)   // keeps Otto left and settings right with nothing to suggest
+            Button { m.toggleDictation() } label: {
+                Image(systemName: "waveform").font(.system(size: 15, weight: .semibold)).foregroundStyle(.black)
+                    .frame(width: 32, height: 32).background(Circle().fill(.white))
+                    .shadow(color: .black.opacity(0.15), radius: 1, y: 0.5)
+                    .frame(width: 40, height: 44)
+            }
+            .accessibilityLabel("Dictate")
             Button { m.mode = m.mode == .clipboard ? .keys : .clipboard } label: {
                 Image(systemName: "list.clipboard").font(.system(size: 16)).frame(width: 36, height: 44)
             }
@@ -96,6 +107,36 @@ struct TopBar: View {
             }
             .accessibilityLabel("Keyboard settings")
         }
+        .buttonStyle(.plain)
+    }
+
+    /// While the app records for the keyboard: a level meter and the button that finishes it.
+    private func dictationRow(_ s: KeyStyle) -> some View {
+        let working = m.dictation == .working
+        return HStack(spacing: 10) {
+            OttoMark(size: 28, thinking: working)
+            if working {
+                Text("Cleaning it up…").font(Font(s.uiFont(15))).opacity(0.75)
+            } else {
+                HStack(spacing: 3) {
+                    ForEach(0..<12, id: \.self) { i in
+                        Capsule().fill(s.accent.color)
+                            .frame(width: 3.5, height: 5 + CGFloat(m.dictLevel) * 22 * CGFloat(0.35 + 0.65 * abs(sin(Double(i) * 1.1))))
+                    }
+                }
+                .animation(.easeOut(duration: 0.12), value: m.dictLevel)
+                Text("Listening").font(Font(s.uiFont(15))).opacity(0.75)
+            }
+            Spacer()
+            if !working {
+                Button { m.toggleDictation() } label: {
+                    Text("Done").font(Font(s.uiFont(15, weight: .semibold))).foregroundStyle(.white)
+                        .padding(.horizontal, 16).frame(height: 32).background(Capsule().fill(s.accent.color))
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .buttonStyle(.plain)
     }
 

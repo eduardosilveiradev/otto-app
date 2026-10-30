@@ -22,6 +22,7 @@ extension KeyboardViewController {
                 previewModel.mode = .clipboard
             }
             if c == "otto" { previewModel.otto = .composing; previewModel.prompt = "tell her I'll be 10 min late" }
+            if c == "dictating" { previewModel.dictation = .listening; previewModel.dictLevel = 0.6 }
             if c == "ottodone" { previewModel.otto = .done("Rewritten") }
             if c.hasPrefix("style:"), let p = KeyStyle.presets.first(where: { $0.name == c.dropFirst(6) }) { previewModel.settings.style = p }
             if c.hasPrefix("lang:") { previewModel.settings.languages = c.dropFirst(5).split(separator: ",").compactMap { Lang(rawValue: String($0)) } }

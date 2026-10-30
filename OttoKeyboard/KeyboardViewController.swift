@@ -81,6 +81,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         model.settingsChanged = { [weak self] in self?.applySettings() }
         model.pasteCurrent = { [weak self] in self?.pasteCurrent() }
         model.copyField = { [weak self] in self?.copyField() }
+        model.toggleDictation = { [weak self] in self?.toggleDictation() }
+        DictationBridge.observe(DictationBridge.toKeyboard) { [weak self] in self?.dictationChanged() }
         // SwiftUI changes the mode and the Otto state; the UIKit side follows once they've landed.
         watch = model.$mode.combineLatest(model.$otto).receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.layoutForModel(); self?.refreshContext() }
@@ -90,6 +92,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         refreshContext()
+        // Back from the app, possibly in a fresh process: pick up a dictation that finished meanwhile.
+        dictationChanged()
     }
 
     override func viewDidLayoutSubviews() {
@@ -433,6 +437,74 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         model.remember(clip: text)
         model.flash = "Copied"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.model.flash = nil }
+    }
+
+    // MARK: dictation
+
+    /// The dictation this keyboard asked for. On disk: iOS often ends the keyboard's
+    /// process while they're in the app starting it.
+    private var dictationID: String? {
+        get { UserDefaults.standard.string(forKey: "dictationID") }
+        set { UserDefaults.standard.set(newValue, forKey: "dictationID") }
+    }
+
+    private func toggleDictation() {
+        guard hasFullAccess else { model.flash = "Needs Allow Full Access"; return }
+        if model.dictation == .listening, let id = dictationID {
+            DictationBridge.write(.init(action: .stop, id: id))
+            DictationBridge.post(DictationBridge.toApp)
+            return
+        }
+        let id = UUID().uuidString
+        dictationID = id
+        DictationBridge.write(.init(action: .start, id: id, preceding: String(before.suffix(200)),
+                                    langs: model.settings.languages.map(\.rawValue)))
+        if DictationBridge.readState().appIsWarm {
+            DictationBridge.post(DictationBridge.toApp)
+        } else {
+            // iOS won't let a backgrounded app turn the mic on: open it, as Raycast's keyboard does.
+            openContainingApp(DictationBridge.openURL)
+        }
+    }
+
+    private func dictationChanged() {
+        guard let id = dictationID else { return }
+        let s = DictationBridge.readState()
+        guard s.id == id else { return }
+        model.dictLevel = s.level
+        switch s.phase {
+        case .done:
+            dictationID = nil
+            model.dictation = .idle
+            if let t = s.text, !t.isEmpty {
+                let ctx = before
+                let joined = ctx.isEmpty || ctx.last!.isWhitespace || t.first.map { $0 == " " || $0.isPunctuation } == true
+                insert((joined ? "" : " ") + t)
+            }
+        case .failed:
+            dictationID = nil
+            model.dictation = .idle
+            model.flash = s.text
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.model.flash = nil }
+        default:
+            model.dictation = s.phase
+        }
+    }
+
+    /// Keyboards aren't given `open(_:)`, but the UIApplication at the end of the responder
+    /// chain still answers it; this is how other keyboards hand off to their app.
+    private func openContainingApp(_ url: URL) {
+        let sel = NSSelectorFromString("openURL:options:completionHandler:")
+        var r: UIResponder? = self
+        while let cur = r {
+            if cur is UIApplication, cur.responds(to: sel) {
+                typealias Open = @convention(c) (AnyObject, Selector, NSURL, NSDictionary, (@convention(block) (Bool) -> Void)?) -> Void
+                unsafeBitCast(cur.method(for: sel), to: Open.self)(cur, sel, url as NSURL, [:], nil)
+                return
+            }
+            r = cur.next
+        }
+        model.flash = "Open Otto to dictate"
     }
 
     // MARK: Otto

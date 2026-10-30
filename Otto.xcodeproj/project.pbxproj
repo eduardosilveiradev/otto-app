@@ -164,7 +164,8 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Take a photo to send Otto, or scan the code that pairs it with your Mac.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID confirms changes you approve for Otto.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Otto saves where you are when you ask it to.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Otto listens when you record a voice message or call.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Otto listens when you record a voice message, call, or dictate from the Otto keyboard.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "When your Mac can't be reached, the Otto keyboard's dictation is transcribed on this iPhone.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
@@ -190,7 +191,8 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Take a photo to send Otto, or scan the code that pairs it with your Mac.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Face ID confirms changes you approve for Otto.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Otto saves where you are when you ask it to.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Otto listens when you record a voice message or call.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Otto listens when you record a voice message, call, or dictate from the Otto keyboard.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "When your Mac can't be reached, the Otto keyboard's dictation is transcribed on this iPhone.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
