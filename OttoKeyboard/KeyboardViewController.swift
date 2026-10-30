@@ -46,6 +46,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .clear
+        if BoardModel.sheet {
+            // iOS 27's keyboard is a sheet with rounded top corners; paint inside them, not over them.
+            view.layer.cornerRadius = 34
+            view.layer.cornerCurve = .continuous
+            view.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            view.clipsToBounds = true
+        }
         backdrop.layer.addSublayer(gradient)
         backdrop.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(backdrop)
@@ -95,6 +102,16 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // iOS keeps a separate keyboard process alive per app, so a change made while typing in
+        // another app only reaches this one by reading the saved copy again each time it shows.
+        let saved = KeyboardSettings.load()
+        if saved != model.settings { model.settings = saved; applySettings() }
+        model.clips = UserDefaults.standard.stringArray(forKey: "clipHistory") ?? []
+        // Panels read their state when built (emoji recents too): rebuild them from what's saved now.
+        if model.mode == .keys {
+            for h in panels.values { h.willMove(toParent: nil); h.view.removeFromSuperview(); h.removeFromParent() }
+            panels = [:]
+        }
         refreshContext()
         // Back from the app, possibly in a fresh process: pick up a dictation that finished meanwhile.
         dictationChanged()
