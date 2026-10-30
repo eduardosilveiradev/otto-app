@@ -27,6 +27,10 @@ extension KeyboardViewController {
             if c.hasPrefix("style:"), let p = KeyStyle.presets.first(where: { $0.name == c.dropFirst(6) }) { previewModel.settings.style = p }
             if c.hasPrefix("lang:") { previewModel.settings.languages = c.dropFirst(5).split(separator: ",").compactMap { Lang(rawValue: String($0)) } }
             if c.hasPrefix("swipe:") { swipeWord = String(c.dropFirst(6)) }
+            if c.hasPrefix("press:") {
+                let ch = String(c.dropFirst(6))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in previewPress(ch) }
+            }
         }
         previewApplySettings()
         if let w = swipeWord {
@@ -38,6 +42,11 @@ extension KeyboardViewController {
 }
 
 extension KeyboardView {
+    func demoPress(_ ch: String) {
+        guard let k = subviews.compactMap({ $0 as? KeyView }).first(where: { $0.def.kind == .char(ch) }) else { return }
+        showPopup(for: k)
+    }
+
     func demoTrail(through word: String) -> [CGPoint] {
         let centers = letterCenters
         var pts: [CGPoint] = []

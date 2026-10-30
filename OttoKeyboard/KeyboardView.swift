@@ -248,10 +248,10 @@ final class KeyboardView: UIView {
 
     // MARK: popups
 
-    private func showPopup(for k: KeyView) {
+    func showPopup(for k: KeyView) {
         hidePopup()
         guard popupsEnabled, let host = popupHost, case .char(let s) = k.def.kind else { return }
-        let p = KeyPopup(text: shift == .off ? s : s.uppercased(), style: style, keyFrame: convert(k.frame, to: host))
+        let p = KeyPopup(text: shift == .off ? s : s.uppercased(), style: style, keyFrame: convert(k.frame, to: host), hostWidth: host.bounds.width)
         host.addSubview(p)
         popup = p
     }
@@ -395,15 +395,50 @@ final class KeyPopup: UIView {
     private(set) var selected: String?
     private let style: KeyStyle
 
-    init(text: String, style: KeyStyle, keyFrame: CGRect) {
+    /// The iOS balloon: a wider head above the key, flowing down into the key itself.
+    init(text: String, style: KeyStyle, keyFrame: CGRect, hostWidth: CGFloat = .greatestFiniteMagnitude) {
         self.style = style
-        let w = keyFrame.width + 18, h = keyFrame.height + 18
-        super.init(frame: CGRect(x: keyFrame.midX - w / 2, y: keyFrame.minY - h - 4, width: w, height: h))
-        decorate()
-        let l = UILabel(frame: bounds)
+        // Nothing can draw above the keyboard's own view, so the top row's head gets the room there is.
+        let headW = keyFrame.width * 1.55, headH = min(keyFrame.height * 1.15, max(30, keyFrame.minY - 7)), r = max(style.corner, 8)
+        // Edge keys lean their head inward so it stays on screen, as iOS does.
+        let headX = min(max(2, keyFrame.midX - headW / 2), hostWidth - headW - 2)
+        let frame = CGRect(x: min(headX, keyFrame.minX), y: keyFrame.minY - headH - 6,
+                           width: max(headX + headW, keyFrame.maxX) - min(headX, keyFrame.minX), height: headH + 6 + keyFrame.height)
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        let head = CGRect(x: headX - frame.minX, y: 0, width: headW, height: headH)
+        let key = CGRect(x: keyFrame.minX - frame.minX, y: headH + 6, width: keyFrame.width, height: keyFrame.height)
+        let path = UIBezierPath()
+        path.move(to: CGPoint(x: head.minX + r, y: head.minY))
+        path.addLine(to: CGPoint(x: head.maxX - r, y: head.minY))
+        path.addQuadCurve(to: CGPoint(x: head.maxX, y: head.minY + r), controlPoint: CGPoint(x: head.maxX, y: head.minY))
+        path.addLine(to: CGPoint(x: head.maxX, y: head.maxY - r))
+        // The neck: curve in from the head's side to the key's.
+        path.addCurve(to: CGPoint(x: key.maxX, y: key.minY + 2), controlPoint1: CGPoint(x: head.maxX, y: head.maxY + 2),
+                      controlPoint2: CGPoint(x: key.maxX, y: head.maxY))
+        path.addLine(to: CGPoint(x: key.maxX, y: key.maxY - style.corner))
+        path.addQuadCurve(to: CGPoint(x: key.maxX - style.corner, y: key.maxY), controlPoint: CGPoint(x: key.maxX, y: key.maxY))
+        path.addLine(to: CGPoint(x: key.minX + style.corner, y: key.maxY))
+        path.addQuadCurve(to: CGPoint(x: key.minX, y: key.maxY - style.corner), controlPoint: CGPoint(x: key.minX, y: key.maxY))
+        path.addLine(to: CGPoint(x: key.minX, y: key.minY + 2))
+        path.addCurve(to: CGPoint(x: head.minX, y: head.maxY - r), controlPoint1: CGPoint(x: key.minX, y: head.maxY),
+                      controlPoint2: CGPoint(x: head.minX, y: head.maxY + 2))
+        path.addLine(to: CGPoint(x: head.minX, y: head.minY + r))
+        path.addQuadCurve(to: CGPoint(x: head.minX + r, y: head.minY), controlPoint: CGPoint(x: head.minX, y: head.minY))
+        path.close()
+        let shape = CAShapeLayer()
+        shape.path = path.cgPath
+        shape.fillColor = (style.key.a < 1 ? UIColor(white: 0.3, alpha: 0.97) : style.key.ui).cgColor
+        shape.shadowColor = UIColor.black.cgColor
+        shape.shadowOpacity = 0.22
+        shape.shadowRadius = 5
+        shape.shadowOffset = CGSize(width: 0, height: 1)
+        shape.shadowPath = path.cgPath
+        layer.addSublayer(shape)
+        let l = UILabel(frame: head.offsetBy(dx: 0, dy: -2))
         l.text = text
         l.textAlignment = .center
-        l.font = style.uiFont(34, weight: .light)
+        l.font = style.uiFont(min(36, headH * 0.75))
         l.textColor = style.text.ui
         addSubview(l)
     }

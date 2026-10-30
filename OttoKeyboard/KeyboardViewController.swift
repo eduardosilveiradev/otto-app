@@ -124,6 +124,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     var previewModel: BoardModel { model }
     func previewApplySettings() { applySettings() }
     func previewSwipe(_ word: String) { swiped(board.demoTrail(through: word)) }
+    func previewPress(_ ch: String) { board.demoPress(ch) }
     #endif
 
     // MARK: settings and look
