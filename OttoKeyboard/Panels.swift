@@ -3,7 +3,7 @@ import SwiftUI
 /// State the SwiftUI parts share with the controller.
 @MainActor
 final class BoardModel: ObservableObject {
-    enum Mode { case keys, emoji, settings }
+    enum Mode { case keys, emoji, settings, clipboard }
     enum Otto: Equatable { case closed, composing, thinking, done(String), failed(String) }
     struct Suggestion: Hashable { var text: String; var literal = false; var primary = false }
 
@@ -13,6 +13,10 @@ final class BoardModel: ObservableObject {
     @Published var suggestions: [Suggestion] = []
     @Published var settings = KeyboardSettings.load()
     @Published var dark = false
+    /// Something new is on the clipboard (known without reading it, so no paste banner until they tap).
+    @Published var pasteReady = false
+    @Published var clips: [String] = (UserDefaults.standard.stringArray(forKey: "clipHistory") ?? [])
+    @Published var flash: String?
 
     var style: KeyStyle { settings.style.followsSystem ? .system(dark: dark) : settings.style }
     var barHeight: CGFloat { otto == .closed ? 44 : 92 }
@@ -24,12 +28,22 @@ final class BoardModel: ObservableObject {
     var typeEmoji: (String) -> Void = { _ in }
     var deleteBackward: () -> Void = {}
     var settingsChanged: () -> Void = {}
+    var pasteCurrent: () -> Void = {}
+    var copyField: () -> Void = {}
+
+    /// Newest first, no repeats, 25 kept.
+    func remember(clip: String) {
+        let c = clip.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !c.isEmpty else { return }
+        clips = Array(([clip] + clips.filter { $0 != clip }).prefix(25))
+        UserDefaults.standard.set(clips, forKey: "clipHistory")
+    }
 }
 
 private extension RGBA { var color: Color { Color(uiColor: ui) } }
 
 private func boardBackground(_ s: KeyStyle) -> some View {
-    LinearGradient(colors: s.background.map(\.color), startPoint: .top, endPoint: .bottom)
+    LinearGradient(colors: s.seeThrough ? [.clear] : s.background.map(\.color), startPoint: .top, endPoint: .bottom)
 }
 
 // MARK: - the bar above the keys
@@ -52,6 +66,14 @@ struct TopBar: View {
                 .padding(.leading, 8).padding(.trailing, 4)
                 .accessibilityLabel("Ask Otto")
             HStack(spacing: 0) {
+                if m.suggestions.isEmpty, m.pasteReady {
+                    Button { m.pasteCurrent() } label: {
+                        Label("Paste", systemImage: "doc.on.clipboard").font(Font(s.uiFont(15, weight: .medium)))
+                            .padding(.horizontal, 14).frame(height: 32)
+                            .background(Capsule().fill(s.key.color.opacity(0.8)))
+                    }
+                }
+                if let f = m.flash { Text(f).font(Font(s.uiFont(14))).opacity(0.7) }
                 ForEach(Array(m.suggestions.prefix(3).enumerated()), id: \.offset) { i, sug in
                     if i > 0 { Rectangle().fill(s.text.color.opacity(0.18)).frame(width: 1, height: 24) }
                     Button { m.pick(sug) } label: {
@@ -64,6 +86,11 @@ struct TopBar: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity)   // keeps Otto left and settings right with nothing to suggest
+            Button { m.mode = m.mode == .clipboard ? .keys : .clipboard } label: {
+                Image(systemName: "list.clipboard").font(.system(size: 16)).frame(width: 36, height: 44)
+            }
+            .accessibilityLabel("Clipboard")
             Button { m.mode = m.mode == .settings ? .keys : .settings } label: {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 16)).frame(width: 40, height: 44)
             }
@@ -221,6 +248,55 @@ struct EmojiPanel: View {
     }
 }
 
+// MARK: - clipboard
+
+struct ClipboardPanel: View {
+    @ObservedObject var m: BoardModel
+
+    var body: some View {
+        let s = m.style
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button { m.mode = .keys } label: { Text("ABC").font(Font(s.uiFont(15))).frame(width: 46, height: 32) }
+                Spacer()
+                Button { m.copyField() } label: { Label("Copy field", systemImage: "doc.on.doc").font(.system(size: 14, weight: .medium)) }
+                    .padding(.horizontal, 12).frame(height: 30).background(Capsule().fill(s.specialKey.color))
+                Button { m.pasteCurrent() } label: { Label("Paste", systemImage: "doc.on.clipboard").font(.system(size: 14, weight: .medium)) }
+                    .padding(.horizontal, 12).frame(height: 30).background(Capsule().fill(s.accent.color)).foregroundStyle(.white)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            if m.clips.isEmpty {
+                Text("Things you paste or copy here are kept for a quick reuse.")
+                    .font(.system(size: 14)).opacity(0.6).multilineTextAlignment(.center).padding(24)
+                    .frame(maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(m.clips, id: \.self) { clip in
+                            HStack(spacing: 0) {
+                                Button { m.typeEmoji(clip) } label: {
+                                    Text(clip).font(Font(s.uiFont(15))).lineLimit(2).multilineTextAlignment(.leading)
+                                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8)
+                                        .contentShape(Rectangle())
+                                }
+                                Button { UIPasteboard.general.string = clip; m.flash = "Copied" } label: {
+                                    Image(systemName: "doc.on.doc").frame(width: 40, height: 36)
+                                }
+                                .accessibilityLabel("Copy")
+                            }
+                            .background(RoundedRectangle(cornerRadius: s.corner + 2).fill(s.key.color.opacity(0.85)))
+                            .contextMenu { Button("Remove", role: .destructive) { m.clips.removeAll { $0 == clip }; UserDefaults.standard.set(m.clips, forKey: "clipHistory") } }
+                        }
+                    }
+                    .padding(.horizontal, 8).padding(.bottom, 8)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(s.text.color)
+    }
+}
+
 // MARK: - settings
 
 struct SettingsPanel: View {
@@ -330,7 +406,7 @@ private struct Swatch: View {
     var body: some View {
         VStack(spacing: 4) {
             ZStack {
-                boardBackground(style)
+                if style.seeThrough { Color.gray.opacity(0.35) } else { boardBackground(style) }
                 HStack(spacing: 3) {
                     ForEach(0..<3) { i in
                         RoundedRectangle(cornerRadius: style.corner / 2).fill((i == 2 ? style.accent : style.key).color)

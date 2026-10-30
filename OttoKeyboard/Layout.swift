@@ -17,11 +17,14 @@ struct KeyDef {
 /// EN, IT and PT all use QWERTY on iOS, so one board serves any pair; the languages
 /// differ in their accents, which come from a long press.
 enum Layout {
-    static func rows(_ page: Page, showGlobe: Bool) -> [[KeyDef]] {
+    /// `extra`: keys beside space for the field's kind, "." for a URL or search, "@" and "." for an email.
+    static func rows(_ page: Page, showGlobe: Bool, extra: [String] = []) -> [[KeyDef]] {
         let bottomLeft: [KeyDef] = [KeyDef(kind: .page(page == .letters ? .numbers : .letters), width: 1.25)]
             + (showGlobe ? [KeyDef(kind: .globe, width: 1.25)] : [])
             + [KeyDef(kind: .emoji, width: 1.25)]
-        let bottom = bottomLeft + [KeyDef(kind: .space, width: showGlobe ? 4.75 : 6), KeyDef(kind: .ret, width: 2.25)]
+        let spaceW = (showGlobe ? 4.75 : 6) - CGFloat(extra.count) * 1.1
+        let bottom = bottomLeft + [KeyDef(kind: .space, width: spaceW)]
+            + extra.map { KeyDef(kind: .char($0), width: 1.1) } + [KeyDef(kind: .ret, width: 2.25)]
         func chars(_ s: String) -> [KeyDef] { s.map { KeyDef(kind: .char(String($0))) } }
         switch page {
         case .letters:
@@ -67,6 +70,9 @@ enum Layout {
         "!": ["¡"],
         "%": ["‰"],
     ]
+
+    /// Top-row digits, for styles with number hints.
+    static let digits: [String: String] = Dictionary(uniqueKeysWithValues: zip("qwertyuiop".map(String.init), "1234567890".map(String.init)))
 
     /// The letter key a character is typed with, for swipe paths: é → e.
     static func base(_ ch: Character) -> Character {

@@ -97,6 +97,9 @@ final class Lexicon {
                 }
             }
         }
+        // A word cut short: "tonig" means "tonight" more than one edit's "toni".
+        if lower.count >= 4, let done = completions(lower, limit: 1).first, let e = byWord[Self.fold(done)],
+           e.rank < 5_000, best == nil || e.rank < best!.rank { best = e }
         return best?.word
     }
 

@@ -7,7 +7,7 @@ struct KeyStyle: Codable, Equatable {
     enum Font: String, Codable, CaseIterable { case system, rounded, serif, mono }
 
     var name: String
-    var background: [RGBA]       // one colour, or two for a vertical gradient
+    var background: [RGBA]       // one colour, two for a vertical gradient, or none: the system's glass shows through
     var key: RGBA
     var specialKey: RGBA         // shift, delete, 123, return when it isn't the accent
     var text: RGBA
@@ -18,6 +18,11 @@ struct KeyStyle: Codable, Equatable {
     var keyBorder: CGFloat = 0
     /// Follows the system's light/dark (only the built-in default does).
     var followsSystem = false
+    /// Small digits on the top row; a long press there types the digit.
+    var numberHints = false
+
+    /// Nothing painted behind the keys, so the keyboard and the system's globe/mic strip share one backdrop.
+    var seeThrough: Bool { background.isEmpty }
 
     func uiFont(_ size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
         let base = UIFont.systemFont(ofSize: size, weight: weight)
@@ -43,6 +48,12 @@ struct KeyStyle: Codable, Equatable {
 
     static let presets: [KeyStyle] = [
         .system(dark: false),
+        KeyStyle(name: "Smoke", background: [], key: RGBA(0.07, 0.07, 0.08, 0.82),
+                 specialKey: RGBA(0.07, 0.07, 0.08, 0.82), text: RGBA(1, 1, 1), shadow: RGBA(0, 0, 0, 0),
+                 accent: RGBA(0.22, 0.52, 0.98), corner: 9, numberHints: true),
+        KeyStyle(name: "Frost", background: [], key: RGBA(1, 1, 1, 0.78),
+                 specialKey: RGBA(1, 1, 1, 0.45), text: RGBA(0, 0, 0), shadow: RGBA(0, 0, 0, 0.12),
+                 accent: RGBA(0.22, 0.52, 0.98), corner: 9, numberHints: true),
         KeyStyle(name: "Tangerine", background: [RGBA(1, 0.80, 0.55), RGBA(1, 0.62, 0.30)], key: RGBA(1, 0.97, 0.92),
                  specialKey: RGBA(1, 0.84, 0.66), text: RGBA(0.35, 0.18, 0.05), shadow: RGBA(0.75, 0.42, 0.12),
                  accent: RGBA(0.85, 0.40, 0.08), corner: 9, font: .rounded),

@@ -17,6 +17,10 @@ extension KeyboardViewController {
         for c in cmds {
             if c == "emoji" { previewModel.mode = .emoji }
             if c == "settings" { previewModel.mode = .settings }
+            if c == "clipboard" {
+                ["see you at 8 by the station", "IT60 X054 2811 1010 0000 0123 456", "https://maps.apple.com/?q=Bar+Basso"].reversed().forEach { previewModel.remember(clip: $0) }
+                previewModel.mode = .clipboard
+            }
             if c == "otto" { previewModel.otto = .composing; previewModel.prompt = "tell her I'll be 10 min late" }
             if c == "ottodone" { previewModel.otto = .done("Rewritten") }
             if c.hasPrefix("style:"), let p = KeyStyle.presets.first(where: { $0.name == c.dropFirst(6) }) { previewModel.settings.style = p }

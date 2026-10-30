@@ -33,6 +33,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
 
     private static let keysHeight: CGFloat = 216
 
+    // Tells iOS this keyboard brings its own dictation, so it drops the mic from the strip under the keys.
+    override var hasDictationKey: Bool { get { true } set {} }
+
     override func loadView() {
         inputView = ClickingInputView(frame: .zero, inputViewStyle: .keyboard)
         inputView?.allowsSelfSizing = true
@@ -76,6 +79,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         model.typeEmoji = { [weak self] in self?.insert($0) }
         model.deleteBackward = { [weak self] in self?.textDocumentProxy.deleteBackward() }
         model.settingsChanged = { [weak self] in self?.applySettings() }
+        model.pasteCurrent = { [weak self] in self?.pasteCurrent() }
+        model.copyField = { [weak self] in self?.copyField() }
         // SwiftUI changes the mode and the Otto state; the UIKit side follows once they've landed.
         watch = model.$mode.combineLatest(model.$otto).receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.layoutForModel(); self?.refreshContext() }
@@ -132,9 +137,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         board.swipeEnabled = s.swipe
         board.popupsEnabled = s.keyPopups
         board.spaceTitle = s.languages.count > 1 ? s.languages.map(\.label).joined(separator: " · ") : s.languages[0].spaceLabel
-        gradient.colors = (style.background.count > 1 ? style.background : style.background + style.background).map { $0.ui.cgColor }
+        if !style.seeThrough { gradient.colors = (style.background.count > 1 ? style.background : style.background + style.background).map { $0.ui.cgColor } }
         // The system's own blur shows through the default style, as on iOS.
-        backdrop.isHidden = style.followsSystem
+        backdrop.isHidden = style.followsSystem || style.seeThrough
         layoutForModel()
     }
 
@@ -147,6 +152,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         case .keys: nil
         case .emoji: AnyView(EmojiPanel(m: model))
         case .settings: AnyView(SettingsPanel(m: model))
+        case .clipboard: AnyView(ClipboardPanel(m: model))
         }
         panel?.willMove(toParent: nil)
         panel?.view.removeFromSuperview()
@@ -186,6 +192,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         default: "return"
         }
         board.returnIsAccent = board.returnTitle != "return"
+        board.extraKeys = switch textDocumentProxy.keyboardType {
+        case .emailAddress: ["@", "."]
+        case .URL, .webSearch: ["."]
+        default: board.returnTitle == "search" || board.returnTitle == "go" ? ["."] : []
+        }
+        refreshClipboard()
         updateShift()
         refreshSuggestions()
     }
@@ -388,6 +400,39 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         for _ in currentWord { textDocumentProxy.deleteBackward() }
         insert(s.text + " ")
         pendingSpace = false
+    }
+
+    // MARK: clipboard
+
+    private static let seenKey = "clipSeenChangeCount"
+
+    /// changeCount and hasStrings don't read the clipboard, so iOS shows no paste banner for them.
+    private func refreshClipboard() {
+        let pb = UIPasteboard.general
+        model.pasteReady = hasFullAccess && pb.hasStrings && pb.changeCount != UserDefaults.standard.integer(forKey: Self.seenKey)
+    }
+
+    private func pasteCurrent() {
+        guard hasFullAccess else { model.flash = "Needs Allow Full Access"; return }
+        let pb = UIPasteboard.general
+        UserDefaults.standard.set(pb.changeCount, forKey: Self.seenKey)
+        guard let s = pb.string, !s.isEmpty else { refreshClipboard(); return }
+        model.remember(clip: s)
+        if model.mode == .clipboard { model.mode = .keys }
+        insert(s)
+    }
+
+    /// Copies everything in the field (or what's selected), and keeps it in the history.
+    private func copyField() {
+        guard hasFullAccess else { model.flash = "Needs Allow Full Access"; return }
+        let p = textDocumentProxy
+        let text = p.selectedText?.isEmpty == false ? p.selectedText! : (p.documentContextBeforeInput ?? "") + (p.documentContextAfterInput ?? "")
+        guard !text.isEmpty else { return }
+        UIPasteboard.general.string = text
+        UserDefaults.standard.set(UIPasteboard.general.changeCount, forKey: Self.seenKey)
+        model.remember(clip: text)
+        model.flash = "Copied"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.model.flash = nil }
     }
 
     // MARK: Otto

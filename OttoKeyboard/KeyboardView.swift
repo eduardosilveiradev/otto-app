@@ -26,6 +26,7 @@ final class KeyboardView: UIView {
     var returnTitle = "return" { didSet { if returnTitle != oldValue { refreshLabels() } } }
     var returnIsAccent = false { didSet { if returnIsAccent != oldValue { refreshLabels() } } }
     var spaceTitle = "space" { didSet { if spaceTitle != oldValue { refreshLabels() } } }
+    var extraKeys: [String] = [] { didSet { if extraKeys != oldValue { rebuild() } } }
     var swipeEnabled = true
     var popupsEnabled = true
 
@@ -50,7 +51,7 @@ final class KeyboardView: UIView {
 
     private func rebuild() {
         keys.forEach { $0.removeFromSuperview() }
-        keys = Layout.rows(page, showGlobe: showGlobe).enumerated().flatMap { r, row in
+        keys = Layout.rows(page, showGlobe: showGlobe, extra: page == .letters ? extraKeys : []).enumerated().flatMap { r, row in
             row.map { KeyView(def: $0, row: r) }
         }
         keys.forEach { addSubview($0) }
@@ -133,7 +134,7 @@ final class KeyboardView: UIView {
             switch k.def.kind {
             case .char(let s):
                 showPopup(for: k)
-                if Layout.variants[s.lowercased()] != nil {
+                if !variants(for: s).isEmpty {
                     tr.timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in self?.openVariants(tr) }
                 }
             case .delete:
@@ -256,8 +257,9 @@ final class KeyboardView: UIView {
     }
 
     private func openVariants(_ tr: Track) {
-        guard tr.mode == .tap, let host = popupHost, case .char(let s) = tr.key.def.kind,
-              let vs = Layout.variants[s.lowercased()] else { return }
+        guard tr.mode == .tap, let host = popupHost, case .char(let s) = tr.key.def.kind else { return }
+        let vs = variants(for: s)
+        guard !vs.isEmpty else { return }
         hidePopup()
         tr.mode = .variants
         let up = shift != .off
@@ -266,6 +268,13 @@ final class KeyboardView: UIView {
         host.addSubview(p)
         popup = p
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    /// Long-press choices: the top row's digit first when the style shows hints, then the accents.
+    private func variants(for s: String) -> [String] {
+        let low = s.lowercased()
+        let digit = style.numberHints && page == .letters ? Layout.digits[low].map { [$0] } ?? [] : []
+        return digit + (Layout.variants[low] ?? [])
     }
 
     private func hidePopup() { popup?.removeFromSuperview(); popup = nil }
@@ -280,6 +289,7 @@ final class KeyView: UIView {
     let def: KeyDef
     let row: Int
     private let label = UILabel()
+    private let hint = UILabel()
     private let icon = UIImageView()
     private var style: KeyStyle = .system(dark: false)
     private var shift: ShiftState = .off
@@ -300,6 +310,7 @@ final class KeyView: UIView {
         label.minimumScaleFactor = 0.6
         icon.contentMode = .center
         addSubview(label)
+        addSubview(hint)
         addSubview(icon)
         layer.shadowOffset = CGSize(width: 0, height: 1)
         layer.shadowRadius = 0
@@ -310,6 +321,7 @@ final class KeyView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         label.frame = bounds.insetBy(dx: 4, dy: 0)
+        hint.frame = CGRect(x: bounds.width - 12, y: 2, width: 10, height: 12)
         icon.frame = bounds
         layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: style.corner).cgPath
     }
@@ -327,6 +339,7 @@ final class KeyView: UIView {
         self.shift = shift
         self.returnAccent = returnAccent
         label.text = nil
+        hint.text = nil
         icon.image = nil
         let sym = UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)
         func setIcon(_ name: String) { icon.image = UIImage(systemName: name, withConfiguration: sym) }
@@ -334,6 +347,11 @@ final class KeyView: UIView {
         case .char(let s):
             label.text = shift == .off ? s : s.uppercased()
             label.font = style.uiFont(s.first!.isLetter ? 23 : 22, weight: .light)
+            if style.numberHints, row == 0, let d = Layout.digits[s] {
+                hint.text = d
+                hint.font = style.uiFont(10)
+                hint.textColor = style.text.ui.withAlphaComponent(0.55)
+            }
         case .shift: setIcon(shift == .locked ? "capslock.fill" : shift == .once ? "shift.fill" : "shift")
         case .delete: setIcon("delete.left")
         case .globe: setIcon("globe")
@@ -341,7 +359,13 @@ final class KeyView: UIView {
         case .otto: setIcon("sparkles")
         case .space: label.text = spaceTitle; label.font = style.uiFont(15)
         case .ret:
-            if returnTitle == "return" { setIcon("return.left") } else { label.text = returnTitle; label.font = style.uiFont(15, weight: .medium) }
+            switch returnTitle {
+            case "return": setIcon("return.left")
+            case "search": setIcon("magnifyingglass")
+            case "go": setIcon("arrow.right")
+            case "send": setIcon("arrow.up")
+            default: label.text = returnTitle; label.font = style.uiFont(15, weight: .medium)
+            }
         case .page(let p): label.text = p == .letters ? "ABC" : p == .numbers ? "123" : "#+="; label.font = style.uiFont(15)
         }
         let textColor = returnAccent && def.kind == .ret ? UIColor.white : style.text.ui
