@@ -84,11 +84,16 @@ final class Lexicon {
         if langs.contains(.en), lower == "i" { return "I" }
         // "dont" → "don't", "perche" → "perché": the same letters, only marks missing.
         if let e = byWord[Self.fold(lower)], e.word != lower, !exact.contains(lower) { return e.word }
-        if isKnown(lower) || lower.count < 2 { return nil }
-        var best: Entry?
-        for cand in edits(lower) {
-            if let e = byWord[cand], e.rank < 20_000, best == nil || e.rank < best!.rank { best = e }
+        if lower.count < 2 { return nil }
+        if isKnown(lower) {
+            // Valid but rare ("helo") next to something far more common ("hello"): iOS corrects these too.
+            let mine = byWord[Self.fold(lower)].map { $0.word == lower ? $0.rank : Int.max } ?? Int.max
+            guard let near = neighbors(lower, limit: 1).first, let e = byWord[Self.fold(near)],
+                  e.rank < 3_000, mine > 15_000 else { return nil }
+            return e.word
         }
+        var best: Entry?
+        if let near = neighbors(lower, limit: 1).first { best = byWord[Self.fold(near)] }
         if best == nil {
             for lang in langs {
                 let guesses = checker.guesses(forWordRange: NSRange(location: 0, length: (lower as NSString).length),
@@ -102,6 +107,20 @@ final class Lexicon {
         if lower.count >= 4, let done = completions(lower, limit: 1).first, let e = byWord[Self.fold(done)],
            e.rank < 5_000, best == nil || e.rank < best!.rank { best = e }
         return best?.word
+    }
+
+    /// Common words one edit away, best first: fills the suggestion slots.
+    func neighbors(_ word: String, limit: Int = 2) -> [String] {
+        let lower = word.lowercased()
+        // A missed double letter ("helo" → "hello") is the commonest slip there is; weigh it 5×.
+        func score(_ e: Entry) -> Double {
+            let doubled = e.word.count == lower.count + 1 && zip(e.word, e.word.dropFirst()).contains { $0 == $1 }
+                && Self.fold(String(e.word)).replacingOccurrences(of: "(.)\\1", with: "$1", options: .regularExpression)
+                    == lower.replacingOccurrences(of: "(.)\\1", with: "$1", options: .regularExpression)
+            return Double(e.rank) / (doubled ? 5 : 1)
+        }
+        return edits(lower).compactMap { byWord[$0] }.filter { $0.word != lower && $0.rank < 12_000 }
+            .sorted { score($0) < score($1) }.prefix(limit).map(\.word)
     }
 
     private static let alphabet = Array("abcdefghijklmnopqrstuvwxyzàáâãçèéêìíîòóôõùúü")

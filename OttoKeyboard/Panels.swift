@@ -22,9 +22,13 @@ final class BoardModel: ObservableObject {
 
     var style: KeyStyle { settings.style.followsSystem ? .system(dark: dark) : settings.style }
     // iOS pads ~16pt above any third-party keyboard; a 28pt bar puts suggestions and keys where Apple's are.
-    var barHeight: CGFloat { mode == .settings ? 0 : otto == .closed ? 28 : 76 }
-    /// Settings get room to breathe instead of a cramped scroll at keyboard height.
-    var extraHeight: CGFloat { mode == .settings ? 170 : 0 }
+    /// Three slots or none, like iOS: blanks keep the dividers where they belong.
+    var paddedSuggestions: [Suggestion] {
+        suggestions.isEmpty ? [] : Array((suggestions + Array(repeating: Suggestion(text: ""), count: 3)).prefix(3))
+    }
+    var barHeight: CGFloat { mode == .settings || mode == .emoji || mode == .clipboard ? 0 : otto == .closed ? 28 : 76 }
+    /// Panels own the bar's space too; settings also get room to breathe instead of a cramped scroll.
+    var extraHeight: CGFloat { mode == .settings ? 170 : mode == .keys ? 0 : 28 }
 
     // Wired by the controller.
     var pick: (Suggestion) -> Void = { _ in }
@@ -48,6 +52,20 @@ final class BoardModel: ObservableObject {
 
 private extension RGBA { var color: Color { Color(uiColor: ui) } }
 
+/// Every button in the keyboard: the whole frame takes the tap (a plain style only hits the
+/// drawn pixels, so an ✕ was a few strokes wide), and it dims while pressed.
+struct Tap: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            // contentShape alone isn't enough inside a keyboard: the hosting view drops touches on
+            // fully transparent pixels, so the frame gets a fill nobody can see.
+            .background(Color.black.opacity(0.001))
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.5 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 private func boardBackground(_ s: KeyStyle) -> some View {
     LinearGradient(colors: s.seeThrough ? [.clear] : s.background.map(\.color), startPoint: .top, endPoint: .bottom)
 }
@@ -65,6 +83,9 @@ struct TopBar: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(s.text.color)
+        // Rows crossfade as the keyboard grows or shrinks around them, instead of snapping.
+        .animation(.easeOut(duration: 0.18), value: m.otto == .closed)
+        .animation(.easeOut(duration: 0.18), value: m.dictation)
     }
 
     private func suggestionRow(_ s: KeyStyle) -> some View {
@@ -81,7 +102,7 @@ struct TopBar: View {
                     }
                 }
                 if let f = m.flash { Text(f).font(Font(s.uiFont(14))).opacity(0.7) }
-                ForEach(Array(m.suggestions.prefix(3).enumerated()), id: \.offset) { i, sug in
+                ForEach(Array(m.paddedSuggestions.enumerated()), id: \.offset) { i, sug in
                     if i > 0 { Rectangle().fill(s.text.color.opacity(0.18)).frame(width: 1, height: 24) }
                     Button { m.pick(sug) } label: {
                         Text(sug.literal ? "“\(sug.text)”" : sug.text)
@@ -103,7 +124,7 @@ struct TopBar: View {
             .accessibilityLabel("Dictate")
         }
         .padding(.trailing, 2)
-        .buttonStyle(.plain)
+        .buttonStyle(Tap())
     }
 
     /// While the app records for the keyboard: a level meter and the button that finishes it.
@@ -133,13 +154,13 @@ struct TopBar: View {
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .buttonStyle(.plain)
+        .buttonStyle(Tap())
     }
 
     private func ottoRows(_ s: KeyStyle) -> some View {
         VStack(spacing: 6) {
             HStack(spacing: 8) {
-                OttoMark(size: 28, thinking: m.otto == .thinking)
+                Button { m.otto = .closed; m.prompt = "" } label: { OttoMark(size: 28, thinking: m.otto == .thinking) }
                 Group {
                     switch m.otto {
                     case .thinking: Text("Otto is on it…").opacity(0.7)
@@ -164,9 +185,11 @@ struct TopBar: View {
                         Image(systemName: "arrow.up.circle.fill").font(.system(size: 30)).foregroundStyle(s.accent.color)
                     }
                 }
-                Button { m.otto = .closed } label: {
-                    Image(systemName: "xmark").font(.system(size: 14, weight: .semibold)).frame(width: 28, height: 36)
+                Button { m.otto = .closed; m.prompt = "" } label: {
+                    // 44 wide but row-high: a taller frame pushed the chip row up over it and it ate the taps.
+                    Image(systemName: "xmark").font(.system(size: 14, weight: .semibold)).frame(width: 44, height: 36)
                 }
+                .accessibilityLabel("Close Otto")
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -188,11 +211,12 @@ struct TopBar: View {
                 }
                 .padding(.horizontal, 8)
             }
+            .frame(height: 32)
             .disabled(m.otto == .thinking)
             .opacity(m.otto == .thinking ? 0.4 : 1)
         }
         .padding(.horizontal, 8).padding(.top, 2)
-        .buttonStyle(.plain)
+        .buttonStyle(Tap())
     }
 
     /// Quick asks. The ones starting "Rewrite" replace the text before the cursor; the rest insert.
@@ -283,7 +307,7 @@ struct EmojiPanel: View {
             }
             .padding(.bottom, 4)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(Tap())
         .foregroundStyle(s.text.color)
     }
 
@@ -337,7 +361,7 @@ struct ClipboardPanel: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(Tap())
         .foregroundStyle(s.text.color)
     }
 }
@@ -415,7 +439,7 @@ struct SettingsPanel: View {
             }
         }
         .foregroundStyle(s.text.color)
-        .buttonStyle(.plain)
+        .buttonStyle(Tap())
         .background(boardBackground(s))
     }
 

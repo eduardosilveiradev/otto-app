@@ -11,7 +11,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     private let model = BoardModel()
     private let board = KeyboardView()
     private var bar: UIHostingController<TopBar>!
-    private var panel: UIHostingController<AnyView>?
     private let backdrop = UIView()
     private let gradient = CAGradientLayer()
     private var height: NSLayoutConstraint!
@@ -23,6 +22,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
 
     /// Typed text that autocorrect replaced, so a backspace straight after puts it back.
     private var lastCorrection: (original: String, corrected: String)?
+    /// Words they took back a correction on; iOS stops correcting those, so this does too.
+    private var keptAsTyped = Set<String>()
     /// The last swiped word and the decoder's other readings of it.
     private var lastSwipe: (word: String, others: [String])?
     /// A swiped word waits for its space until the next word starts, as on iOS.
@@ -86,6 +87,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         model.toggleDictation = { [weak self] in self?.toggleDictation() }
         DictationBridge.observe(DictationBridge.toKeyboard) { [weak self] in self?.dictationChanged() }
         // SwiftUI changes the mode and the Otto state; the UIKit side follows once they've landed.
+        DispatchQueue.global(qos: .utility).async { _ = Emoji.categories }   // first tap shouldn't pay for the Unicode scan
         watch = model.$mode.combineLatest(model.$otto).receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.layoutForModel(); self?.refreshContext() }
         applySettings()
@@ -115,6 +117,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.panelHost(.emoji) }
         #if DEBUG
         _ = runPreviewCommands()
         #endif
@@ -156,35 +159,50 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     }
 
     private func layoutForModel() {
-        barHeight.constant = model.barHeight
-        height.constant = model.barHeight + Self.keysHeight + model.extraHeight
-        guard model.mode != panelMode || (panel == nil) != (model.mode == .keys) else { return }
+        let newBar = model.barHeight, newHeight = model.barHeight + Self.keysHeight + model.extraHeight
+        if newBar != barHeight.constant || newHeight != height.constant {
+            barHeight.constant = newBar
+            height.constant = newHeight
+            UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) { self.view.layoutIfNeeded() }
+        }
+        guard model.mode != panelMode else { return }
         panelMode = model.mode
-        let want: AnyView? = switch model.mode {
-        case .keys: nil
+        panels.values.forEach { $0.view.isHidden = true }
+        board.isHidden = model.mode != .keys
+        bar.view.isHidden = model.mode != .keys   // or it shows through the panel while it shrinks
+        guard model.mode != .keys else { return }
+        let host = panelHost(model.mode)
+        host.view.isHidden = false
+        view.bringSubviewToFront(host.view)
+    }
+
+    /// Panels are built once and kept: making a hosting controller and an emoji grid on every
+    /// tap cost half a second. Emoji is built ahead of time, the rest on first use.
+    private var panels: [BoardModel.Mode: UIHostingController<AnyView>] = [:]
+
+    @discardableResult
+    private func panelHost(_ mode: BoardModel.Mode) -> UIHostingController<AnyView> {
+        if let h = panels[mode] { return h }
+        let root: AnyView = switch mode {
         case .emoji: AnyView(EmojiPanel(m: model))
         case .settings: AnyView(SettingsPanel(m: model))
         case .clipboard: AnyView(ClipboardPanel(m: model))
+        case .keys: AnyView(EmptyView())
         }
-        panel?.willMove(toParent: nil)
-        panel?.view.removeFromSuperview()
-        panel?.removeFromParent()
-        panel = nil
-        board.isHidden = want != nil
-        guard let want else { return }
-        let host = UIHostingController(rootView: want)
+        let host = UIHostingController(rootView: root)
         host.view.backgroundColor = .clear
         addChild(host)
         host.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(host.view)
-        // Settings take the whole keyboard; emoji keep the bar.
-        let topAnchor = model.mode == .settings ? view.topAnchor : bar.view.bottomAnchor
+        // Panels take the whole keyboard, bar included, like iOS's emoji keyboard.
         NSLayoutConstraint.activate([
-            host.view.topAnchor.constraint(equalTo: topAnchor), host.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            host.view.topAnchor.constraint(equalTo: view.topAnchor), host.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             host.view.leadingAnchor.constraint(equalTo: view.leadingAnchor), host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
         host.didMove(toParent: self)
-        panel = host
+        host.view.isHidden = true
+        panels[mode] = host
+        return host
     }
 
     // MARK: context
@@ -239,10 +257,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         let w = currentWord
         guard !w.isEmpty else { model.suggestions = []; return }
         var out: [BoardModel.Suggestion] = [.init(text: w, literal: true)]
-        if model.settings.autocorrect, let fix = lex.correction(for: w) {
+        if model.settings.autocorrect, !keptAsTyped.contains(w.lowercased()), let fix = lex.correction(for: w) {
             out.append(.init(text: matchCase(fix, w), primary: true))
         }
-        for c in lex.completions(w, limit: 3) where !out.contains(where: { $0.text.lowercased() == c }) {
+        for c in lex.completions(w, limit: 3) + lex.neighbors(w, limit: 3) where !out.contains(where: { $0.text.lowercased() == c }) {
             out.append(.init(text: matchCase(c, w)))
         }
         model.suggestions = Array(out.prefix(3))
@@ -267,7 +285,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     private func finishWord() {
         guard model.settings.autocorrect, let lex = lexicon else { return }
         let w = currentWord
-        guard !w.isEmpty, let fix = lex.correction(for: w) else { return }
+        guard !w.isEmpty, !keptAsTyped.contains(w.lowercased()), let fix = lex.correction(for: w) else { return }
         let fixed = matchCase(fix, w)
         for _ in w { textDocumentProxy.deleteBackward() }
         textDocumentProxy.insertText(fixed)
@@ -338,6 +356,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         if let c = lastCorrection, before.hasSuffix(c.corrected + " ") || before.hasSuffix(c.corrected) {
             let trailing = before.hasSuffix(" ") ? 1 : 0
             for _ in 0..<(c.corrected.count + trailing) { textDocumentProxy.deleteBackward() }
+            keptAsTyped.insert(c.original.lowercased())
             insert(c.original)
             return
         }
