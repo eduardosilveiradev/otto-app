@@ -184,9 +184,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     private func panelHost(_ mode: BoardModel.Mode) -> UIHostingController<AnyView> {
         if let h = panels[mode] { return h }
         let root: AnyView = switch mode {
-        case .emoji: AnyView(EmojiPanel(m: model))
-        case .settings: AnyView(SettingsPanel(m: model))
-        case .clipboard: AnyView(ClipboardPanel(m: model))
+        case .emoji: AnyView(EmojiPanel(m: model).plainScrollEdges())
+        case .settings: AnyView(SettingsPanel(m: model).plainScrollEdges())
+        case .clipboard: AnyView(ClipboardPanel(m: model).plainScrollEdges())
         case .keys: AnyView(EmptyView())
         }
         let host = UIHostingController(rootView: root)

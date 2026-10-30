@@ -57,6 +57,11 @@ final class BoardModel: ObservableObject {
 
 private extension RGBA { var color: Color { Color(uiColor: ui) } }
 
+extension View {
+    /// iOS 26+ shades scroll views' edges; inside a keyboard that reads as a dark smudge across the keys.
+    func plainScrollEdges() -> some View { scrollEdgeEffectHidden(true, for: .all) }
+}
+
 /// Every button in the keyboard: the whole frame takes the tap (a plain style only hits the
 /// drawn pixels, so an ✕ was a few strokes wide), and it dims while pressed.
 struct Tap: ButtonStyle {
@@ -86,6 +91,7 @@ struct TopBar: View {
             if m.dictation == .listening || m.dictation == .working { dictationRow(s) }
             else if m.otto == .closed { suggestionRow(s) } else { ottoRows(s) }
         }
+        .plainScrollEdges()
         .padding(.top, BoardModel.barInset)
         .padding(.horizontal, BoardModel.sheet ? 8 : 0)   // clear of the sheet's curved corners
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -219,6 +225,7 @@ struct TopBar: View {
                 .padding(.horizontal, 8)
             }
             .frame(height: 32)
+            .scrollClipDisabled()   // the capsules' tops were shaved off by the row's clip
             .disabled(m.otto == .thinking)
             .opacity(m.otto == .thinking ? 0.4 : 1)
         }

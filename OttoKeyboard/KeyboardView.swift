@@ -32,18 +32,14 @@ final class KeyboardView: UIView {
 
     private var keys: [KeyView] = []
     private var rowFrames: [CGRect] = []
-    private let trail = CAShapeLayer()
+    private let trail = SwipeTrail()
 
     private let gap: CGFloat = 6, rowGap: CGFloat = 11, side: CGFloat = 3, top: CGFloat = 8
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
-        trail.fillColor = nil
-        trail.lineCap = .round
-        trail.lineJoin = .round
-        trail.lineWidth = 7
-        layer.addSublayer(trail)
+        addSubview(trail)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -55,8 +51,9 @@ final class KeyboardView: UIView {
             row.map { KeyView(def: $0, row: r) }
         }
         keys.forEach { addSubview($0) }
-        layer.addSublayer(trail)   // back on top of the new keys
-        trail.strokeColor = style.accent.ui.withAlphaComponent(0.55).cgColor
+        bringSubviewToFront(trail)   // back on top of the new keys
+        // iOS draws it in the key text colour, not a tint: white on dark boards, a soft ink on light ones.
+        trail.color = style.text.ui.withAlphaComponent(style.text.r + style.text.g + style.text.b > 1.5 ? 0.85 : 0.45)
         refreshLabels()
         setNeedsLayout()
     }
@@ -162,6 +159,7 @@ final class KeyboardView: UIView {
                 if swipeEnabled, page == .letters, tracks.count == 1, tr.key.isLetter,
                    p.distance(to: tr.start) > unitWidth * 0.9 {
                     tr.mode = .swipe
+                    tr.path.forEach { trail.add($0) }
                     tr.timer?.invalidate()
                     hidePopup()
                     tr.key.pressed = false
@@ -175,12 +173,7 @@ final class KeyboardView: UIView {
                 }
             case .swipe:
                 tr.path.append(p)
-                let b = UIBezierPath()
-                b.move(to: tr.path[0])
-                tr.path.dropFirst().forEach { b.addLine(to: $0) }
-                trail.removeAllAnimations()
-                trail.opacity = 1
-                trail.path = b.cgPath
+                trail.add(p)
             case .variants:
                 popup?.select(atX: t.location(in: popup).x)
             case .trackpad:
@@ -201,10 +194,7 @@ final class KeyboardView: UIView {
             case .tap: fire(tr)
             case .swipe:
                 delegate?.swiped(tr.path)
-                let fade = CABasicAnimation(keyPath: "opacity")
-                fade.fromValue = 1; fade.toValue = 0; fade.duration = 0.25
-                trail.add(fade, forKey: "fade")
-                trail.opacity = 0
+                trail.end()
             case .variants:
                 if let s = popup?.selected { delegate?.typed(s) }
             case .trackpad: keys.forEach { $0.dimmed = false }
@@ -222,7 +212,7 @@ final class KeyboardView: UIView {
         }
         keys.forEach { $0.dimmed = false }
         hidePopup()
-        trail.path = nil
+        trail.end()
     }
 
     private func fire(_ tr: Track) {
@@ -280,7 +270,7 @@ final class KeyboardView: UIView {
     private func hidePopup() { popup?.removeFromSuperview(); popup = nil }
 
     /// Draws a trail that stays, for screenshots.
-    func showTrail(_ path: CGPath) { trail.removeAllAnimations(); trail.opacity = 1; trail.path = path }
+    func showTrail(_ path: [CGPoint]) { trail.freeze(path) }
 }
 
 // MARK: - keys

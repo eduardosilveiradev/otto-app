@@ -54,10 +54,7 @@ extension KeyboardView {
         func jitter() -> CGFloat { seed = seed &* 6364136223846793005 &+ 1; return CGFloat(Int(seed >> 33) % 9) - 4 }
         for ch in word { if let c = centers[ch] { pts.append(CGPoint(x: c.x + jitter(), y: c.y + jitter())) } }
         let path = Lexicon.densify(pts, step: 6)
-        let b = UIBezierPath()
-        b.move(to: path[0])
-        path.dropFirst().forEach { b.addLine(to: $0) }
-        showTrail(b.cgPath)
+        showTrail(path)
         return path
     }
 }

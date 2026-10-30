@@ -155,7 +155,7 @@ final class Lexicon {
                 .prefix(3).map(\.key)
         }
         let starts = around(path.first!), ends = around(path.last!)
-        var scored: [(String, CGFloat)] = []
+        var scored: [(String, CGFloat, Int)] = []
         let userShape = Self.resample(path, n: 32)
         for s in starts {
             for e in ends {
@@ -167,11 +167,14 @@ final class Lexicon {
                     for i in 0..<32 { d += userShape[i].distance(to: ideal[i]) }
                     let shape = d / 32 / unit
                     let freq = log10(CGFloat(cand.rank) + 10)
-                    scored.append((cand.word, shape * 2.2 + freq * 0.45))
+                    scored.append((cand.word, shape * 2.2 + freq * 0.45, cand.rank))
                 }
             }
         }
-        return scored.sorted { $0.1 < $1.1 }.prefix(4).map(\.0)
+        // The best reading always; the alternatives only when they're words people actually use.
+        let ranked = scored.sorted { $0.1 < $1.1 }
+        guard let best = ranked.first else { return [] }
+        return [best.0] + ranked.dropFirst().filter { $0.2 < 10_000 }.prefix(3).map(\.0)
     }
 
     /// Every key visited in order, each within `r` of some later point of the path.
