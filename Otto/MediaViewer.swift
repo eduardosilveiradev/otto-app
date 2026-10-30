@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 
 /// Opens the full-screen media viewer on one photo: tapping any photo in the thread.
 @MainActor @Observable
@@ -17,6 +18,29 @@ final class MediaViewer {
         if let d { data[file.id] = d }
         return d
     }
+
+    /// A video needs a file to play from: the bytes written once to caches, named by id.
+    static func url(_ file: RemoteFile, from backend: any OttoBackend) async -> URL? {
+        let ext = (file.name as NSString).pathExtension
+        let url = URL.cachesDirectory.appending(path: "media-\(file.id).\(ext.isEmpty ? "mp4" : ext)")
+        if FileManager.default.fileExists(atPath: url.path) { return url }
+        guard let d = await load(file, from: backend), (try? d.write(to: url)) != nil else { return nil }
+        data[file.id] = nil   // the file holds it now; don't keep a second copy in memory
+        return url
+    }
+
+    static var thumbs: [String: UIImage] = [:]
+    /// The video's first frame, for the bubble.
+    static func thumbnail(_ file: RemoteFile, from backend: any OttoBackend) async -> UIImage? {
+        if let hit = thumbs[file.id] { return hit }
+        guard let url = await url(file, from: backend) else { return nil }
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 720, height: 720)
+        guard let cg = try? await gen.image(at: .zero).image else { return nil }
+        let img = UIImage(cgImage: cg); thumbs[file.id] = img
+        return img
+    }
 }
 
 /// One photo in the thread, yours (the JPEG you sent) or Otto's (fetched on demand).
@@ -26,13 +50,14 @@ struct MediaItem: Identifiable {
     let mine: Bool
     let local: Data?
     let file: RemoteFile?
+    var isVideo: Bool { file?.kind == "video" }
 
     /// Every photo in the thread, oldest first, the order you swipe through them.
     static func all(in messages: [Message]) -> [MediaItem] {
         messages.flatMap { m -> [MediaItem] in
             var out: [MediaItem] = []
             if let img = m.image { out.append(MediaItem(id: m.id.uuidString, date: m.date, mine: m.from == .me, local: img, file: nil)) }
-            for f in m.files ?? [] where f.kind == "image" {
+            for f in m.files ?? [] where f.kind == "image" || f.kind == "video" {
                 out.append(MediaItem(id: f.id, date: m.date, mine: m.from == .me, local: nil, file: f))
             }
             return out
@@ -50,15 +75,18 @@ struct MediaViewerView: View {
     @State private var zoomed = false
     @State private var chrome = true
     @State private var drop: CGFloat = 0
-    @State private var sharing: UIImage?
+    @State private var sharing: Any?
 
     var body: some View {
         ZStack {
             Color.black.opacity(1 - min(abs(drop) / 400, 0.7)).ignoresSafeArea()
             TabView(selection: $current) {
                 ForEach(items) { item in
-                    MediaPage(item: item, store: store, zoomed: current == item.id ? $zoomed : .constant(false))
-                        .tag(Optional(item.id))
+                    Group {
+                        if item.isVideo { VideoPage(item: item, store: store, showing: current == item.id) }
+                        else { MediaPage(item: item, store: store, zoomed: current == item.id ? $zoomed : .constant(false)) }
+                    }
+                    .tag(Optional(item.id))
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -87,11 +115,11 @@ struct MediaViewerView: View {
         }
         .onChange(of: current) { zoomed = false }
         .sheet(item: Binding(get: { sharing.map(Shared.init) }, set: { _ in sharing = nil })) {
-            ShareSheet(items: [$0.image]).presentationDetents([.medium, .large])
+            ShareSheet(items: [$0.item]).presentationDetents([.medium, .large])
         }
     }
 
-    private struct Shared: Identifiable { let id = UUID(); let image: UIImage }
+    private struct Shared: Identifiable { let id = UUID(); let item: Any }
 
     private var bar: some View {
         let i = items.firstIndex { $0.id == current }
@@ -115,7 +143,11 @@ struct MediaViewerView: View {
                 Spacer()
                 Button {
                     guard let i else { return }
-                    Task { sharing = await MediaPage.image(items[i], store: store) }
+                    let item = items[i]
+                    Task {
+                        if item.isVideo, let f = item.file { sharing = await MediaCache.url(f, from: store.backend) }
+                        else { sharing = await MediaPage.image(item, store: store) }
+                    }
                 } label: {
                     Image(systemName: "square.and.arrow.up").font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44)
                 }
@@ -186,5 +218,38 @@ private struct MediaPage: View {
             if scale <= 1.01 { scale = 1; pan = .zero }
         }
         base = scale; panBase = pan; zoomed = scale > 1
+    }
+}
+
+/// One video: a spinner while it downloads, then the system player. It plays while it's the page on screen.
+private struct VideoPage: View {
+    let item: MediaItem
+    let store: OttoStore
+    let showing: Bool
+    @State private var player: AVPlayer?
+    @State private var failed = false
+
+    var body: some View {
+        ZStack {
+            if let player {
+                VideoPlayer(player: player)
+            } else if failed {
+                Label("Couldn't load this video", systemImage: "exclamationmark.triangle").foregroundStyle(.white)
+            } else {
+                VStack(spacing: 12) {
+                    ProgressView().tint(.white).controlSize(.large)
+                    Text("Loading video").font(.system(size: 15)).foregroundStyle(.white.opacity(0.7))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: item.id) {
+            guard let f = item.file, let url = await MediaCache.url(f, from: store.backend) else { failed = true; return }
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            player = AVPlayer(url: url)
+            if showing { player?.play() }
+        }
+        .onChange(of: showing) { _, on in if on { player?.play() } else { player?.pause() } }
+        .onDisappear { player?.pause() }
     }
 }

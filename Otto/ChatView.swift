@@ -942,13 +942,18 @@ private struct Row: View {
     }
 }
 
-/// A photo or file Otto sent. Photos show inline and open in the media viewer; anything else opens in Quick Look.
+/// A photo, video or file Otto sent. Photos and videos show inline and open in the media viewer; anything else opens in Quick Look.
+/// Each shows a spinner while its bytes download.
 private struct RemoteFileView: View {
     @Environment(OttoStore.self) private var store
     let file: RemoteFile
     @State private var data: Data?
+    @State private var thumb: UIImage?
     @State private var missing = false
+    @State private var opening = false
     @State private var preview: URL?
+
+    private var visual: Bool { file.kind == "image" || file.kind == "video" }
 
     var body: some View {
         Group {
@@ -957,19 +962,48 @@ private struct RemoteFileView: View {
                     .frame(maxWidth: 240, maxHeight: 320)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
                     .onTapGesture { MediaViewer.shared.start = file.id }
+            } else if file.kind == "video", let thumb {
+                Image(uiImage: thumb).resizable().scaledToFit()
+                    .frame(maxWidth: 240, maxHeight: 320)
+                    .overlay {
+                        Image(systemName: "play.fill").font(.system(size: 22, weight: .semibold)).foregroundStyle(.white)
+                            .frame(width: 56, height: 56).glassEffect(.regular, in: .circle)
+                    }
+                    .clipShape(.rect(cornerRadius: 18, style: .continuous))
+                    .contentShape(.rect)
+                    .onTapGesture { MediaViewer.shared.start = file.id }
+                    .accessibilityLabel("Video, \(file.name)").accessibilityAddTraits(.isButton)
+            } else if visual && !missing {
+                // still downloading: a placeholder the size of what's coming
+                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color(.systemGray5))
+                    .frame(width: file.kind == "video" ? 180 : 220, height: file.kind == "video" ? 320 : 220)
+                    .overlay {
+                        VStack(spacing: 8) {
+                            ProgressView()
+                            Text(file.kind == "video" ? "Loading video" : "Loading photo").font(.system(size: 13)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
             } else {
                 Button(action: open) {
-                    Label(missing ? "\(file.name) — no longer available" : file.name,
-                          systemImage: file.kind == "image" ? "photo" : "doc")
-                        .font(.system(size: 15)).lineLimit(1)
-                        .padding(.horizontal, 12).padding(.vertical, 9)
-                        .background(Color(.systemGray5), in: .rect(cornerRadius: 18, style: .continuous))
+                    HStack(spacing: 8) {
+                        if opening { ProgressView().controlSize(.small) }
+                        else { Image(systemName: missing ? "exclamationmark.triangle" : "doc") }
+                        Text(missing ? "\(file.name) — no longer available" : file.name).lineLimit(1)
+                    }
+                    .font(.system(size: 15))
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .background(Color(.systemGray5), in: .rect(cornerRadius: 18, style: .continuous))
                 }
                 .tint(.primary)
-                .disabled(missing)
+                .disabled(missing || opening)
             }
         }
         .task(id: file.id) {
+            if file.kind == "video" {
+                if let t = await MediaCache.thumbnail(file, from: store.backend) { thumb = t } else { missing = true }
+                return
+            }
             if let hit = MediaCache.data[file.id] { data = hit; return }
             guard file.kind == "image" else { return }
             await load()
@@ -984,6 +1018,7 @@ private struct RemoteFileView: View {
 
     private func open() {
         Task {
+            opening = true; defer { opening = false }
             if data == nil { await load() }
             guard let data else { return }
             let url = URL.temporaryDirectory.appending(path: file.name)

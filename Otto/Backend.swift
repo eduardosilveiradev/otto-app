@@ -69,7 +69,7 @@ struct Message: Identifiable, Codable {
 struct RemoteFile: Codable, Hashable {
     let id: String
     let name: String
-    /// "image", "audio" or "file".
+    /// "image", "video", "audio" or "file".
     let kind: String
 }
 
