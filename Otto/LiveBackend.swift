@@ -115,7 +115,7 @@ final class LiveBackend: OttoBackend {
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
                           buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: r.voice != nil || r.voicePending == true, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
-                          thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled)
+                          thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled, recorded: r.recorded)
         }
     }
 
@@ -303,7 +303,7 @@ final class LiveBackend: OttoBackend {
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
                           buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: f.voice != nil || f.voicePending == true, serverID: f.id, replyTo: f.reply_to,
-                          files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why, scheduled: f.scheduled))
+                          files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why, scheduled: f.scheduled, recorded: f.recorded))
     }
 
     private func write(_ frame: [String: String]) async {
@@ -425,7 +425,7 @@ final class LiveBackend: OttoBackend {
         let type: String; let id: String?; let text: String?; let ts: String?; let buttons: [WireButton]?
         let files: [RemoteFile]?; let voice: RemoteFile?; let reply_to: String?; let emoji: String?; let ids: [String]?; let on: Bool?
         let thread: String?; let level: String?; let src: String?; let why: String?
-        let voicePending: Bool?; let scheduled: [DashTrigger]?; let shared: Bool?
+        let voicePending: Bool?; let scheduled: [DashTrigger]?; let recorded: [RecordedCard]?; let shared: Bool?
         let items: [TodoItem]?
     }
     /// Otto's entries carry what the live frame did, so a message that arrived while the
@@ -433,7 +433,7 @@ final class LiveBackend: OttoBackend {
     private struct WireHistory: Decodable {
         let dir: String; let text: String; let ts: String; let id: String?; let kind: String?
         let files: [RemoteFile]?; let voice: RemoteFile?; let voicePending: Bool?; let reply_to: String?; let buttons: [WireButton]?
-        let thread: String?; let level: String?; let src: String?; let why: String?; let scheduled: [DashTrigger]?
+        let thread: String?; let level: String?; let src: String?; let why: String?; let scheduled: [DashTrigger]?; let recorded: [RecordedCard]?
         let shared: Bool?
     }
     private struct WireBrief: Decodable {

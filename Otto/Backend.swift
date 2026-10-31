@@ -61,6 +61,8 @@ struct Message: Identifiable, Codable {
     var failed: Bool? = nil
     /// What Otto armed while writing this, shown as a chip in the bubble (Schedules.swift).
     var scheduled: [DashTrigger]? = nil
+    /// What Otto wrote down while writing this (money, memories, loops…), as cards (Recorded.swift).
+    var recorded: [RecordedCard]? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }

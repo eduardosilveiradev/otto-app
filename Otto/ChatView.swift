@@ -806,6 +806,7 @@ private struct Row: View {
             VStack(alignment: .leading, spacing: 8) {
                 content
                 ForEach(message.scheduled ?? []) { ScheduleChip(trigger: $0) }
+                ForEach(message.recorded ?? []) { RecordedChip(card: $0, message: message.id) }
             }
                 .font(.system(size: 17))
                 .tint(mine ? .white : .blue)

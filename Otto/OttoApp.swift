@@ -262,6 +262,13 @@ final class OttoStore {
             messages = [
                 Message(from: .me, text: "fix the voice thing at 3am while i'm sleeping", read: true),
                 Message(from: .otto, text: "on it. it runs at 3, and you'll get one line on it in the morning.", scheduled: [MockBackend.triggers[0]]),
+                Message(from: .otto, text: "logged it, and the race is in your spending.",
+                        recorded: [RecordedCard(kind: "money", id: "m1", title: "€49.80 · E-MOTION Roma", detail: "fun · 2026-10-31", body: "This month at E-MOTION Roma: €49.80 (1)", action: nil),
+                                   RecordedCard(kind: "loop", id: "n1", title: "Book the next sim session", detail: "Due 2026-11-07", body: nil, action: .init(label: "Done", data: "close loop n1"))]),
+                Message(from: .otto, text: "saved all three.",
+                        recorded: [RecordedCard(kind: "memory", id: "claude-plan", title: "Stay on Max 5x until Desk launches", detail: "Remembered", body: "Upgrade to Ultra when Desk starts selling, for the API credits.", action: .init(label: "Forget it", data: "forget memory claude-plan")),
+                                   RecordedCard(kind: "place", id: "p1", title: "E-MOTION Roma", detail: "loved · Rome", body: "the sim rigs", action: nil),
+                                   RecordedCard(kind: "write", id: "w1", title: "Sim racing, Sat 7 Nov 12:00", detail: "Calendar", body: "Undo: delete the event", action: .init(label: "Undo it", data: "undo write w1"))]),
             ]
         }
         // `-demoThread`: the conversation the website shows, for screen recordings.
