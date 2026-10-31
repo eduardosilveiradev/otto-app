@@ -1207,7 +1207,7 @@ struct BubbleShape: Shape {
     let tail: Bool
 
     func path(in rect: CGRect) -> Path {
-        let p = Path(roundedRect: rect, cornerRadius: 18, style: .continuous)
+        let p = Path(roundedRect: rect, cornerRadius: 19, style: .continuous)   // measured: Messages' corner is a touch rounder than 18
         guard tail else { return p }
         // Drawn for the left side, mirrored for yours. Union, not addPath: opposite
         var t = Path()
