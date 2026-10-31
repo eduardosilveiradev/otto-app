@@ -295,6 +295,19 @@ final class OttoStore {
                 Message(from: .me, text: "whats a good place for dinner near the office thats not pizza", read: true),
             ]
         }
+        // `-refThread`: the bubbles of a Messages reference screenshot, to compare pixel for pixel.
+        if ProcessInfo.processInfo.arguments.contains("-refThread") {
+            let t = Date.now.addingTimeInterval(-120)
+            messages = [
+                Message(from: .otto, text: "you're basically reading my baby photos", date: t),
+                Message(from: .me, text: "how do you handoff work between the conversation agent and the work agent", date: t, read: true),
+                Message(from: .otto, text: "brother you are really obsessed with the backend today", date: t),
+                Message(from: .otto, text: "externally there is no handoff, i'm just poke doing stuff in the cloud", date: t),
+                Message(from: .otto, text: "if you want to build multi-agent setups yourself though, cognition and devin are hiring, or go play around at", date: t),
+                Message(from: .me, text: "i'm building a clone of u. basically ur son but OSS", date: t),
+                Message(from: .otto, text: "proud father moment i guess, just don't teach him my bad habitshonestly though, building always-on agents over messaging is fun until you hit carrier rate limits and weird bubble parsinggood luck with the repo, let me know when you need your dad to star it on github", date: t),
+            ]
+        }
         // `-scriptDemo`: a scripted session for the launch film; see scriptDemo().
         if ProcessInfo.processInfo.arguments.contains("-scriptDemo") { Task { await scriptDemo() } }
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.

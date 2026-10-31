@@ -99,16 +99,18 @@ struct ChatView: View {
                         } else {
                             Row(thread: thread, message: m,
                                 quote: m.replyTo.flatMap { byWire[$0] },
-                                tail: next?.from != m.from || next.map { $0.date.timeIntervalSince(m.date) > 3600 } ?? true,
+                                tail: true,   // Messages on iOS 26 tails every bubble, not just the last of a run
                                 receipt: m.id == lastMine && m.pending != true && m.failed != true ? receipt(for: i, in: messages) : nil,
                                 onTap: { thread.tap($0, on: m.id) })
-                                .padding(.top, newBlock || prev?.from == .terminal ? 0 : (prev?.from == m.from ? 2 : 10))
+                                .padding(.top, newBlock || prev?.from == .terminal ? 0 : (prev?.from == m.from ? 4 : 10))
                                 .id(m.id)
-                                // New bubbles grow out of their own tail corner, iMessage-style.
+                                // Yours lifts out of the text field, as wide as the field and blurred,
+                                // and narrows into its bubble (Messages, measured off a screen recording);
+                                // Otto's grows out of its tail corner.
                                 .transition(.asymmetric(
-                                    insertion: .scale(scale: 0.4, anchor: m.from == .me ? .bottomTrailing : .bottomLeading)
-                                        .combined(with: .opacity)
-                                        .combined(with: .offset(y: m.from == .me ? 24 : 0)),
+                                    insertion: m.from == .me
+                                        ? .modifier(active: SendMorph(progress: 0, lift: ui.height + 2), identity: SendMorph(progress: 1, lift: 0))
+                                        : .scale(scale: 0.4, anchor: .bottomLeading).combined(with: .opacity),
                                     removal: .opacity))
                         }
                     }
@@ -117,9 +119,9 @@ struct ChatView: View {
                             .transition(.scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity))
                     }
                 }
-                .animation(thread.animated ? .spring(response: 0.38, dampingFraction: 0.72) : nil, value: messages.count)
+                .animation(thread.animated ? .spring(response: 0.42, dampingFraction: 0.82) : nil, value: messages.count)
                 .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typing)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 16)
                 .padding(.bottom, 6)
         }
         // Pinned to the bottom as content grows (new bubbles, typing dots, the keyboard),
@@ -192,9 +194,10 @@ struct ChatView: View {
             }
         }
         .background(Color(.systemBackground))
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .safeAreaBar(edge: .top, spacing: 0) {
             ottoTop
         }
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .task { await calls.run(store.backend) }
         .task { if thread.isOtto { await gate.run(store.backend) } }
         .sheet(isPresented: $showGate) { GateSheet(watch: gate) }
@@ -302,8 +305,8 @@ struct ChatView: View {
                     else if let url = URL(string: "tel:\(digits)"), !digits.isEmpty { openURL(url) }
                     else { showCall = true }
                 } label: {
-                    Image(systemName: "phone").font(.system(size: 17))
-                        .frame(width: 40, height: 40)
+                    Image(systemName: "phone").font(.system(size: 18))
+                        .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: .circle)
                 }
                 .tint(.primary)
@@ -331,14 +334,14 @@ struct ChatView: View {
                 }
             }
             Button { showDetails = true } label: {
-                VStack(spacing: 4) {
-                    OttoAvatar(size: 56, thinking: store.ottoTyping, asleep: store.asleep, lookingAtCursor: focused)
-                    HStack(spacing: 3) {
-                        Text("Otto").font(.system(size: 12, weight: .medium))
-                        Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
+                VStack(spacing: -6) {
+                    OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, lookingAtCursor: focused)
+                    HStack(spacing: 4) {
+                        Text("Otto").font(.system(size: 15, weight: .semibold))
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
                     .glassEffect(.regular.interactive(), in: .capsule)
                 }
             }
@@ -346,11 +349,6 @@ struct ChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 6)
-        .background(alignment: .top) {
-            LinearGradient(colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
-                            startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea(edges: .top)
-        }
     }
 
 }
@@ -370,6 +368,8 @@ struct Composer: View {
     @State private var showLibrary = false
     @State private var picked: [PhotosPickerItem] = []
     @State private var recorder = VoiceRecorder()
+    /// The field's blue flash as a message leaves it (Messages fills the field, then lets go).
+    @State private var flash = false
 
     struct Attachment: Identifiable { let id = UUID(); let image: UIImage }
 
@@ -377,15 +377,15 @@ struct Composer: View {
 
     var body: some View {
         GlassEffectContainer(spacing: 8) {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .bottom, spacing: 12) {
             if thread.isOtto {
             Menu {
                 Button("Camera", systemImage: "camera") { showCamera = true }
                     .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
                 Button("Photos", systemImage: "photo.on.rectangle") { showLibrary = true }
             } label: {
-                Image(systemName: "plus").font(.system(size: 18, weight: .medium))
-                    .frame(width: 36, height: 36)
+                Image(systemName: "plus").font(.system(size: 19, weight: .medium))
+                    .frame(width: 40, height: 40)
                     .glassEffect(.regular.interactive(), in: .circle)
             }
             .tint(.secondary)
@@ -418,14 +418,14 @@ struct Composer: View {
                                 .frame(width: 36, height: 36)
                         }
                     } else {
-                        ComposerTextView(text: $draft, focused: $focused, placeholder: "Text \(thread.name)") { images in
+                        ComposerTextView(text: $draft, focused: $focused, placeholder: "Message") { images in
                             withAnimation(.snappy) { attachments += images.map { Attachment(image: $0) } }
                         }
                         .transition(.opacity)
                         if !canSend {
                             if thread.isOtto {
                             Button { Task { await recorder.start() } } label: {
-                                Image(systemName: "mic").frame(width: 36, height: 36)
+                                Image(systemName: "waveform").frame(width: 36, height: 36)
                             }
                             .tint(.secondary)
                             .transition(.scale(scale: 0.6).combined(with: .opacity))
@@ -445,10 +445,14 @@ struct Composer: View {
             }
             .animation(.snappy(duration: 0.22), value: canSend)
             .animation(.snappy(duration: 0.22), value: recorder.started != nil)
-            .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
+            .frame(minHeight: 40)
+            .background(Color.blue.opacity(flash ? 0.9 : 0), in: .rect(cornerRadius: 20, style: .continuous))
+            .glassEffect(.regular, in: .rect(cornerRadius: 20, style: .continuous))
         }
         }
-        .padding(.horizontal, 12)
+        // Messages pulls the bar in toward the edges while the keyboard is up.
+        .padding(.horizontal, focused ? 15 : 27)
+        .animation(.snappy, value: focused)
         .padding(.top, 6)
         .padding(.bottom, 4)
         .onChange(of: focused) { ui.focused = focused }
@@ -559,6 +563,8 @@ struct Composer: View {
         if photos.isEmpty { thread.send(text) }
         withAnimation(.snappy) { attachments = [] }
         draft = ""
+        flash = true
+        withAnimation(.easeOut(duration: 0.2)) { flash = false }
     }
 }
 
@@ -772,6 +778,7 @@ private struct Row: View {
         let t = m.text.trimmingCharacters(in: .whitespacesAndNewlines)
         return t == url.absoluteString || URL(string: t)?.absoluteString == url.absoluteString
     }
+    private var textShown: Bool { (message.image == nil || !message.text.isEmpty) && !hidesText }
     private var hidesText: Bool { preview != nil && Self.previewURL(message).map { Self.isOnlyLink(message, $0) } == true }
 
     /// Otto's "draft:" messages: the first line is the heading, the rest the words that would go out.
@@ -784,7 +791,7 @@ private struct Row: View {
         return (head, body)
     }
 
-    private static let tapbacks = ["❤️", "👍", "👎", "😂", "‼️", "❓"]
+    static let tapbacks = ["❤️", "👍", "👎", "😂", "‼️", "❓"]
     /// How far a swipe has to pull before letting go means "reply".
     private static let replyAt: CGFloat = 60
 
@@ -798,18 +805,22 @@ private struct Row: View {
             }
             if let img = Thumbs.image(for: message) {
                 Image(uiImage: img).resizable().scaledToFit()
-                    .frame(maxWidth: 240, maxHeight: 320)
+                    .frame(maxWidth: 253, maxHeight: 320)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
                     .onTapGesture { MediaViewer.shared.start = message.id.uuidString }
+                    .modifier(Reactable(thread: thread, message: message, badge: !textShown))
             }
-            ForEach(message.files ?? [], id: \.id) { f in if StudySet.isStudy(f) { StudyBubble(file: f) } else { RemoteFileView(file: f) } }
-            if (message.image == nil || !message.text.isEmpty) && !hidesText {
+            ForEach(Array((message.files ?? []).enumerated()), id: \.element.id) { i, f in
+                Group { if StudySet.isStudy(f) { StudyBubble(file: f) } else { RemoteFileView(file: f) } }
+                    .modifier(Reactable(thread: thread, message: message, badge: !textShown && Thumbs.image(for: message) == nil && i == 0))
+            }
+            if textShown {
             VStack(alignment: .leading, spacing: 8) {
                 content
                 ForEach(message.scheduled ?? []) { ScheduleChip(trigger: $0) }
                 ForEach(message.recorded ?? []) { RecordedChip(card: $0, message: message.id) }
             }
-                .font(.system(size: 17))
+                .font(.body.leading(.tight))
                 .tint(mine ? .white : .blue)
                 // A tapped link asks what to do with it rather than leaving the app.
                 .environment(\.openURL, OpenURLAction { url in link = url; return .handled })
@@ -821,9 +832,9 @@ private struct Row: View {
                     }
                 }
                 .sheet(item: $sharing) { ShareSheet(items: [$0]).presentationDetents([.medium, .large]) }
-                .padding(.horizontal, 12).padding(.vertical, 7)
+                .padding(.horizontal, 14).padding(.vertical, 9.5)
                 .foregroundStyle(mine ? .white : .primary)
-                .background(BubbleShape(mine: mine, tail: tail).fill(mine ? Color.blue : Color(.systemGray5)))
+                .background(BubbleShape(mine: mine, tail: tail).fill(mine ? Color.blue : .incomingBubble))
                 .contentShape(.contextMenuPreview, BubbleShape(mine: mine, tail: false))
                 // Double-tap: ❤️ straight away, no menu. Again takes it off.
                 .onTapGesture(count: 2) { thread.react("❤️", on: message.id) }
@@ -908,7 +919,7 @@ private struct Row: View {
                     if receipt { Text("Read ").fontWeight(.semibold) + Text(message.date.formatted(date: .omitted, time: .shortened)) }
                     else { Text("Delivered").fontWeight(.semibold) }
                 }
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .font(.system(size: 12)).foregroundStyle(.secondary)
                 .padding(.trailing, 4)
                 .contentTransition(.opacity)
                 .animation(.snappy, value: receipt)
@@ -920,7 +931,7 @@ private struct Row: View {
             if preview == nil { preview = await LinkMeta.load(u) }
         }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
-        .padding(mine ? .leading : .trailing, 64)
+        .padding(mine ? .leading : .trailing, 89)
         // Swipe right to reply, as in Messages: the row follows the finger, an arrow
         // fills in behind it, and letting go past the mark picks it.
         .offset(x: swipe)
@@ -982,7 +993,7 @@ private struct RemoteFileView: View {
                     .accessibilityLabel("Video, \(file.name)").accessibilityAddTraits(.isButton)
             } else if visual && !missing {
                 // still downloading: a placeholder the size of what's coming
-                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color(.systemGray5))
+                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.incomingBubble)
                     .frame(width: file.kind == "video" ? 180 : 220, height: file.kind == "video" ? 320 : 220)
                     .overlay {
                         VStack(spacing: 8) {
@@ -1000,7 +1011,7 @@ private struct RemoteFileView: View {
                     }
                     .font(.system(size: 15))
                     .padding(.horizontal, 12).padding(.vertical, 9)
-                    .background(Color(.systemGray5), in: .rect(cornerRadius: 18, style: .continuous))
+                    .background(.incomingBubble, in: .rect(cornerRadius: 18, style: .continuous))
                 }
                 .tint(.primary)
                 .disabled(missing || opening)
@@ -1065,7 +1076,7 @@ private struct VoiceRow: View {
             Button { Task { await player.toggle(key, load: load) } } label: {
                 Image(systemName: playing ? "pause.fill" : "play.fill")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(mine ? Color.blue : Color(.systemGray5))
+                    .foregroundStyle(mine ? Color.blue : .incomingBubble)
                     .frame(width: 26, height: 26)
                     .background(ink, in: .circle)
                     .contentTransition(.symbolEffect(.replace))
@@ -1166,6 +1177,30 @@ private struct VoiceRow: View {
     }
 }
 
+/// A sent bubble on its way out of the composer: at 0 it covers the text field (its width,
+/// 40pt tall, about 50pt lower) with the words blurred; at 1 it is the bubble. Measured off
+/// Messages on iOS 26: the field fills blue, narrows toward the send button, lifts and
+/// settles with a slight overshoot in about 0.45s.
+struct SendMorph: ViewModifier, Animatable {
+    var progress: Double
+    /// From the row's bottom down to the text field's.
+    var lift: CGFloat
+    var animatableData: Double { get { progress } set { progress = newValue } }
+    func body(content: Content) -> some View {
+        let q = 1 - min(max(progress, 0), 1.2)
+        let lift = lift
+        content.visualEffect { c, g in
+            let field = CGSize(width: max(g.size.width, UIScreen.main.bounds.width - 82), height: 40)
+            return c
+                .scaleEffect(x: 1 + (field.width / max(g.size.width, 1) - 1) * q,
+                             y: 1 + (field.height / max(g.size.height, 1) - 1) * q,
+                             anchor: .bottomTrailing)
+                .offset(y: lift * q)
+                .blur(radius: 5 * max(q, 0))
+        }
+    }
+}
+
 /// Rounded bubble; the last one in a run gets a tail curling out of its bottom corner.
 struct BubbleShape: Shape {
     let mine: Bool
@@ -1188,6 +1223,30 @@ struct BubbleShape: Shape {
             t = t.applying(CGAffineTransform(translationX: rect.maxX + rect.minX, y: 0).scaledBy(x: -1, y: 1))
         }
         return p.union(t)
+    }
+}
+
+/// Long press on a photo or file: the same tapback palette a text bubble has. `badge` puts the
+/// reaction on this one when there's no text bubble to carry it.
+private struct Reactable: ViewModifier {
+    let thread: any ChatThread
+    let message: Message
+    let badge: Bool
+    func body(content: Content) -> some View {
+        content
+            .contextMenu {
+                ControlGroup {
+                    ForEach(Row.tapbacks, id: \.self) { e in Button(e) { thread.react(e, on: message.id) } }
+                }
+                .controlGroupStyle(.palette)
+                .menuActionDismissBehavior(.enabled)
+                Button("Reply", systemImage: "arrowshape.turn.up.left") { thread.replyingTo = message.id }
+            }
+            .overlay(alignment: message.from == .me ? .topLeading : .topTrailing) {
+                if badge, let r = message.reaction { Tapback(emoji: r, mine: message.from == .me) }
+            }
+            .padding(.top, badge && message.reaction != nil ? 14 : 0)
+            .sensoryFeedback(.impact(weight: .light), trigger: message.reaction)
     }
 }
 
@@ -1244,8 +1303,8 @@ struct Typing: View {
         }
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14).padding(.vertical, 12)
-        .background(BubbleShape(mine: false, tail: true).fill(Color(.systemGray5)))
-        .padding(.trailing, 64)
+        .background(BubbleShape(mine: false, tail: true).fill(.incomingBubble))
+        .padding(.trailing, 90)
         .frame(maxWidth: .infinity, alignment: .leading)
         // Last, so the bubble behind the text is inside the animation too: it grows and
         // shrinks with a longer or shorter step instead of jumping to the new size.
@@ -1518,6 +1577,8 @@ private enum Thumbs {
     /// A voice note is recording, and how loud it is (0–1): drives the screen glow.
     var recording = false
     @ObservationIgnored var level: () -> Double = { 0 }
+    /// The composer's height, so a sent bubble knows how far below it the text field was.
+    @ObservationIgnored var height: CGFloat = 50
 }
 
 /// The voice glow rising from the bottom edge of the screen while a note records. Its own
@@ -1609,6 +1670,7 @@ final class KeyboardDock: UIViewController {
     private func measureComposer(animated: Bool) {
         guard view.bounds.width > 0 else { return }
         let h = composer.sizeThatFits(in: CGSize(width: view.bounds.width, height: .greatestFiniteMagnitude)).height
+        ui.height = h
         guard abs(h - composerHeight.constant) > 0.5 else { return }
         composerHeight.constant = h
         if animated { UIView.animate(withDuration: 0.2) { self.view.layoutIfNeeded() } }
@@ -1671,4 +1733,12 @@ private struct AddPassSheet: UIViewControllerRepresentable {
     let pass: PKPass
     func makeUIViewController(context: Context) -> PKAddPassesViewController { PKAddPassesViewController(pass: pass)! }
     func updateUIViewController(_ vc: PKAddPassesViewController, context: Context) {}
+}
+
+
+extension ShapeStyle where Self == Color {
+    /// Messages' grey for the other side, a shade darker than systemGray5 in dark mode.
+    static var incomingBubble: Color {
+        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.149, green: 0.145, blue: 0.165, alpha: 1) : UIColor(red: 0.914, green: 0.914, blue: 0.922, alpha: 1) })
+    }
 }
