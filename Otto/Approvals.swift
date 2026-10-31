@@ -187,72 +187,211 @@ struct ApprovalSheet: View {
     }
 }
 
-/// Kitchen's receipt (dqnamo.com/kitchen): the paper feeds out of a slot in twelve short jerks
-/// over 2.2s, like a thermal printer, with a PAID stamp (TEST for a test).
+/// Kitchen's Receipt Printer (dqnamo.com/experiments/receipt-printer), rebuilt: a dark printer
+/// whose screen says what it's doing (processing, printing, complete), and a receipt that feeds
+/// out of its slot in ten short pushes, bigger in the middle, over 1.75s.
 struct PrintedReceipt: View {
     let payment: ApprovalRequest.Payment
-    @State private var fed = 0
+    enum Stage { case processing, printing, complete }
+    @State private var stage: Stage = .processing
+    /// 0 hidden in the slot, 1 fully out; the paper is offset by (frac - 1) of its own height.
+    @State private var frac: Double = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private let steps = 12
+
+    // Kitchen's stepped feed: where the paper stops after each push (fraction still inside),
+    // each push 0.13s, each pause 0.05s, linear.
+    private static let stops: [Double] = [0.91, 0.81, 0.70, 0.58, 0.45, 0.32, 0.20, 0.10, 0.03, 0]
+    private static let push = 0.13, pause = 0.0525
+    private static let easeOut = Animation.timingCurve(0.23, 1, 0.32, 1, duration: 0.18)
 
     var body: some View {
         VStack(spacing: 0) {
-            Capsule().fill(Color.primary).frame(height: 12).zIndex(1)
-            paper
-                .offset(y: 0)
-                .visualEffect { [fed, steps] c, g in c.offset(y: -g.size.height * (1 - Double(fed) / Double(steps)) - 7) }
-                .padding(.horizontal, 12)
-                .clipped()
-                .padding(.top, -6)
+            machine.zIndex(2)
+            output.padding(.top, -16).zIndex(1)
         }
-        .padding(.vertical, 8)
-        .task {
-            if reduceMotion { fed = steps; return }
-            try? await Task.sleep(for: .milliseconds(300))
-            while fed < steps {
-                fed += 1
-                UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.4)
-                try? await Task.sleep(for: .milliseconds(183))
-            }
-        }
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .task { await run() }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("Receipt for \(payment.money(payment.total)) to \(payment.merchant)")
+    }
+
+    private func run() async {
+        if reduceMotion { stage = .complete; frac = 1; return }
+        try? await Task.sleep(for: .milliseconds(700))
+        withAnimation(Self.easeOut) { stage = .printing }
+        let tick = UIImpactFeedbackGenerator(style: .soft)
+        for s in Self.stops {
+            withAnimation(.linear(duration: Self.push)) { frac = 1 - s }
+            tick.impactOccurred(intensity: 0.5)
+            try? await Task.sleep(for: .seconds(Self.push + Self.pause))
+        }
+        withAnimation(Self.easeOut) { stage = .complete }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    // MARK: the printer
+
+    private var machine: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "creditcard.fill").font(.system(size: 13)).foregroundStyle(Color(white: 0.55))
+                    .frame(width: 22, height: 22).background(Color(white: 0.22), in: .rect(cornerRadius: 5))
+                Spacer()
+                Text(payment.test == true ? "Test" : "Paid").font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color(white: 0.75))
+                    .padding(.horizontal, 10).frame(height: 24).background(Color(white: 0.22), in: .capsule)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(payment.merchant).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                        Text(payment.items.count == 1 ? payment.items[0].name : "\(payment.items.count) items")
+                            .font(.system(size: 12)).foregroundStyle(Color(white: 0.6)).lineLimit(1)
+                    }
+                    Spacer(minLength: 12)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("Total").font(.system(size: 11)).foregroundStyle(Color(white: 0.6))
+                        Text(payment.money(payment.total)).font(.system(size: 17, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
+                    }
+                }
+                status
+            }
+            .padding(14)
+            .background(Color(white: 0.09), in: .rect(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(white: 0.2)))
+            Color.clear.frame(height: 8)
+        }
+        .padding(10)
+        .background(Color(white: 0.15), in: .rect(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color(white: 0.25)))
+        // The slot the paper comes out of.
+        .overlay(alignment: .bottom) {
+            RoundedRectangle(cornerRadius: 4).fill(Color(white: 0.04))
+                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color(white: 0.22)))
+                .frame(height: 8).padding(.horizontal, 24).padding(.bottom, 9)
+        }
+        .shadow(color: .black.opacity(0.35), radius: 16, y: 8)
+    }
+
+    private var status: some View {
+        HStack(spacing: 8) {
+            ZStack {
+                if stage == .complete {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        .transition(.scale(scale: 0.94).combined(with: .opacity))
+                } else {
+                    ProgressView().controlSize(.mini).tint(Color(white: 0.6))
+                        .transition(.scale(scale: 0.96).combined(with: .opacity))
+                }
+            }
+            .frame(width: 18, height: 18)
+            ZStack(alignment: .leading) {
+                Text(label).id(stage)
+                    .transition(.asymmetric(insertion: .offset(y: 4).combined(with: .opacity), removal: .offset(y: -4).combined(with: .opacity)))
+            }
+            .font(.system(size: 12, weight: .medium)).foregroundStyle(Color(white: 0.7))
+        }
+        .clipped()
+    }
+
+    private var label: String {
+        switch stage {
+        case .processing: "Processing your payment"
+        case .printing: "Printing your receipt"
+        case .complete: payment.test == true ? "Test complete" : "Payment complete"
+        }
+    }
+
+    // MARK: the paper
+
+    private var output: some View {
+        paper
+            .visualEffect { [frac] c, g in c.offset(y: -g.size.height * (1 - frac) + 2) }
+            .padding(.horizontal, 24)
+            .clipped()
+            // The slot's shadow on the paper as it comes out.
+            .overlay(alignment: .top) {
+                Rectangle().fill(.black.opacity(0.55)).frame(height: 8).blur(radius: 6).padding(.horizontal, 24).offset(y: -4)
+            }
+            .opacity(stage == .processing ? 0 : 1)
     }
 
     private var paper: some View {
-        let mono = Font.system(size: 12, weight: .medium, design: .monospaced)
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(payment.merchant.uppercased()).font(.system(size: 12, weight: .bold, design: .monospaced)).tracking(2).frame(maxWidth: .infinity)
-            if let site = payment.site { Text(site).frame(maxWidth: .infinity).foregroundStyle(Color(white: 0.4)) }
-            dashed
-            row(Date.now.formatted(date: .abbreviated, time: .shortened), "")
+        let mono = Font.system(size: 11, weight: .medium, design: .monospaced)
+        return VStack(alignment: .leading, spacing: 0) {
+            Image(systemName: "sparkle").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 32, height: 32).background(Color(white: 0.12), in: .rect(cornerRadius: 6))
+                .frame(maxWidth: .infinity).padding(.bottom, 14)
             dashed
             ForEach(Array(payment.items.enumerated()), id: \.offset) { _, i in
-                row(i.quantity > 1 ? "\(i.quantity) × \(i.name)" : i.name, payment.money(i.unit * Double(i.quantity)))
+                VStack(alignment: .leading, spacing: 1) {
+                    row((i.quantity > 1 ? "\(i.quantity) × \(i.name)" : i.name).uppercased(), payment.money(i.unit * Double(i.quantity))).fontWeight(.bold)
+                    if let d = i.detail { Text(d).foregroundStyle(Color(white: 0.45)) }
+                }
+                .padding(.vertical, 4)
             }
             dashed
-            row("Total", payment.money(payment.total)).fontWeight(.bold)
-            row(payment.method, "")
-            Text(payment.test == true ? "TEST" : "PAID")
-                .font(.system(size: 13, weight: .heavy, design: .monospaced)).tracking(3)
-                .foregroundStyle(Color(red: 0.30, green: 0.48, blue: 0.36))
-                .padding(.horizontal, 10).padding(.vertical, 2)
-                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color(red: 0.30, green: 0.48, blue: 0.36), lineWidth: 2))
-                .rotationEffect(.degrees(-6))
-                .frame(maxWidth: .infinity).padding(.top, 8)
+            row("TOTAL PAID", payment.money(payment.total)).font(.system(size: 13, weight: .bold, design: .monospaced)).padding(.vertical, 6)
+            dashed
+            VStack(alignment: .leading, spacing: 3) {
+                row("Merchant", payment.site ?? payment.merchant)
+                row("Paid with", payment.method)
+                row("Date", Date.now.formatted(.dateTime.day().month(.abbreviated).year().hour().minute()).uppercased())
+            }
+            .foregroundStyle(Color(white: 0.35))
+            .padding(.vertical, 6)
+            Barcode(seed: payment.merchant + payment.money(payment.total)).frame(height: 34).padding(.top, 10).padding(.horizontal, 30)
+            Text(payment.test == true ? "TEST · NOTHING CHARGED" : "THANK YOU").font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(Color(white: 0.5)).frame(maxWidth: .infinity).padding(.top, 4)
         }
         .font(mono).monospacedDigit()
         .foregroundStyle(Color(white: 0.12))
-        .padding(.horizontal, 14).padding(.top, 16).padding(.bottom, 20)
-        .background(.white)
+        .padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 26)
+        .background(Color(white: 0.985))
+        .clipShape(Torn())
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 6)
     }
 
     private var dashed: some View {
-        Line().stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 3])).foregroundStyle(Color(white: 0.8)).frame(height: 1).padding(.vertical, 4)
+        Line().stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 3])).foregroundStyle(Color(white: 0.78)).frame(height: 1).padding(.vertical, 6)
     }
 
     private func row(_ l: String, _ r: String) -> some View {
-        HStack(alignment: .firstTextBaseline) { Text(l); Spacer(minLength: 12); Text(r) }
+        HStack(alignment: .firstTextBaseline) { Text(l).lineLimit(1); Spacer(minLength: 12); Text(r).lineLimit(1) }
     }
 
     private struct Line: Shape { func path(in r: CGRect) -> Path { Path { $0.move(to: CGPoint(x: 0, y: r.midY)); $0.addLine(to: CGPoint(x: r.maxX, y: r.midY)) } } }
+
+    /// The tear: a row of small teeth along the bottom edge.
+    private struct Torn: Shape {
+        func path(in r: CGRect) -> Path {
+            let teeth = 28, depth: CGFloat = 6
+            return Path { p in
+                p.move(to: .zero); p.addLine(to: CGPoint(x: r.maxX, y: 0)); p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - depth))
+                for i in stride(from: teeth, through: 0, by: -1) {
+                    let x = r.width * CGFloat(i) / CGFloat(teeth)
+                    p.addLine(to: CGPoint(x: x, y: i % 2 == 0 ? r.maxY - depth : r.maxY))
+                }
+                p.closeSubpath()
+            }
+        }
+    }
+
+    /// Bars from a hash of the payment, so the same receipt always prints the same code.
+    private struct Barcode: View {
+        let seed: String
+        var body: some View {
+            Canvas { ctx, size in
+                var h = UInt64(seed.utf8.reduce(1469598103934665603) { ($0 ^ UInt64($1)) &* 1099511628211 })
+                var x: CGFloat = 0
+                while x < size.width {
+                    h = h &* 6364136223846793005 &+ 1442695040888963407
+                    let w = CGFloat(1 + (h >> 33) % 3), gap = CGFloat(1 + (h >> 40) % 2)
+                    ctx.fill(Path(CGRect(x: x, y: 0, width: min(w, size.width - x), height: size.height)), with: .color(Color(white: 0.1)))
+                    x += w + gap
+                }
+            }
+        }
+    }
 }
