@@ -102,6 +102,8 @@ struct ChatView: View {
                                 quote: m.replyTo.flatMap { byWire[$0] },
                                 tail: next?.from != m.from || next.map { $0.date.timeIntervalSince(m.date) > 3600 } ?? true,
                                 receipt: m.id == lastMine && m.pending != true && m.failed != true ? receipt(for: i, in: messages) : nil,
+                                fresh: m.from == .me && m.pending == true && Date.now.timeIntervalSince(m.date) < 1,
+                                lift: ui.height + 12,   // the bubble starts on the field (tuned against recordings)
                                 onTap: { thread.tap($0, on: m.id) })
                                 .padding(.top, newBlock || prev?.from == .terminal ? 0 : (prev?.from == m.from ? 4 : 10))
                                 .id(m.id)
@@ -109,8 +111,9 @@ struct ChatView: View {
                                 // and narrows into its bubble (Messages, measured off a screen recording);
                                 // Otto's grows out of its tail corner.
                                 .transition(.asymmetric(
+                                    // Yours morphs out of the field inside the row (see Row.fresh), so the row itself just appears.
                                     insertion: m.from == .me
-                                        ? .modifier(active: SendMorph(progress: 0, lift: ui.height + 2), identity: SendMorph(progress: 1, lift: 0))
+                                        ? .identity
                                         // Otto's takes the typing bubble's place: it cross-fades out of the dots, a
                                         // little blurred, without moving (measured off a recording of Messages).
                                         : .opacity.combined(with: .modifier(active: Blurred(radius: 4), identity: Blurred(radius: 0))),
@@ -723,7 +726,12 @@ private struct Row: View {
     let tail: Bool
     /// Under your newest message: true is "Read", false "Delivered", nil nothing.
     let receipt: Bool?
+    /// Just sent from the composer: the bubble starts as the text field and morphs into place.
+    var fresh = false
+    /// From the bubble's bottom down to the text field's bottom, before the receipt line.
+    var lift: CGFloat = 0
     let onTap: (ActionButton) -> Void
+    @State private var morph: Double = 1
     @State private var swipe: CGFloat = 0
     @State private var selecting = false
     @State private var link: URL?
@@ -860,6 +868,14 @@ private struct Row: View {
                 .foregroundStyle(mine ? .white : .primary)
                 .background(BubbleShape(mine: mine, tail: tail).fill(mine ? .outgoingBubble : .incomingBubble))
                 .contentShape(.contextMenuPreview, BubbleShape(mine: mine, tail: false))
+                // The field's width and place at 0, the bubble at 1: on the bubble itself, so the
+                // stretch is field width over bubble width (the row is as wide as the screen).
+                .modifier(SendMorph(progress: morph, lift: lift))
+                .onAppear {
+                    guard fresh else { return }
+                    morph = 0
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { morph = 1 }
+                }
                 // Double-tap: ❤️ straight away, no menu. Again takes it off.
                 .onTapGesture(count: 2) { thread.react("❤️", on: message.id) }
                 .sensoryFeedback(.impact(weight: .light), trigger: message.reaction)
