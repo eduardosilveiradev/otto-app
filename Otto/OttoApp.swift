@@ -650,10 +650,13 @@ final class OttoStore {
 
     func hideApproval(_ id: String) { hiddenApprovals.insert(id) }
 
-    func decide(_ id: String, approve: Bool) async {
+    /// `keep`: the decision goes out, but the sheet stays up (a payment's receipt) until `closeApproval`.
+    func decide(_ id: String, approve: Bool, keep: Bool = false) async {
         await backend.decide(approval: id, approve: approve)
-        approvals.removeAll { $0.id == id }
+        if !keep { approvals.removeAll { $0.id == id } }
     }
+
+    func closeApproval(_ id: String) { approvals.removeAll { $0.id == id } }
 
     /// Downscaled to 1600px so the upload is quick and the saved thread stays small.
     static func jpeg(_ image: UIImage) -> Data? {

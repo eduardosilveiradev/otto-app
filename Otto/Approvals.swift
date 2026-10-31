@@ -36,24 +36,37 @@ struct ApprovalSheet: View {
     let request: ApprovalRequest
     @State private var busy = false
     @State private var failed: String?
+    /// Paid: the decision has gone to the Mac, and the receipt prints before the sheet closes.
+    /// `-receiptDemo`: straight to the receipt, for recordings (Face ID can't be tapped in the simulator).
+    @State private var paid = ProcessInfo.processInfo.arguments.contains("-receiptDemo")
 
     var body: some View {
         NavigationStack {
             List {
-                if let p = request.payment { paymentRows(p) } else { changeRows }
+                if paid, let p = request.payment {
+                    Section { PrintedReceipt(payment: p).listRowBackground(Color.clear).listRowInsets(EdgeInsets()) }
+                } else if let p = request.payment { paymentRows(p) } else { changeRows }
 
                 if let failed {
                     Section { Text(failed).foregroundStyle(.red).font(.footnote) }
                 }
             }
-            .navigationTitle(request.title)
+            .navigationTitle(paid ? "Paid" : request.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Later") { store.hideApproval(request.id) }
+                if !paid {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Later") { store.hideApproval(request.id) }
+                    }
                 }
             }
             .safeAreaInset(edge: .bottom) {
+                if paid {
+                    Button { store.closeApproval(request.id) } label: { Text("Done").frame(maxWidth: .infinity) }
+                        .buttonStyle(.borderedProminent).controlSize(.large)
+                        .padding(.horizontal, 20).padding(.vertical, 12)
+                        .background(.bar)
+                } else {
                 HStack(spacing: 12) {
                     Button(role: .destructive) { Task { await decide(false) } } label: {
                         Text("Decline").frame(maxWidth: .infinity)
@@ -68,6 +81,7 @@ struct ApprovalSheet: View {
                 .disabled(busy)
                 .padding(.horizontal, 20).padding(.vertical, 12)
                 .background(.bar)
+                }
             }
         }
         .interactiveDismissDisabled()
@@ -163,6 +177,82 @@ struct ApprovalSheet: View {
                 return
             }
         }
+        // A paid payment goes to the Mac now, then the sheet stays for the receipt until Done.
+        if approve, request.payment != nil {
+            await store.decide(request.id, approve: true, keep: true)
+            withAnimation(.snappy) { paid = true }
+            return
+        }
         await store.decide(request.id, approve: approve)
     }
+}
+
+/// Kitchen's receipt (dqnamo.com/kitchen): the paper feeds out of a slot in twelve short jerks
+/// over 2.2s, like a thermal printer, with a PAID stamp (TEST for a test).
+struct PrintedReceipt: View {
+    let payment: ApprovalRequest.Payment
+    @State private var fed = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let steps = 12
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Capsule().fill(Color.primary).frame(height: 12).zIndex(1)
+            paper
+                .offset(y: 0)
+                .visualEffect { [fed, steps] c, g in c.offset(y: -g.size.height * (1 - Double(fed) / Double(steps)) - 7) }
+                .padding(.horizontal, 12)
+                .clipped()
+                .padding(.top, -6)
+        }
+        .padding(.vertical, 8)
+        .task {
+            if reduceMotion { fed = steps; return }
+            try? await Task.sleep(for: .milliseconds(300))
+            while fed < steps {
+                fed += 1
+                UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.4)
+                try? await Task.sleep(for: .milliseconds(183))
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var paper: some View {
+        let mono = Font.system(size: 12, weight: .medium, design: .monospaced)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(payment.merchant.uppercased()).font(.system(size: 12, weight: .bold, design: .monospaced)).tracking(2).frame(maxWidth: .infinity)
+            if let site = payment.site { Text(site).frame(maxWidth: .infinity).foregroundStyle(Color(white: 0.4)) }
+            dashed
+            row(Date.now.formatted(date: .abbreviated, time: .shortened), "")
+            dashed
+            ForEach(Array(payment.items.enumerated()), id: \.offset) { _, i in
+                row(i.quantity > 1 ? "\(i.quantity) × \(i.name)" : i.name, payment.money(i.unit * Double(i.quantity)))
+            }
+            dashed
+            row("Total", payment.money(payment.total)).fontWeight(.bold)
+            row(payment.method, "")
+            Text(payment.test == true ? "TEST" : "PAID")
+                .font(.system(size: 13, weight: .heavy, design: .monospaced)).tracking(3)
+                .foregroundStyle(Color(red: 0.30, green: 0.48, blue: 0.36))
+                .padding(.horizontal, 10).padding(.vertical, 2)
+                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color(red: 0.30, green: 0.48, blue: 0.36), lineWidth: 2))
+                .rotationEffect(.degrees(-6))
+                .frame(maxWidth: .infinity).padding(.top, 8)
+        }
+        .font(mono).monospacedDigit()
+        .foregroundStyle(Color(white: 0.12))
+        .padding(.horizontal, 14).padding(.top, 16).padding(.bottom, 20)
+        .background(.white)
+    }
+
+    private var dashed: some View {
+        Line().stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 3])).foregroundStyle(Color(white: 0.8)).frame(height: 1).padding(.vertical, 4)
+    }
+
+    private func row(_ l: String, _ r: String) -> some View {
+        HStack(alignment: .firstTextBaseline) { Text(l); Spacer(minLength: 12); Text(r) }
+    }
+
+    private struct Line: Shape { func path(in r: CGRect) -> Path { Path { $0.move(to: CGPoint(x: 0, y: r.midY)); $0.addLine(to: CGPoint(x: r.maxX, y: r.midY)) } } }
 }
