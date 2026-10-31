@@ -452,6 +452,10 @@ struct Composer: View {
         }
         // Messages pulls the bar in toward the edges while the keyboard is up.
         .padding(.horizontal, focused ? 15 : 27)
+        // Measured off Messages: 16pt from the field to the keyboard, 28pt to the screen edge without it.
+        // The dock stops at the home indicator (34pt), so without the keyboard the bar sinks 10pt past it.
+        .padding(.bottom, focused ? 12 : 0)
+        .offset(y: focused ? 0 : 10)
         .animation(.snappy, value: focused)
         .padding(.top, 6)
         .padding(.bottom, 4)

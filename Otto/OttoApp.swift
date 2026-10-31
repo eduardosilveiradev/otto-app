@@ -307,6 +307,13 @@ final class OttoStore {
                 Message(from: .me, text: "i'm building a clone of u. basically ur son but OSS", date: t),
                 Message(from: .otto, text: "proud father moment i guess, just don't teach him my bad habitshonestly though, building always-on agents over messaging is fun until you hit carrier rate limits and weird bubble parsinggood luck with the repo, let me know when you need your dad to star it on github", date: t),
             ]
+            // `-autoSend`: open the keyboard and send through the real path, to record the send.
+            if ProcessInfo.processInfo.arguments.contains("-autoSend") {
+                Task {
+                    try? await Task.sleep(for: .seconds(3)); demoFocus = true
+                    try? await Task.sleep(for: .seconds(2)); send("test send")
+                }
+            }
         }
         // `-scriptDemo`: a scripted session for the launch film; see scriptDemo().
         if ProcessInfo.processInfo.arguments.contains("-scriptDemo") { Task { await scriptDemo() } }
