@@ -273,6 +273,15 @@ final class OttoStore {
                         files: [RemoteFile(id: "demo-pass-1", name: "Pass_1.pkpass", kind: "file"), RemoteFile(id: "demo-pass-2", name: "Pass_2.pkpass", kind: "file")]),
             ]
         }
+        // `-paymentDemo`: a payment confirmation up over the thread.
+        if ProcessInfo.processInfo.arguments.contains("-paymentDemo") {
+            approvals = [ApprovalRequest(id: "demo-pay", title: "Pay 17.00 EUR", summary: "Multisala Lux Roma", files: [], branch: nil, stat: nil, expires: nil,
+                payment: .init(merchant: "Multisala Lux Roma", site: "lux.cdr.18tickets.it",
+                               items: [.init(name: "Primetime ticket", detail: "Sun 1 Nov 17:50 · Sala 6 · E4", quantity: 1, unit: 8.5),
+                                       .init(name: "Primetime ticket", detail: "Sun 1 Nov 17:50 · Sala 6 · E5", quantity: 1, unit: 8.5)],
+                               total: 17, currency: "EUR", method: "Link card ending 6983",
+                               notes: ["No refunds on cinema tickets", "Seats held until 16:14"], test: nil))]
+        }
         // `-demoThread`: the conversation the website shows, for screen recordings.
         if ProcessInfo.processInfo.arguments.contains("-demoThread") {
             messages = [
