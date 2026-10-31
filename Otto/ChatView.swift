@@ -99,7 +99,7 @@ struct ChatView: View {
                         } else {
                             Row(thread: thread, message: m,
                                 quote: m.replyTo.flatMap { byWire[$0] },
-                                tail: true,   // Messages on iOS 26 tails every bubble, not just the last of a run
+                                tail: next?.from != m.from || next.map { $0.date.timeIntervalSince(m.date) > 3600 } ?? true,
                                 receipt: m.id == lastMine && m.pending != true && m.failed != true ? receipt(for: i, in: messages) : nil,
                                 onTap: { thread.tap($0, on: m.id) })
                                 .padding(.top, newBlock || prev?.from == .terminal ? 0 : (prev?.from == m.from ? 4 : 10))
