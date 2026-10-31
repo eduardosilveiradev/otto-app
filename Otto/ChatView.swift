@@ -136,6 +136,13 @@ struct ChatView: View {
         .onTapGesture { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
         // Your own send always comes back down, like Messages, even from far up the thread.
         .onChange(of: lastMine) { withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) } }
+        // The thinking bubble can be tall (steps, a to-do list). When it goes, the thread is
+        // shorter by that much; a reader at the bottom stays at the bottom instead of being left
+        // looking at older messages.
+        .onChange(of: thread.typing) { _, on in
+            guard !on, !scrolledUp else { return }
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { scroll.scrollTo(edge: .bottom) }
+        }
         // What the composer and keyboard cover. A SwiftUI margin rather than a UIKit safe-area
         // inset: SwiftUI applied the inset in one jump and then scrolled after it on its own
         // curve, so the thread lurched. Now the margin and the scroll move together, on the

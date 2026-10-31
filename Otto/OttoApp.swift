@@ -307,6 +307,10 @@ final class OttoStore {
                 Message(from: .me, text: "i'm building a clone of u. basically ur son but OSS", date: t),
                 Message(from: .otto, text: "proud father moment i guess, just don't teach him my bad habitshonestly though, building always-on agents over messaging is fun until you hit carrier rate limits and weird bubble parsinggood luck with the repo, let me know when you need your dad to star it on github", date: t),
             ]
+            // `-longRef`: the same exchange many times over, for a thread longer than one page.
+            if ProcessInfo.processInfo.arguments.contains("-longRef") {
+                messages = (0..<12).flatMap { _ in messages.map { var m = $0; m.id = UUID(); return m } }
+            }
             // `-autoSend`: open the keyboard and send through the real path, to record the send.
             if ProcessInfo.processInfo.arguments.contains("-autoSend") {
                 Task {
