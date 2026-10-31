@@ -438,13 +438,15 @@ struct Composer: View {
                             .transition(.scale(scale: 0.6).combined(with: .opacity))
                             }
                         } else {
+                            // Messages' send: a 37×27 pill, 6.5pt in from the field's corner (measured off a screenshot).
                             Button(action: send) {
-                                Image(systemName: "arrow.up.circle.fill")
-                                    .font(.system(size: 28))
-                                    .symbolRenderingMode(.palette)
-                                    .foregroundStyle(.white, Color.blue)
-                                    .frame(width: 36, height: 36)
+                                Image(systemName: "arrow.up")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 37, height: 27)
+                                    .background(Color(red: 0.525, green: 0.553, blue: 0.592), in: .capsule)
                             }
+                            .padding(.trailing, 6.5).padding(.bottom, 6.5)
                             .transition(.scale(scale: 0.6).combined(with: .opacity))
                         }
                     }
