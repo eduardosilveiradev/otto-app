@@ -375,7 +375,8 @@ final class OttoStore {
             for await u in backend.approvalUpdates {
                 switch u {
                 case .show(let a): if !approvals.contains(where: { $0.id == a.id }) { approvals.append(a) }
-                case .done(let id): approvals.removeAll { $0.id == id }
+                // A paid payment stays for its receipt even though the Mac has settled it.
+                case .done(let id): if !keptApprovals.contains(id) { approvals.removeAll { $0.id == id } }
                 }
             }
         }
@@ -652,11 +653,13 @@ final class OttoStore {
 
     /// `keep`: the decision goes out, but the sheet stays up (a payment's receipt) until `closeApproval`.
     func decide(_ id: String, approve: Bool, keep: Bool = false) async {
+        if keep { keptApprovals.insert(id) }   // before the send: the Mac's "done" can beat its reply
         await backend.decide(approval: id, approve: approve)
         if !keep { approvals.removeAll { $0.id == id } }
     }
 
-    func closeApproval(_ id: String) { approvals.removeAll { $0.id == id } }
+    func closeApproval(_ id: String) { keptApprovals.remove(id); approvals.removeAll { $0.id == id } }
+    @ObservationIgnored private var keptApprovals: Set<String> = []
 
     /// Downscaled to 1600px so the upload is quick and the saved thread stays small.
     static func jpeg(_ image: UIImage) -> Data? {

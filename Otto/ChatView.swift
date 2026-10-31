@@ -137,6 +137,8 @@ struct ChatView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typing)
         // The thinking bubble's to-do list and a tapback's room above a bubble change heights too.
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typingTodos)
+        // A new step's line can wrap to two, or back to one: the bubble's height follows smoothly.
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typingStatus)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: messages.map(\.reaction))
         // Pinned to the bottom as content grows (new bubbles, typing dots, the keyboard),
         // so nothing has to scroll after the fact and fight the insert animation.
