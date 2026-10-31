@@ -111,13 +111,16 @@ struct ChatView: View {
                                 .transition(.asymmetric(
                                     insertion: m.from == .me
                                         ? .modifier(active: SendMorph(progress: 0, lift: ui.height + 2), identity: SendMorph(progress: 1, lift: 0))
-                                        : .scale(scale: 0.4, anchor: .bottomLeading).combined(with: .opacity),
+                                        // Otto's takes the typing bubble's place: it cross-fades out of the dots, a
+                                        // little blurred, without moving (measured off a recording of Messages).
+                                        : .opacity.combined(with: .modifier(active: Blurred(radius: 4), identity: Blurred(radius: 0))),
                                     removal: .opacity))
                         }
                     }
                     if thread.typing {
                         Typing(status: thread.typingStatus, todos: thread.typingTodos, connected: thread.connected).padding(.top, 10).id("typing")
-                            .transition(.scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity))
+                            .transition(.asymmetric(insertion: .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity),
+                                                    removal: .opacity))
                     }
                 }
                 .animation(thread.animated ? .spring(response: 0.42, dampingFraction: 0.82) : nil, value: messages.count)
@@ -454,7 +457,7 @@ struct Composer: View {
                                     .frame(width: 37, height: 27)
                                     .background(Color(red: 0.525, green: 0.553, blue: 0.592), in: .capsule)
                             }
-                            .padding(.trailing, 6.5).padding(.bottom, 6.5)
+                            .padding(.trailing, 6.5).padding(.bottom, 4.5)   // centred in a one-line field (measured), like Messages
                             .transition(.scale(scale: 0.6).combined(with: .opacity))
                         }
                     }
@@ -1221,6 +1224,8 @@ struct SendMorph: ViewModifier, Animatable {
         }
     }
 }
+
+struct Blurred: ViewModifier { let radius: CGFloat; func body(content: Content) -> some View { content.blur(radius: radius) } }
 
 /// Rounded bubble; the last one in a run gets a tail curling out of its bottom corner.
 struct BubbleShape: Shape {
