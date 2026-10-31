@@ -835,6 +835,8 @@ private struct Row: View {
                         ForEach(Self.tapbacks, id: \.self) { e in Button(e) { thread.react(e, on: message.id) } }
                     }
                     .controlGroupStyle(.palette)
+                    // Palette buttons keep the menu open by default; a tapback should close it like Messages.
+                    .menuActionDismissBehavior(.enabled)
                     Button("Reply", systemImage: "arrowshape.turn.up.left") { thread.replyingTo = message.id }
                     Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
                     Button("Select Text", systemImage: "selection.pin.in.out") { selecting = true }
