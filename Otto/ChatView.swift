@@ -446,7 +446,7 @@ struct Composer: View {
             .animation(.snappy(duration: 0.22), value: canSend)
             .animation(.snappy(duration: 0.22), value: recorder.started != nil)
             .frame(minHeight: 40)
-            .background(Color.blue.opacity(flash ? 0.9 : 0), in: .rect(cornerRadius: 20, style: .continuous))
+            .background(Color.outgoingBubble.opacity(flash ? 0.9 : 0), in: .rect(cornerRadius: 20, style: .continuous))
             .glassEffect(.regular, in: .rect(cornerRadius: 20, style: .continuous))
         }
         }
@@ -834,7 +834,7 @@ private struct Row: View {
                 .sheet(item: $sharing) { ShareSheet(items: [$0]).presentationDetents([.medium, .large]) }
                 .padding(.horizontal, 14).padding(.vertical, 9.5)
                 .foregroundStyle(mine ? .white : .primary)
-                .background(BubbleShape(mine: mine, tail: tail).fill(mine ? Color.blue : .incomingBubble))
+                .background(BubbleShape(mine: mine, tail: tail).fill(mine ? .outgoingBubble : .incomingBubble))
                 .contentShape(.contextMenuPreview, BubbleShape(mine: mine, tail: false))
                 // Double-tap: ❤️ straight away, no menu. Again takes it off.
                 .onTapGesture(count: 2) { thread.react("❤️", on: message.id) }
@@ -1076,7 +1076,7 @@ private struct VoiceRow: View {
             Button { Task { await player.toggle(key, load: load) } } label: {
                 Image(systemName: playing ? "pause.fill" : "play.fill")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(mine ? Color.blue : .incomingBubble)
+                    .foregroundStyle(mine ? .outgoingBubble : .incomingBubble)
                     .frame(width: 26, height: 26)
                     .background(ink, in: .circle)
                     .contentTransition(.symbolEffect(.replace))
@@ -1737,6 +1737,11 @@ private struct AddPassSheet: UIViewControllerRepresentable {
 
 
 extension ShapeStyle where Self == Color {
+    /// Yours: the slate grey of the user's side in the reference (sampled #60656B in dark mode).
+    /// ponytail: the light-mode value is a guess until there's a light screenshot to sample.
+    static var outgoingBubble: Color {
+        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.376, green: 0.396, blue: 0.420, alpha: 1) : UIColor(red: 0.553, green: 0.580, blue: 0.616, alpha: 1) })
+    }
     /// Messages' grey for the other side, a shade darker than systemGray5 in dark mode.
     static var incomingBubble: Color {
         Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.149, green: 0.145, blue: 0.165, alpha: 1) : UIColor(red: 0.914, green: 0.914, blue: 0.922, alpha: 1) })
