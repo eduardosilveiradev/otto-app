@@ -90,7 +90,21 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.categoryIdentifier = Self.category
         content.threadIdentifier = thread
         content.relevanceScore = relevance
+        // The icon counts what came in while the app was away; opening it clears both (see clearAll).
+        let unread = UserDefaults.standard.integer(forKey: Self.unreadKey) + 1
+        UserDefaults.standard.set(unread, forKey: Self.unreadKey)
+        content.badge = NSNumber(value: unread)
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+    }
+
+    private static let unreadKey = "unreadCount"
+    /// Opening the app reads the thread: every notification of Otto's goes from Notification
+    /// Center and the icon's count goes to zero, like Messages.
+    static func clearAll() {
+        UserDefaults.standard.set(0, forKey: unreadKey)
+        let center = UNUserNotificationCenter.current()
+        center.removeAllDeliveredNotifications()
+        center.setBadgeCount(0)
     }
 
     // MARK: UNUserNotificationCenterDelegate

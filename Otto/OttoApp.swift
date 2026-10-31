@@ -61,7 +61,7 @@ private struct MainRoot: View {
             .task { Notifier.shared.requestPermission(); await store.start() }
             .onChange(of: phase, initial: true) { _, p in
                 store.foreground = p == .active
-                if p == .active { store.sendShared() }
+                if p == .active { store.sendShared(); Notifier.clearAll() }
                 if p == .background { store.flush(); Notifier.scheduleRefresh() }
                 Grace.update(background: p == .background)
                 Keepalive.update(background: p == .background)
