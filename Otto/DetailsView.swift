@@ -20,6 +20,7 @@ struct DetailsView: View {
     var body: some View {
         NavigationStack {
             List {
+                Group {
                 Section {
                     VStack(spacing: 8) {
                         OttoAvatar(size: 78, asleep: store.asleep)
@@ -84,6 +85,9 @@ struct DetailsView: View {
                 } header: { Text("Server") } footer: {
                     Text("Over Tailscale. Quit and reopen the app after changing these.")
                 }
+                }
+                // Messages' rows are glass over the blurred thread, not solid grey.
+                .listRowBackground(Rectangle().fill(.white.opacity(0.07)))
             }
             .refreshable { await store.refreshBrief(); await store.setSnooze(nil) }
             .task {
