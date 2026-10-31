@@ -269,6 +269,8 @@ final class OttoStore {
                         recorded: [RecordedCard(kind: "memory", id: "claude-plan", title: "Stay on Max 5x until Desk launches", detail: "Remembered", body: "Upgrade to Ultra when Desk starts selling, for the API credits.", action: .init(label: "Forget it", data: "forget memory claude-plan")),
                                    RecordedCard(kind: "place", id: "p1", title: "E-MOTION Roma", detail: "loved · Rome", body: "the sim rigs", action: nil),
                                    RecordedCard(kind: "write", id: "w1", title: "Sim racing, Sat 7 Nov 12:00", detail: "Calendar", body: "Undo: delete the event", action: .init(label: "Undo it", data: "undo write w1"))]),
+                Message(from: .otto, text: "here, one per seat.",
+                        files: [RemoteFile(id: "demo-pass-1", name: "Pass_1.pkpass", kind: "file"), RemoteFile(id: "demo-pass-2", name: "Pass_2.pkpass", kind: "file")]),
             ]
         }
         // `-demoThread`: the conversation the website shows, for screen recordings.

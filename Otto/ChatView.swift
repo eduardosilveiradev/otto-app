@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import AVFoundation
 import QuickLook
+import PassKit
 import LinkPresentation
 import ThinkingOrbsKit
 import VoiceGlowKit
@@ -943,7 +944,8 @@ private struct Row: View {
     }
 }
 
-/// A photo, video or file Otto sent. Photos and videos show inline and open in the media viewer; anything else opens in Quick Look.
+/// A photo, video or file Otto sent. Photos and videos show inline and open in the media viewer, a Wallet pass opens
+/// Add to Wallet, anything else opens in Quick Look.
 /// Each shows a spinner while its bytes download.
 private struct RemoteFileView: View {
     @Environment(OttoStore.self) private var store
@@ -953,8 +955,10 @@ private struct RemoteFileView: View {
     @State private var missing = false
     @State private var opening = false
     @State private var preview: URL?
+    @State private var pass: PKPass?
 
     private var visual: Bool { file.kind == "image" || file.kind == "video" }
+    private var isPass: Bool { file.name.lowercased().hasSuffix(".pkpass") }
 
     var body: some View {
         Group {
@@ -989,8 +993,8 @@ private struct RemoteFileView: View {
                 Button(action: open) {
                     HStack(spacing: 8) {
                         if opening { ProgressView().controlSize(.small) }
-                        else { Image(systemName: missing ? "exclamationmark.triangle" : "doc") }
-                        Text(missing ? "\(file.name) — no longer available" : file.name).lineLimit(1)
+                        else { Image(systemName: missing ? "exclamationmark.triangle" : isPass ? "wallet.pass" : "doc") }
+                        Text(missing ? "\(file.name) — no longer available" : isPass ? "Add to Apple Wallet" : file.name).lineLimit(1)
                     }
                     .font(.system(size: 15))
                     .padding(.horizontal, 12).padding(.vertical, 9)
@@ -1010,6 +1014,7 @@ private struct RemoteFileView: View {
             await load()
         }
         .quickLookPreview($preview)
+        .sheet(item: $pass) { AddPassSheet(pass: $0).ignoresSafeArea() }
     }
 
     private func load() async {
@@ -1022,6 +1027,7 @@ private struct RemoteFileView: View {
             opening = true; defer { opening = false }
             if data == nil { await load() }
             guard let data else { return }
+            if isPass, PKAddPassesViewController.canAddPasses(), let p = try? PKPass(data: data) { pass = p; return }
             let url = URL.temporaryDirectory.appending(path: file.name)
             try? data.write(to: url)
             preview = url
@@ -1654,4 +1660,13 @@ private struct SelectableText: UIViewRepresentable {
     func updateUIView(_ v: UITextView, context: Context) {
         if v.text != text { v.text = text }
     }
+}
+
+extension PKPass: @retroactive Identifiable { public var id: String { serialNumber } }
+
+/// The system Add to Wallet card for one pass.
+private struct AddPassSheet: UIViewControllerRepresentable {
+    let pass: PKPass
+    func makeUIViewController(context: Context) -> PKAddPassesViewController { PKAddPassesViewController(pass: pass)! }
+    func updateUIViewController(_ vc: PKAddPassesViewController, context: Context) {}
 }
