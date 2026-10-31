@@ -318,6 +318,9 @@ final class OttoStore {
                     try? await Task.sleep(for: .seconds(2)); send("test send")
                 }
             }
+            // `-shiftLab`: every thing that can move the thread, one at a time, two seconds apart,
+            // to record and look for jumps. Each step prints "LAB <seconds> <what>".
+            if ProcessInfo.processInfo.arguments.contains("-shiftLab") { Task { await shiftLab() } }
         }
         // `-scriptDemo`: a scripted session for the launch film; see scriptDemo().
         if ProcessInfo.processInfo.arguments.contains("-scriptDemo") { Task { await scriptDemo() } }
@@ -438,6 +441,31 @@ final class OttoStore {
     /// `-scriptDemo`: one continuous session, recorded from the simulator for the launch film.
     /// Everything goes straight into the thread, never through the backend, so the mock's
     /// canned "(mock) …" replies can't appear. Timings are tuned for a ~40 s take.
+    private func shiftLab() async {
+        let t0 = Date.now
+        func step(_ what: String, _ f: () -> Void) async {
+            try? await Task.sleep(for: .seconds(2))
+            print(String(format: "LAB %.2f %@", Date.now.timeIntervalSince(t0), what)); fflush(stdout)
+            f()
+        }
+        await step("keyboard open") { demoFocus = true }
+        await step("send") { send("one") }
+        await step("typing on") { ottoTyping = true; ottoStatus = "Reading" }
+        await step("status change") { ottoStatus = "Searching mail for the receipt" }
+        await step("todos appear") { ottoTodos = [TodoItem(text: "Find the receipt", status: .completed), TodoItem(text: "Log it", status: .in_progress), TodoItem(text: "Tell them", status: .pending)] }
+        await step("otto message while typing") { messages.append(Message(from: .otto, text: "found it, €17 at lux")) }
+        await step("second otto message while typing") { messages.append(Message(from: .otto, text: "logged")) }
+        await step("todos cleared") { ottoTodos = [] }
+        await step("typing off") { ottoTyping = false; ottoStatus = nil }
+        await step("reaction on mine") { if let m = messages.last(where: { $0.from == .me }) { react("❤️", on: m.id) } }
+        await step("read receipt") { if let i = messages.lastIndex(where: { $0.from == .me }) { messages[i].read = true } }
+        await step("keyboard close") { demoFocus = false }
+        await step("otto message, idle") { messages.append(Message(from: .otto, text: "anything else?")) }
+        await step("typing on, idle") { ottoTyping = true; ottoStatus = "Thinking" }
+        await step("otto message replaces dots") { ottoTyping = false; ottoStatus = nil; messages.append(Message(from: .otto, text: "done")) }
+        await step("end") {}
+    }
+
     private func scriptDemo() async {
         func wait(_ s: Double) async { try? await Task.sleep(for: .seconds(s)) }
         func type(_ text: String) async {

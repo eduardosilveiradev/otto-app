@@ -126,11 +126,18 @@ struct ChatView: View {
                                                     removal: .opacity))
                     }
                 }
-                .animation(thread.animated ? .spring(response: 0.42, dampingFraction: 0.82) : nil, value: messages.count)
-                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typing)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 6)
         }
+        // On the scroll view, not the stack: the bottom anchor's offset change then rides the same
+        // animation as the rows. On the stack, the rows animated while the offset jumped, and every
+        // new bubble, the dots coming or going, or a tapback shoved the thread down a frame before
+        // it slid back (measured frame by frame with -shiftLab).
+        .animation(thread.animated ? .spring(response: 0.42, dampingFraction: 0.82) : nil, value: messages.count)
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typing)
+        // The thinking bubble's to-do list and a tapback's room above a bubble change heights too.
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typingTodos)
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: messages.map(\.reaction))
         // Pinned to the bottom as content grows (new bubbles, typing dots, the keyboard),
         // so nothing has to scroll after the fact and fight the insert animation.
         .scrollPosition($scroll)
