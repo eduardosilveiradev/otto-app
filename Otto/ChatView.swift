@@ -42,6 +42,7 @@ extension OttoStore: ChatThread {
 struct ChatView: View {
     @Environment(OttoStore.self) private var store
     @State private var showDetails = ProcessInfo.processInfo.arguments.contains("-details")
+    @Namespace private var card
     @State private var showCall = false
     @State private var webCall = false
     /// Calls Otto is placing for you; a live one shows as a banner under the header.
@@ -247,7 +248,13 @@ struct ChatView: View {
             }
         }
         .animation(.snappy, value: scrolledUp)
-        .sheet(isPresented: $showDetails) { DetailsView() }
+        // Messages opens the contact card by zooming it out of the header, glass over the blurred
+        // thread, edge to edge (measured off a screen recording), and closes it back into the header.
+        .fullScreenCover(isPresented: $showDetails) {
+            DetailsView()
+                .navigationTransition(.zoom(sourceID: "card", in: card))
+                .presentationBackground { Rectangle().fill(.ultraThinMaterial).ignoresSafeArea() }
+        }
         .fullScreenCover(isPresented: $webCall) { CallView() }
         .fullScreenCover(isPresented: Binding(get: { WalkieLauncher.shared.open }, set: { WalkieLauncher.shared.open = $0 })) { WalkieView() }
         .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
@@ -353,6 +360,7 @@ struct ChatView: View {
                 }
             }
             .tint(.primary)
+            .matchedTransitionSource(id: "card", in: card)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 6)

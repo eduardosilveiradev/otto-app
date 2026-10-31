@@ -22,8 +22,8 @@ struct DetailsView: View {
             List {
                 Section {
                     VStack(spacing: 8) {
-                        OttoAvatar(size: 96, asleep: store.asleep)
-                        Text("Otto").font(.title.weight(.semibold))
+                        OttoAvatar(size: 78, asleep: store.asleep)
+                        Text("Otto").font(.title2.weight(.semibold))
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
                             Text(store.backend is MockBackend ? "mock data"
@@ -107,8 +107,15 @@ struct DetailsView: View {
                 default: DevicesScreen()
                 }
             }
-            .toolbar { Button("Done") { dismiss() } }
+            // Messages' card: a back chevron in a glass circle, the thread blurred behind the list.
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: { Image(systemName: "chevron.left") }
+                        .accessibilityLabel("Back")
+                }
+            }
             .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
         }
     }
 
