@@ -233,6 +233,9 @@ struct ChatView: View {
             if ProcessInfo.processInfo.arguments.contains("-openCall"), let live = calls.live { openCall = live }
         }
         .sheet(item: $openCall) { CallSheet(call: $0) }
+        .sheet(item: Binding(get: { thread.isOtto ? store.otpDrawer : nil }, set: { store.otpDrawer = $0 })) {
+            if let otp = $0.otp { OTPDrawer(otp: otp) }
+        }
         // Closed only by its own buttons (Later hides it), so the setter has nothing to do.
         .sheet(item: Binding(get: { thread.isOtto ? store.shownApproval : nil }, set: { _ in })) {
             ApprovalSheet(request: $0)
@@ -860,6 +863,7 @@ private struct Row: View {
                 content
                 ForEach(message.scheduled ?? []) { ScheduleChip(trigger: $0) }
                 ForEach(message.recorded ?? []) { RecordedChip(card: $0, message: message.id) }
+                OTPChip(message: message)
             }
                 .font(.body.leading(.tight))
                 .tint(mine ? .white : .blue)
