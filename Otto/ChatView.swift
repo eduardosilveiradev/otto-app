@@ -927,8 +927,9 @@ private struct Row: View {
                 .padding(.top, message.reaction == nil ? 0 : 14)
             }
             if let md = preview {
+                // No frame here: a maxWidth frame is 280 wide and centres a narrower card in it.
+                // LinkPreview already caps itself at 280 and hugs its content.
                 LinkPreview(metadata: md)
-                    .frame(maxWidth: 280)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
                     .contextMenu {
                         if let url = Self.previewURL(message) {
