@@ -932,12 +932,25 @@ private struct Row: View {
                 LinkPreview(metadata: md)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
                     .contextMenu {
+                        // A bare link is only this card, so the card takes the tapbacks.
+                        if !textShown {
+                            ControlGroup {
+                                ForEach(Self.tapbacks, id: \.self) { e in Button(e) { thread.react(e, on: message.id) } }
+                            }
+                            .controlGroupStyle(.palette)
+                            .menuActionDismissBehavior(.enabled)
+                        }
                         if let url = Self.previewURL(message) {
                             Button("Open Link", systemImage: "safari") { openURL(url) }
                             Button("Copy Link", systemImage: "link") { UIPasteboard.general.url = url }
                             Button("Share Link…", systemImage: "square.and.arrow.up") { sharing = url }
                         }
                     }
+                    .overlay(alignment: mine ? .topLeading : .topTrailing) {
+                        if !textShown, let r = message.reaction { Tapback(emoji: r, mine: mine) }
+                    }
+                    .padding(.top, !textShown && message.reaction != nil ? 14 : 0)
+                    .sensoryFeedback(.impact(weight: .light), trigger: message.reaction)
             }
             // What you said, under your voice note; Otto's sits inside its bubble.
             if mine, message.isVoice, !message.text.isEmpty {
