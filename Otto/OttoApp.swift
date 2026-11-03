@@ -557,6 +557,10 @@ final class OttoStore {
         for s in all where s.from == .me && s.shared == true && !have.contains(s.id) {
             messages.insert(s, at: messages.firstIndex { $0.date > s.date } ?? messages.endIndex)
         }
+        // Otto's tapbacks: the frame can land before the message it's on (a share-sheet one comes in just above).
+        for h in all where h.reaction != nil {
+            if let i = messages.firstIndex(where: { $0.wireID == h.wireID }) { messages[i].reaction = h.reaction }
+        }
         let history = all.filter { $0.from != .me }
         // A reply that came as text with its voice to follow: the "voice" frame may have gone into a
         // socket iOS had frozen, and history carries the clip, so fill the waiting bar from it.

@@ -109,13 +109,15 @@ final class LiveBackend: OttoBackend {
         guard let rows: [WireHistory] = await get("app/history", background: background) else { return [] }
         // Ids make the merge exact: yours come back under the UUID this phone sent them with.
         return rows.map { r in
-            r.kind == "terminal" ? Self.terminal(r.text, ts: r.ts)
+            var m = r.kind == "terminal" ? Self.terminal(r.text, ts: r.ts)
             : r.dir == "in"
                 ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date(), shared: r.shared)
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
                           buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: r.voice != nil || r.voicePending == true, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
                           thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled, recorded: r.recorded)
+            m.reaction = r.reaction
+            return m
         }
     }
 
@@ -434,7 +436,7 @@ final class LiveBackend: OttoBackend {
         let dir: String; let text: String; let ts: String; let id: String?; let kind: String?
         let files: [RemoteFile]?; let voice: RemoteFile?; let voicePending: Bool?; let reply_to: String?; let buttons: [WireButton]?
         let thread: String?; let level: String?; let src: String?; let why: String?; let scheduled: [DashTrigger]?; let recorded: [RecordedCard]?
-        let shared: Bool?
+        let shared: Bool?; let reaction: String?
     }
     private struct WireBrief: Decodable {
         struct Event: Decodable { let title: String; let start: String; let minutes: Int }
