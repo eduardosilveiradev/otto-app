@@ -1,3 +1,4 @@
+import MWDATCore
 import SwiftUI
 import ThinkingOrbsKit
 
@@ -9,6 +10,7 @@ struct OttoApp: App {
     init() {
         Notifier.shared.register()   // the background task must be registered before launch ends
         Dictation.shared.setUp()     // the keyboard's mic requests arrive any time
+        try? Wearables.configure()
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
         #endif
@@ -20,7 +22,12 @@ struct OttoApp: App {
             Group {
                 if onboarded { MainRoot() } else { OnboardingFlow { withAnimation { onboarded = true } } }
             }
-            .onOpenURL { if $0.host == "dictate" { Dictation.shared.openedFromKeyboard() } }
+            .onOpenURL { url in
+                if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
+                // Meta AI comes back here after connecting the glasses; anything else isn't the SDK's.
+                guard url.query()?.contains("metaWearablesAction") == true else { return }
+                Task { _ = try? await Wearables.shared.handleUrl(url) }
+            }
             .modifier(DictationCover())
         }
     }

@@ -1,5 +1,5 @@
 {
-  "originHash" : "788f492ec7b0dc15d28a8dc3ced9c9dcde486574351f95f4f48c871055255113",
+  "originHash" : "6e84d360ffe09465908415b51cd6916b48d930da02924f8323ea7fdcb828b360",
   "pins" : [
     {
       "identity" : "daily-client-ios",
@@ -25,6 +25,15 @@
       "location" : "https://github.com/Jakubantalik/Libraries.dev",
       "state" : {
         "revision" : "a27566557b4def79bcdcedc71858c0fb28020b6d"
+      }
+    },
+    {
+      "identity" : "meta-wearables-dat-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/facebook/meta-wearables-dat-ios",
+      "state" : {
+        "revision" : "0bd369298eef6a980ad0bdb6c8a5502f2c02a08c",
+        "version" : "1.0.1"
       }
     }
   ],
