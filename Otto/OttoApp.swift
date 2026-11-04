@@ -120,6 +120,8 @@ final class OttoStore {
     /// Approval screens waiting on you, newest last; `Later` hides one until the next launch.
     var approvals: [ApprovalRequest] = []
     var hiddenApprovals: Set<String> = []
+    /// A code that just came in, open in its drawer (OTP.swift); the chip in its bubble reopens it.
+    var otpDrawer: Message? = nil
     var shownApproval: ApprovalRequest? { approvals.last { !hiddenApprovals.contains($0.id) } }
     /// The server sends "typing" frames; until one arrives (an older server), the app guesses.
     @ObservationIgnored private var serverTyping = false
@@ -287,6 +289,11 @@ final class OttoStore {
                                total: 17, currency: "EUR", method: "Link card ending 6983",
                                notes: ["No refunds on cinema tickets", "Seats held until 16:14"], test: nil))]
         }
+        // `-otpDemo`: a code arriving, drawer open, for screenshots.
+        if ProcessInfo.processInfo.arguments.contains("-otpDemo") {
+            let m = Message(from: .otto, text: "Clerk code", serverID: "demo-otp", otp: .init(code: "482915", sender: "Clerk"))
+            messages.append(m); otpDrawer = m
+        }
         // `-demoThread`: the conversation the website shows, for screen recordings.
         if ProcessInfo.processInfo.arguments.contains("-demoThread") {
             messages = [
@@ -399,7 +406,8 @@ final class OttoStore {
         }
         Task {
             for await (id, text) in backend.edits {
-                if let i = messages.firstIndex(where: { $0.wireID == id }) { messages[i].text = text }
+                if let i = messages.firstIndex(where: { $0.wireID == id }) { messages[i].text = text; messages[i].otp = nil }
+                if otpDrawer?.wireID == id { otpDrawer = nil }
             }
         }
         Task {
@@ -415,6 +423,7 @@ final class OttoStore {
             // history first, then the socket flushes the held copy.
             guard !messages.contains(where: { $0.wireID == m.wireID }) else { continue }
             messages.append(m)
+            if m.otp != nil { otpDrawer = m }
             if !foreground && m.from == .otto { Notifier.shared.post(m) }
         }
     }

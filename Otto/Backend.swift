@@ -63,6 +63,8 @@ struct Message: Identifiable, Codable {
     var scheduled: [DashTrigger]? = nil
     /// What Otto wrote down while writing this (money, memories, loops…), as cards (Recorded.swift).
     var recorded: [RecordedCard]? = nil
+    /// A verification code to show in the drawer (OTP.swift). Cleared when the server edits the message after it expires.
+    var otp: OTPCode? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }

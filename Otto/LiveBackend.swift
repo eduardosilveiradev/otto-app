@@ -11,7 +11,8 @@ import Foundation
 ///                   "files":[{"id","name","kind"}]?,"voice":{"id","name","kind"}?,"reply_to":"<id>"?,
 ///                   "src"?,"why"?  (only on messages Otto sent unprompted)}
 ///                  {"type":"react","id":"<id>","emoji":"👍"}
-///                  {"type":"edit","id":"<id>","text":"..."}   Otto rewrote a message it sent
+///                  {"type":"edit","id":"<id>","text":"..."}   Otto rewrote a message it sent (also takes off its `otp`)
+///                  a "message" may carry "otp":{"code","sender"?}: a verification code, shown in a drawer (OTP.swift)
 ///                  {"type":"status","text":"Reading ChatView.swift"}   while a reply is in the works
 ///                  {"type":"read","ids":["<uuid>"]}   your messages Otto has taken in
 ///                  {"type":"terminal","text":"first six words…","ts":"<ISO>"}   a prompt typed in Otto's terminal
@@ -305,7 +306,7 @@ final class LiveBackend: OttoBackend {
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
                           buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: f.voice != nil || f.voicePending == true, serverID: f.id, replyTo: f.reply_to,
-                          files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why, scheduled: f.scheduled, recorded: f.recorded))
+                          files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why, scheduled: f.scheduled, recorded: f.recorded, otp: f.otp))
     }
 
     private func write(_ frame: [String: String]) async {
@@ -429,6 +430,7 @@ final class LiveBackend: OttoBackend {
         let thread: String?; let level: String?; let src: String?; let why: String?
         let voicePending: Bool?; let scheduled: [DashTrigger]?; let recorded: [RecordedCard]?; let shared: Bool?
         let items: [TodoItem]?
+        let otp: OTPCode?
     }
     /// Otto's entries carry what the live frame did, so a message that arrived while the
     /// socket was asleep still has its photos, voice and buttons.
