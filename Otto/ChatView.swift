@@ -308,9 +308,10 @@ struct ChatView: View {
         // The header's fade, carried down behind the banner so the thread doesn't show through it.
         .background(alignment: .top) {
             if calls.live != nil || gate.visible() != nil {
-                LinearGradient(colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
-                               startPoint: UnitPoint(x: 0.5, y: 0.6), endPoint: .bottom)
-                    .padding(.bottom, -16)
+                LinearGradient(stops: [.init(color: Color(.systemBackground), location: 0.8),
+                                       .init(color: Color(.systemBackground).opacity(0), location: 1)],
+                               startPoint: .top, endPoint: .bottom)
+                    .padding(.bottom, -28)
                     .ignoresSafeArea(edges: .top)
             }
         }
@@ -798,7 +799,7 @@ private struct Row: View {
                 Text(Self.linked(d.body))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
-                    .background(Color(.systemGray6), in: .rect(cornerRadius: 12, style: .continuous))
+                    .background(Color(.systemBackground).opacity(0.55), in: .rect(cornerRadius: 12, style: .continuous))
             }
             .padding(.vertical, 3)
         } else if message.isVoice || message.audio != nil {
@@ -1810,9 +1811,9 @@ private struct AddPassSheet: UIViewControllerRepresentable {
 
 extension ShapeStyle where Self == Color {
     /// Yours: the slate grey of the user's side in the reference (sampled #60656B in dark mode).
-    /// ponytail: the light-mode value is a guess until there's a light screenshot to sample.
+    /// Light mode is a shade darker than a straight lift, so white text clears 4.5:1.
     static var outgoingBubble: Color {
-        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.376, green: 0.396, blue: 0.420, alpha: 1) : UIColor(red: 0.553, green: 0.580, blue: 0.616, alpha: 1) })
+        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.376, green: 0.396, blue: 0.420, alpha: 1) : UIColor(red: 0.420, green: 0.443, blue: 0.471, alpha: 1) })
     }
     /// Messages' grey for the other side, a shade darker than systemGray5 in dark mode.
     static var incomingBubble: Color {

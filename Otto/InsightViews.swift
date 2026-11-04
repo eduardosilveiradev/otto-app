@@ -167,7 +167,8 @@ private struct MoneyList: View {
                 Section("By month · \(cur)") {
                     Chart(Array(series), id: \.0) { mo, total in
                         BarMark(x: .value("Month", String(monthName(mo).prefix(3))), y: .value("Spent", total))
-                            .foregroundStyle(mo == month ? Color.orange : Color.orange.opacity(0.45))
+                            .foregroundStyle(month == nil || mo == month ? Color.orange : Color.orange.opacity(0.3))
+                            .cornerRadius(5)
                     }
                     .frame(height: 160)
                     .padding(.vertical, 6)
@@ -186,7 +187,7 @@ private struct MoneyList: View {
                                     Text(money(c.total, cur)).monospacedDigit().foregroundStyle(.secondary)
                                 }
                                 GeometryReader { g in
-                                    Capsule().fill(Color.orange.opacity(category == nil || category == c.category ? 0.8 : 0.25))
+                                    Capsule().fill(Color.orange.opacity(category == nil || category == c.category ? 1 : 0.25))
                                         .frame(width: top > 0 ? max(4, g.size.width * c.total / top) : 4)
                                 }
                                 .frame(height: 4)
