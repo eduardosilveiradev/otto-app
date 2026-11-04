@@ -43,9 +43,11 @@ struct LogPayment: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        // A line in the thread, so each payment shows up where Otto's 👍 lands on it.
-        let text = "paid \(amount)" + (merchant.isEmpty ? "" : " at \(merchant)")
-        let mine = Message(from: .me, text: text)
+        // The payment as a money card in the thread, keyed with its id so Otto's 👍 lands on it.
+        let title = merchant.isEmpty ? amount : "\(amount) · \(merchant)"
+        let day = Date().formatted(.iso8601.year().month().day())
+        let mine = Message(from: .me, text: card.isEmpty ? "Payment" : card,
+                           recorded: [RecordedCard(kind: "money", id: UUID().uuidString, title: title, detail: day, body: nil, action: nil)])
         _ = await OttoStore.shared.siri(mine) { live in
             _ = await live.logPayment(id: mine.wireID, amount: amount, merchant: merchant, card: card)
             return nil
