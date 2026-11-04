@@ -243,6 +243,7 @@ final class MockBackend: OttoBackend {
     func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data? {
         let enc = JSONEncoder()
         if path == "triggers" { return try? enc.encode(["triggers": Self.triggers]) }
+        if let canned = MockDash.data(path) { return canned }
         guard path == "triggers/item", let t = Self.triggers.first(where: { $0.id == query.first?.value }) else { return nil }
         var o = (try? JSONSerialization.jsonObject(with: enc.encode(t))) as? [String: Any] ?? [:]
         o["action"] = "Overnight fix the user asked for: replies in the app sound robotic. Find out why from the voice daemon's own log, fix it on a branch, self-test it, and leave one line in the morning."
