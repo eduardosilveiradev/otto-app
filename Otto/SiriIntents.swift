@@ -28,6 +28,27 @@ struct MessageOtto: AppIntent {
     }
 }
 
+/// For the Shortcuts "Transaction" automation: Wallet hands over each Apple Pay payment and
+/// this passes it to Otto, who files it in money tracking. Runs locked and in the background,
+/// says nothing, and never opens the app.
+struct LogPayment: AppIntent {
+    static let title: LocalizedStringResource = "Log Payment"
+    static let description = IntentDescription("Send a Wallet payment to Otto's money tracking.")
+    static let supportedModes: IntentModes = [.background]
+    static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+
+    @Parameter(title: "Amount") var amount: String
+    @Parameter(title: "Merchant", default: "") var merchant: String
+    @Parameter(title: "Card", default: "") var card: String
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let live = OttoStore.shared.backend as? LiveBackend else { return .result() }
+        _ = await live.logPayment(id: UUID().uuidString, amount: amount, merchant: merchant, card: card)
+        return .result()
+    }
+}
+
 /// A photo to file. It gets no AppShortcut phrase: Siri can't fill a photo parameter, and a camera
 /// can't run headless. The only system camera outside the app is the Shortcuts "Take Photo" action,
 /// so the user builds "Take Photo, then Snap to Otto" once.

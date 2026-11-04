@@ -180,6 +180,14 @@ final class LiveBackend: OttoBackend {
         return (try? JSONDecoder().decode(Answer.self, from: data)) ?? Answer(reply: nil)
     }
 
+    /// A Wallet payment from the Shortcuts "Transaction" automation. Otto files it without
+    /// answering, so nothing waits on a reply. False when the server can't be reached.
+    func logPayment(id: String, amount: String, merchant: String, card: String) async -> Bool {
+        let body: [String: Any] = ["id": id, "text": "", "via": "wallet", "amount": amount, "merchant": merchant, "card": card]
+        guard let json = try? JSONSerialization.data(withJSONObject: body) else { return false }
+        return await post("app/ask", json) != nil
+    }
+
     /// A photo to be filed. An older server answers 204 with no body: delivered, nothing to say.
     func snap(_ jpeg: Data, note: String, id: String) async -> Answer? {
         guard let data = await post("app/photo", jpeg, query: [URLQueryItem(name: "id", value: id), URLQueryItem(name: "snap", value: "1")]
