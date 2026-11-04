@@ -98,9 +98,10 @@ private struct Primary: View {
         Button(action: action) {
             ZStack {
                 Text(label).opacity(busy ? 0 : 1)
-                if busy { ProgressView().tint(.white) }
+                if busy { ProgressView().tint(Color(white: 0.12)) }
             }
             .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(Color(white: 0.12))   // white on this orange is ~2:1
             .frame(maxWidth: .infinity).frame(height: 52)
         }
         .buttonStyle(.glassProminent)
@@ -210,7 +211,7 @@ private struct ConnectPage: View {
                     Task { @MainActor in await take(s) }
                 }
                 .buttonBorderShape(.capsule)
-                .tint(canScan ? .secondary : .orange)
+                .tint(.secondary)
                 .labelStyle(.titleAndIcon)
                 if canScan {
                     Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } }

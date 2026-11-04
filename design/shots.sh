@@ -19,8 +19,8 @@ shot() {  # name, wait, launch args...
 
 for mode in dark light; do
   xcrun simctl ui "$DEV" appearance $mode
-  shot "$mode-onboarding" 3 -onboarding
-  shot "$mode-onboarding-connect" 3 -onboarding -onboardingStep 1
+  shot "$mode-onboarding" 5 -onboarding
+  shot "$mode-onboarding-connect" 5 -onboarding -onboardingStep 1
   shot "$mode-chat" 5 -onboarded YES -demoThread
   shot "$mode-details" 5 -onboarded YES -details
   for s in Loops Schedules Memory People Money Trips Activity Status; do

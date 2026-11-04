@@ -271,7 +271,12 @@ struct ChatView: View {
         .fullScreenCover(isPresented: $showDetails) {
             DetailsView()
                 .navigationTransition(.zoom(sourceID: "card", in: card))
-                .presentationBackground { Rectangle().fill(.ultraThinMaterial).ignoresSafeArea() }
+                .presentationBackground {
+                    // Light mode frosts over the thread, so its dark bubbles don't show through as smudges.
+                    Rectangle().fill(.ultraThinMaterial)
+                        .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? .clear : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
+                        .ignoresSafeArea()
+                }
         }
         .fullScreenCover(isPresented: $webCall) { CallView() }
         .fullScreenCover(isPresented: Binding(get: { WalkieLauncher.shared.open }, set: { WalkieLauncher.shared.open = $0 })) { WalkieView() }
@@ -311,7 +316,7 @@ struct ChatView: View {
                 LinearGradient(stops: [.init(color: Color(.systemBackground), location: 0.8),
                                        .init(color: Color(.systemBackground).opacity(0), location: 1)],
                                startPoint: .top, endPoint: .bottom)
-                    .padding(.bottom, -28)
+                    .padding(.bottom, -36)
                     .ignoresSafeArea(edges: .top)
             }
         }

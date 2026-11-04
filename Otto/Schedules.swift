@@ -151,7 +151,8 @@ struct SchedulesScreen: View {
                     Text(t.gist).lineLimit(2)
                     Text(sub(t)).font(.footnote).foregroundStyle(.secondary)
                 }
-            } icon: { RowIcon(symbol: t.icon, tint: t.enabled ? .blue : .secondary) }
+            } icon: { RowIcon(symbol: t.icon) }
+            .opacity(t.enabled ? 1 : 0.5)
         }
     }
 

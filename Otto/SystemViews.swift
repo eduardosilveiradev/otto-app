@@ -171,7 +171,7 @@ struct StatusScreen: View {
                                 Text(r.detail).font(.footnote).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 8)
-                            if r.verdict != "up" { Text(r.verdict).font(.footnote).foregroundStyle(color(r.verdict)) }
+                            if r.verdict != "up" { Pill(text: r.verdict, tint: r.verdict == "down" ? .red : r.verdict == "degraded" ? .orange : .secondary) }
                         }
                     }
                 } header: { Text("On the Mac") } footer: {

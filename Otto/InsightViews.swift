@@ -91,6 +91,7 @@ private struct LoopsList: View {
                 Text(sub).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
             }
         }
+        .padding(.vertical, 4)
     }
 
     private func flip(_ id: String, done: Bool) {
@@ -170,6 +171,7 @@ private struct MoneyList: View {
                             .foregroundStyle(month == nil || mo == month ? Color.orange : Color.orange.opacity(0.3))
                             .cornerRadius(5)
                     }
+                    .chartXAxis { AxisMarks { AxisValueLabel() } }   // month names, no vertical rules
                     .frame(height: 160)
                     .padding(.vertical, 6)
                 }
