@@ -1,0 +1,510 @@
+import SwiftUI
+
+/// State the SwiftUI parts share with the controller.
+@MainActor
+final class BoardModel: ObservableObject {
+    enum Mode { case keys, emoji, settings, clipboard }
+    enum Otto: Equatable { case closed, composing, thinking, done(String), failed(String) }
+    struct Suggestion: Hashable { var text: String; var literal = false; var primary = false }
+
+    @Published var mode: Mode = .keys
+    @Published var otto: Otto = .closed
+    @Published var prompt = ""
+    @Published var suggestions: [Suggestion] = []
+    @Published var settings = KeyboardSettings.load()
+    @Published var dark = false
+    /// Something new is on the clipboard (known without reading it, so no paste banner until they tap).
+    @Published var pasteReady = false
+    @Published var clips: [String] = (UserDefaults.standard.stringArray(forKey: "clipHistory") ?? [])
+    @Published var flash: String?
+    @Published var dictation: DictationBridge.State.Phase = .idle
+    @Published var dictLevel: Float = 0
+
+    var style: KeyStyle { settings.style.followsSystem ? .system(dark: dark) : settings.style }
+    /// iOS 26 pads ~16pt above any third-party keyboard, so a 28pt bar puts the keys where Apple's are.
+    /// Three slots or none, like iOS: blanks keep the dividers where they belong.
+    var paddedSuggestions: [Suggestion] {
+        suggestions.isEmpty ? [] : Array((suggestions + Array(repeating: Suggestion(text: ""), count: 3)).prefix(3))
+    }
+    /// iOS 27 draws the keyboard as a rounded sheet with no band, so the bar brings its own inset.
+    static let sheet = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+    static let barInset: CGFloat = sheet ? 12 : 0
+    var barHeight: CGFloat {
+        mode == .settings || mode == .emoji || mode == .clipboard ? 0 : (otto == .closed ? 28 : 76) + Self.barInset
+    }
+    /// Panels own the bar's space too; settings also get room to breathe instead of a cramped scroll.
+    var extraHeight: CGFloat { mode == .settings ? 170 : mode == .keys ? 0 : 28 }
+
+    // Wired by the controller.
+    var pick: (Suggestion) -> Void = { _ in }
+    var ask: (String) -> Void = { _ in }
+    var undoOtto: () -> Void = {}
+    var typeEmoji: (String) -> Void = { _ in }
+    var deleteBackward: () -> Void = {}
+    var settingsChanged: () -> Void = {}
+    var pasteCurrent: () -> Void = {}
+    var copyField: () -> Void = {}
+    var toggleDictation: () -> Void = {}
+
+    /// Newest first, no repeats, 25 kept.
+    func remember(clip: String) {
+        let c = clip.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !c.isEmpty else { return }
+        clips = Array(([clip] + clips.filter { $0 != clip }).prefix(25))
+        UserDefaults.standard.set(clips, forKey: "clipHistory")
+    }
+}
+
+private extension RGBA { var color: Color { Color(uiColor: ui) } }
+
+extension View {
+    /// iOS 26+ shades scroll views' edges; inside a keyboard that reads as a dark smudge across the keys.
+    func plainScrollEdges() -> some View { scrollEdgeEffectHidden(true, for: .all) }
+}
+
+/// Every button in the keyboard: the whole frame takes the tap (a plain style only hits the
+/// drawn pixels, so an ✕ was a few strokes wide), and it dims while pressed.
+struct Tap: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            // contentShape alone isn't enough inside a keyboard: the hosting view drops touches on
+            // fully transparent pixels, so the frame gets a fill nobody can see.
+            .background(Color.black.opacity(0.001))
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.5 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private func boardBackground(_ s: KeyStyle) -> some View {
+    LinearGradient(colors: s.seeThrough ? [.clear] : s.background.map(\.color), startPoint: .top, endPoint: .bottom)
+}
+
+// MARK: - the bar above the keys
+
+struct TopBar: View {
+    @ObservedObject var m: BoardModel
+
+    var body: some View {
+        let s = m.style
+        VStack(spacing: 0) {
+            if m.dictation == .listening || m.dictation == .working { dictationRow(s) }
+            else if m.otto == .closed { suggestionRow(s) } else { ottoRows(s) }
+        }
+        .plainScrollEdges()
+        .padding(.top, BoardModel.barInset)
+        .padding(.horizontal, BoardModel.sheet ? 8 : 0)   // clear of the sheet's curved corners
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .foregroundStyle(s.text.color)
+        // Rows crossfade as the keyboard grows or shrinks around them, instead of snapping.
+        .animation(.easeOut(duration: 0.18), value: m.otto == .closed)
+        .animation(.easeOut(duration: 0.18), value: m.dictation)
+    }
+
+    private func suggestionRow(_ s: KeyStyle) -> some View {
+        HStack(spacing: 0) {
+            Button { m.otto = .composing; m.prompt = "" } label: { OttoMark(size: 26) }
+                .padding(.leading, 8).padding(.trailing, 4)
+                .accessibilityLabel("Ask Otto")
+            HStack(spacing: 0) {
+                if m.suggestions.isEmpty, m.pasteReady {
+                    Button { m.pasteCurrent() } label: {
+                        Label("Paste", systemImage: "doc.on.clipboard").font(Font(s.uiFont(15, weight: .medium)))
+                            .padding(.horizontal, 14).frame(height: 32)
+                            .background(Capsule().fill(s.key.color.opacity(0.8)))
+                    }
+                }
+                if let f = m.flash { Text(f).font(Font(s.uiFont(14))).opacity(0.7) }
+                ForEach(Array(m.paddedSuggestions.enumerated()), id: \.offset) { i, sug in
+                    if i > 0 { Rectangle().fill(s.text.color.opacity(0.18)).frame(width: 1, height: 24) }
+                    Button { m.pick(sug) } label: {
+                        Text(sug.literal ? "“\(sug.text)”" : sug.text)
+                            .font(Font(s.uiFont(16, weight: sug.primary ? .semibold : .regular)))
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(sug.primary ? RoundedRectangle(cornerRadius: 8).fill(s.key.color.opacity(0.7)).padding(4) : nil)
+                            .contentShape(Rectangle())
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)   // keeps Otto left and settings right with nothing to suggest
+            Button { m.toggleDictation() } label: {
+                Image(systemName: "waveform").font(.system(size: 15, weight: .semibold)).foregroundStyle(.black)
+                    .frame(width: 28, height: 28).background(Circle().fill(.white))
+                    .shadow(color: .black.opacity(0.15), radius: 1, y: 0.5)
+                    .frame(width: 40, height: 28)
+            }
+            .accessibilityLabel("Dictate")
+        }
+        .padding(.trailing, 2)
+        .buttonStyle(Tap())
+    }
+
+    /// While the app records for the keyboard: a level meter and the button that finishes it.
+    private func dictationRow(_ s: KeyStyle) -> some View {
+        let working = m.dictation == .working
+        return HStack(spacing: 10) {
+            OttoMark(size: 28, thinking: working)
+            if working {
+                Text("Cleaning it up…").font(Font(s.uiFont(15))).opacity(0.75)
+            } else {
+                HStack(spacing: 3) {
+                    ForEach(0..<12, id: \.self) { i in
+                        Capsule().fill(s.accent.color)
+                            .frame(width: 3.5, height: 5 + CGFloat(m.dictLevel) * 22 * CGFloat(0.35 + 0.65 * abs(sin(Double(i) * 1.1))))
+                    }
+                }
+                .animation(.easeOut(duration: 0.12), value: m.dictLevel)
+                Text("Listening").font(Font(s.uiFont(15))).opacity(0.75)
+            }
+            Spacer()
+            if !working {
+                Button { m.toggleDictation() } label: {
+                    Text("Done").font(Font(s.uiFont(15, weight: .semibold))).foregroundStyle(.white)
+                        .padding(.horizontal, 16).frame(height: 32).background(Capsule().fill(s.accent.color))
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .buttonStyle(Tap())
+    }
+
+    private func ottoRows(_ s: KeyStyle) -> some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Button { m.otto = .closed; m.prompt = "" } label: { OttoMark(size: 28, thinking: m.otto == .thinking) }
+                Group {
+                    switch m.otto {
+                    case .thinking: Text("Otto is on it…").opacity(0.7)
+                    case .done(let what):
+                        HStack { Text(what).lineLimit(1); Spacer(); Button("Undo") { m.undoOtto() }.fontWeight(.semibold) }
+                    case .failed(let why): Text(why).font(.system(size: 13)).lineLimit(2).opacity(0.85)
+                    default:
+                        HStack(spacing: 1) {
+                            Text(m.prompt.isEmpty ? "Ask Otto, or pick one below" : m.prompt)
+                                .opacity(m.prompt.isEmpty ? 0.5 : 1).lineLimit(1).truncationMode(.head)
+                            if !m.prompt.isEmpty { Caret(color: s.accent.color) }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+                .font(Font(s.uiFont(16)))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10).frame(height: 36)
+                .background(RoundedRectangle(cornerRadius: 18).fill(s.key.color.opacity(0.85)))
+                if m.otto == .composing, !m.prompt.isEmpty {
+                    Button { m.ask(m.prompt) } label: {
+                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 30)).foregroundStyle(s.accent.color)
+                    }
+                }
+                Button { m.otto = .closed; m.prompt = "" } label: {
+                    // 44 wide but row-high: a taller frame pushed the chip row up over it and it ate the taps.
+                    Image(systemName: "xmark").font(.system(size: 14, weight: .semibold)).frame(width: 44, height: 36)
+                }
+                .accessibilityLabel("Close Otto")
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach([("list.clipboard", BoardModel.Mode.clipboard, "Clipboard"), ("slider.horizontal.3", .settings, "Settings")], id: \.0) { icon, mode, name in
+                        Button { m.otto = .closed; m.mode = mode } label: {
+                            Image(systemName: icon).font(.system(size: 14, weight: .medium))
+                                .frame(width: 36, height: 30).background(Capsule().fill(s.specialKey.color))
+                        }
+                        .accessibilityLabel(name)
+                    }
+                    Rectangle().fill(s.text.color.opacity(0.15)).frame(width: 1, height: 20)
+                    ForEach(Self.chips, id: \.0) { title, prompt in
+                        Button { m.ask(prompt) } label: {
+                            Text(title).font(Font(s.uiFont(14, weight: .medium)))
+                                .padding(.horizontal, 12).frame(height: 30)
+                                .background(Capsule().fill(s.specialKey.color))
+                        }
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
+            .frame(height: 32)
+            .scrollClipDisabled()   // the capsules' tops were shaved off by the row's clip
+            .disabled(m.otto == .thinking)
+            .opacity(m.otto == .thinking ? 0.4 : 1)
+        }
+        .padding(.horizontal, 8).padding(.top, 2)
+        .buttonStyle(Tap())
+    }
+
+    /// Quick asks. The ones starting "Rewrite" replace the text before the cursor; the rest insert.
+    static let chips: [(String, String)] = [
+        ("Reply", "Write my reply to this."),
+        ("Fix", "Rewrite: fix spelling and grammar, change nothing else."),
+        ("Shorter", "Rewrite: make it shorter."),
+        ("Warmer", "Rewrite: make it warmer and friendlier."),
+        ("→ EN", "Rewrite: translate it to English."),
+        ("→ IT", "Rewrite: translate it to Italian."),
+        ("→ PT", "Rewrite: translate it to Brazilian Portuguese."),
+        ("Finish it", "Continue this where it stops."),
+    ]
+}
+
+private struct Caret: View {
+    var color: Color
+    @State private var on = true
+    var body: some View {
+        Rectangle().fill(color).frame(width: 2, height: 20).opacity(on ? 1 : 0)
+            .onAppear { withAnimation(.easeInOut(duration: 0.5).repeatForever()) { on = false } }
+    }
+}
+
+/// Otto's tangerine face, small enough for a bar.
+struct OttoMark: View {
+    var size: CGFloat
+    var thinking = false
+    @State private var bob = false
+    var body: some View {
+        ZStack {
+            Circle().fill(LinearGradient(colors: [Color(red: 1, green: 0.74, blue: 0.4), Color(red: 1, green: 0.58, blue: 0.2)],
+                                         startPoint: .top, endPoint: .bottom))
+            HStack(spacing: size * 0.18) {
+                Capsule().fill(Color(white: 0.12)).frame(width: size * 0.11, height: size * 0.22)
+                Capsule().fill(Color(white: 0.12)).frame(width: size * 0.11, height: size * 0.22)
+            }
+            .offset(y: -size * 0.04)
+        }
+        .frame(width: size, height: size)
+        .offset(y: bob ? -2 : 0)
+        .onChange(of: thinking, initial: true) {
+            withAnimation(thinking ? .easeInOut(duration: 0.45).repeatForever() : .default) { bob = thinking }
+        }
+    }
+}
+
+// MARK: - emoji
+
+struct EmojiPanel: View {
+    @ObservedObject var m: BoardModel
+    @State private var cat = 0
+    @AppStorage("emojiRecents") private var recentsRaw = ""
+
+    private var recents: [String] { recentsRaw.split(separator: " ").map(String.init) }
+
+    var body: some View {
+        let s = m.style
+        let sets = [("clock", recents)] + Emoji.categories.map { ($0.icon, $0.items) }
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHGrid(rows: Array(repeating: GridItem(.fixed(38), spacing: 2), count: 5), spacing: 2) {
+                        ForEach(sets.indices, id: \.self) { i in
+                            ForEach(Array(sets[i].1.enumerated()), id: \.offset) { j, e in
+                                Button { pick(e) } label: { Text(e).font(.system(size: 30)).frame(width: 42, height: 38) }
+                                    .id(j == 0 ? "cat\(i)" : "\(i)-\(j)")
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 6)
+                }
+                .onChange(of: cat) { withAnimation { proxy.scrollTo("cat\(cat)", anchor: .leading) } }
+            }
+            .frame(maxHeight: .infinity)
+            HStack(spacing: 0) {
+                Button { m.mode = .keys } label: { Text("ABC").font(Font(s.uiFont(15))).frame(width: 46, height: 36) }
+                ForEach(sets.indices, id: \.self) { i in
+                    if i > 0 || !recents.isEmpty {
+                        Button { cat = i } label: {
+                            Image(systemName: sets[i].0).font(.system(size: 15))
+                                .frame(maxWidth: .infinity, minHeight: 36)
+                                .background(cat == i ? Circle().fill(s.specialKey.color).frame(width: 30, height: 30) : nil)
+                        }
+                    }
+                }
+                Button { m.deleteBackward() } label: { Image(systemName: "delete.left").frame(width: 46, height: 36) }
+            }
+            .padding(.bottom, 4)
+        }
+        .buttonStyle(Tap())
+        .foregroundStyle(s.text.color)
+    }
+
+    private func pick(_ e: String) {
+        m.typeEmoji(e)
+        recentsRaw = ([e] + recents.filter { $0 != e }).prefix(30).joined(separator: " ")
+    }
+}
+
+// MARK: - clipboard
+
+struct ClipboardPanel: View {
+    @ObservedObject var m: BoardModel
+
+    var body: some View {
+        let s = m.style
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button { m.mode = .keys } label: { Text("ABC").font(Font(s.uiFont(15))).frame(width: 46, height: 32) }
+                Spacer()
+                Button { m.copyField() } label: { Label("Copy field", systemImage: "doc.on.doc").font(.system(size: 14, weight: .medium)) }
+                    .padding(.horizontal, 12).frame(height: 30).background(Capsule().fill(s.specialKey.color))
+                Button { m.pasteCurrent() } label: { Label("Paste", systemImage: "doc.on.clipboard").font(.system(size: 14, weight: .medium)) }
+                    .padding(.horizontal, 12).frame(height: 30).background(Capsule().fill(s.accent.color)).foregroundStyle(.white)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            if m.clips.isEmpty {
+                Text("Things you paste or copy here are kept for a quick reuse.")
+                    .font(.system(size: 14)).opacity(0.6).multilineTextAlignment(.center).padding(24)
+                    .frame(maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(m.clips, id: \.self) { clip in
+                            HStack(spacing: 0) {
+                                Button { m.typeEmoji(clip) } label: {
+                                    Text(clip).font(Font(s.uiFont(15))).lineLimit(2).multilineTextAlignment(.leading)
+                                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8)
+                                        .contentShape(Rectangle())
+                                }
+                                Button { UIPasteboard.general.string = clip; m.flash = "Copied" } label: {
+                                    Image(systemName: "doc.on.doc").frame(width: 40, height: 36)
+                                }
+                                .accessibilityLabel("Copy")
+                            }
+                            .background(RoundedRectangle(cornerRadius: s.corner + 2).fill(s.key.color.opacity(0.85)))
+                            .contextMenu { Button("Remove", role: .destructive) { m.clips.removeAll { $0 == clip }; UserDefaults.standard.set(m.clips, forKey: "clipHistory") } }
+                        }
+                    }
+                    .padding(.horizontal, 8).padding(.bottom, 8)
+                }
+            }
+        }
+        .buttonStyle(Tap())
+        .foregroundStyle(s.text.color)
+    }
+}
+
+// MARK: - settings
+
+struct SettingsPanel: View {
+    @ObservedObject var m: BoardModel
+
+    var body: some View {
+        let s = m.style
+        VStack(spacing: 0) {
+            HStack {
+                Text("Otto keyboard").font(Font(s.uiFont(17, weight: .semibold)))
+                Spacer()
+                Button("Done") { m.mode = .keys }.fontWeight(.semibold).foregroundStyle(s.accent.color)
+            }
+            .padding(.horizontal, 14).frame(height: 44)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    section("Languages · pick one or two") {
+                        HStack(spacing: 8) {
+                            ForEach(Lang.allCases, id: \.self) { l in
+                                let on = m.settings.languages.contains(l)
+                                Button { toggle(l) } label: {
+                                    Text(l.name).font(Font(s.uiFont(14, weight: .medium)))
+                                        .padding(.horizontal, 12).frame(height: 32)
+                                        .background(Capsule().fill(on ? s.accent.color : s.key.color))
+                                        .foregroundStyle(on ? .white : s.text.color)
+                                }
+                            }
+                        }
+                    }
+                    section("Style") {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(KeyStyle.presets, id: \.name) { p in
+                                    Button { update { $0.style = p } } label: { Swatch(style: p, on: m.settings.style.name == p.name) }
+                                }
+                            }
+                        }
+                    }
+                    section("Accent") {
+                        HStack(spacing: 10) {
+                            ForEach(KeyStyle.accents, id: \.self) { a in
+                                Button { update { $0.style.accent = a; $0.style.followsSystem = false; $0.style.name = "Custom" } } label: {
+                                    Circle().fill(a.color).frame(width: 26, height: 26)
+                                        .overlay(Circle().strokeBorder(s.text.color, lineWidth: m.settings.style.accent == a ? 2 : 0))
+                                }
+                            }
+                        }
+                    }
+                    section("Keys") {
+                        HStack {
+                            Text("Roundness").font(.system(size: 14))
+                            Slider(value: Binding(get: { m.settings.style.corner }, set: { v in update { $0.style.corner = v.rounded() } }), in: 0...16)
+                                .tint(s.accent.color)
+                        }
+                        Picker("Font", selection: Binding(get: { m.settings.style.font }, set: { f in update { $0.style.font = f } })) {
+                            ForEach(KeyStyle.Font.allCases, id: \.self) { Text($0.rawValue.capitalized) }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    section("Typing") {
+                        toggle("Slide to type", \.swipe)
+                        toggle("Autocorrect", \.autocorrect)
+                        toggle("Auto-capitalisation", \.autoCapitalize)
+                        toggle("“.” shortcut (double space)", \.doubleSpacePeriod)
+                        toggle("Character preview", \.keyPopups)
+                        toggle("Haptics", \.haptics)
+                        toggle("Key clicks", \.clicks)
+                    }
+                }
+                .padding(.horizontal, 14).padding(.bottom, 16)
+            }
+        }
+        .foregroundStyle(s.text.color)
+        .buttonStyle(Tap())
+        .background(boardBackground(s))
+    }
+
+    /// iOS Settings-style group: a caption, then the rows on a rounded card.
+    private func section<C: View>(_ title: String, @ViewBuilder _ c: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased()).font(.system(size: 12, weight: .regular)).opacity(0.55).padding(.leading, 14)
+            VStack(alignment: .leading, spacing: 10) { c() }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(m.style.key.color.opacity(m.style.seeThrough ? 0.9 : 0.95)))
+        }
+    }
+
+    private func toggle(_ title: String, _ kp: WritableKeyPath<KeyboardSettings, Bool>) -> some View {
+        Toggle(title, isOn: Binding(get: { m.settings[keyPath: kp] }, set: { v in update { $0[keyPath: kp] = v } }))
+            .font(.system(size: 14)).tint(m.style.accent.color)
+    }
+
+    private func toggle(_ l: Lang) {
+        update { s in
+            if let i = s.languages.firstIndex(of: l) { if s.languages.count > 1 { s.languages.remove(at: i) } }
+            else { s.languages = Array((s.languages + [l]).suffix(2)) }
+        }
+    }
+
+    private func update(_ f: (inout KeyboardSettings) -> Void) {
+        f(&m.settings)
+        m.settings.save()
+        m.settingsChanged()
+    }
+}
+
+private struct Swatch: View {
+    let style: KeyStyle
+    let on: Bool
+    var body: some View {
+        VStack(spacing: 4) {
+            ZStack {
+                if style.seeThrough { Color.gray.opacity(0.35) } else { boardBackground(style) }
+                HStack(spacing: 3) {
+                    ForEach(0..<3) { i in
+                        RoundedRectangle(cornerRadius: style.corner / 2).fill((i == 2 ? style.accent : style.key).color)
+                            .frame(width: 14, height: 18)
+                    }
+                }
+            }
+            .frame(width: 64, height: 40)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(style.accent.color, lineWidth: on ? 2.5 : 0))
+            Text(style.name).font(.system(size: 11))
+        }
+    }
+}
