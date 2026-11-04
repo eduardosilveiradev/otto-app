@@ -167,7 +167,7 @@ private struct MoneyList: View {
             if series.count > 1 {
                 Section("By month · \(cur)") {
                     Chart(Array(series), id: \.0) { mo, total in
-                        BarMark(x: .value("Month", String(monthName(mo).prefix(3))), y: .value("Spent", total))
+                        BarMark(x: .value("Month", String(monthName(mo).prefix(3))), y: .value("Spent", total), width: .ratio(0.45))
                             .foregroundStyle(month == nil || mo == month ? Color.orange : Color.orange.opacity(0.3))
                             .cornerRadius(5)
                     }
