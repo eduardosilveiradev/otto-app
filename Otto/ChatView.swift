@@ -321,7 +321,7 @@ struct ChatView: View {
                         .frame(height: 36)
                 }
                 .padding(.bottom, -36)
-                    .ignoresSafeArea(edges: .top)
+                .ignoresSafeArea(edges: .top)
             }
         }
     }
