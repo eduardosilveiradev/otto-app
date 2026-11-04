@@ -43,8 +43,13 @@ struct LogPayment: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        guard let live = OttoStore.shared.backend as? LiveBackend else { return .result() }
-        _ = await live.logPayment(id: UUID().uuidString, amount: amount, merchant: merchant, card: card)
+        // A line in the thread, so each payment shows up where Otto's 👍 lands on it.
+        let text = "paid \(amount)" + (merchant.isEmpty ? "" : " at \(merchant)")
+        let mine = Message(from: .me, text: text)
+        _ = await OttoStore.shared.siri(mine) { live in
+            _ = await live.logPayment(id: mine.wireID, amount: amount, merchant: merchant, card: card)
+            return nil
+        }
         return .result()
     }
 }
