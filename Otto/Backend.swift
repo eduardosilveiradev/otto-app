@@ -67,6 +67,8 @@ struct Message: Identifiable, Codable {
     var recorded: [RecordedCard]? = nil
     /// A verification code to show in the drawer (OTP.swift). Cleared when the server edits the message after it expires.
     var otp: OTPCode? = nil
+    /// A desktop was focused when it went out (server's desktop-focus quiet): in the thread, but no banner.
+    var quiet: Bool? = nil
     /// Yours, a button tap: the data that goes up (the bubble shows the label). Pending until the server has it.
     var tap: String? = nil
     /// Yours, a Wallet payment (amount, merchant, card) for money tracking, when it couldn't go up at once.
@@ -169,6 +171,8 @@ protocol OttoBackend: AnyObject {
     var voices: AsyncStream<(String, RemoteFile?)> { get }
     /// Otto rewriting a message it already sent: (wireID, new text).
     var edits: AsyncStream<(String, String)> { get }
+    /// The one banner for what a focused desktop held, once it lets go: (newest held id, text). No bubble.
+    var notifies: AsyncStream<(String, String)> { get }
     func decide(approval id: String, approve: Bool) async -> ApprovalOutcome
     /// The newest `limit` messages of the thread on the server, or with `since`, every one after it.
     func history(background: Bool, limit: Int, since: Date?) async -> [Message]
@@ -207,6 +211,7 @@ protocol OttoBackend: AnyObject {
 extension OttoBackend {
     var voices: AsyncStream<(String, RemoteFile?)> { AsyncStream { _ in } }
     var edits: AsyncStream<(String, String)> { AsyncStream { _ in } }
+    var notifies: AsyncStream<(String, String)> { AsyncStream { _ in } }
     func release() async -> Release? { nil }
     func snooze(_ change: SnoozeChange?) async -> Snooze? { nil }
     func setLoop(_ id: String, done: Bool) async -> Bool { !isLive }

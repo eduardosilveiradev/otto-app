@@ -3,7 +3,7 @@
  * against a throwaway Otto server (otto-core's otto/tests/apptwin.ts) that can be stopped,
  * restarted and asked to reply. Each scenario prints PASS or FAIL.
  *
- *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|approval|tapread|oldedit|photo|lostphoto|corrupt|all]
+ *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|approval|tapread|oldedit|photo|lostphoto|corrupt|quiet|all]
  *
  * Use a simulator made for it (`xcrun simctl create`): the app is reinstalled, so its thread is wiped.
  */
@@ -236,6 +236,68 @@ if (scenario === 'all' || scenario === 'corrupt') {
   await waitFor(() => mine('after the bad file'), 20000)
   const { readdirSync } = await import('fs')
   check('corrupt: an unreadable thread is kept aside, not overwritten', readdirSync(dir).some(f => f.startsWith('chat-otto-server.json.unreadable-')))
+}
+
+// A focused desktop quiets the phone. Banners are counted by the app's unread count, which
+// every Notifier.post bumps (the simulator can't grant notification permission from the CLI).
+if (scenario === 'all' || scenario === 'quiet') {
+  const { phone } = await import(join(process.env.OTTO_CORE!, 'otto/tests/apptwin.ts'))
+  const unread = () => Number(sh('xcrun', 'simctl', 'spawn', DEV, 'defaults', 'read', join(container(), `Library/Preferences/${BUNDLE}`), 'unreadCount')) || 0
+  const otto = (text: string): any => thread().find(m => m.from === 'otto' && m.text === text)
+  // The app goes through a proxy that can be cut, so replies can land in history only (the catch-up path).
+  let up = true
+  const conns = new Set<any>()
+  const proxy = Bun.listen<{ up?: any; q: Uint8Array[] }>({ hostname: '127.0.0.1', port: 0, socket: {
+    async open(c) {
+      if (!up) return c.end()
+      conns.add(c); c.data = { q: [] }
+      c.data.up = await Bun.connect({ hostname: '127.0.0.1', port: twin.port, socket: { data: (_, d) => { c.write(d) }, close: () => { c.end() } } })
+      for (const d of c.data.q) c.data.up.write(d)
+    },
+    data(c, d) { c.data.up ? c.data.up.write(d) : c.data.q.push(new Uint8Array(d)) },
+    close(c) { conns.delete(c); c.data?.up?.end() },
+  } })
+  sh('xcrun', 'simctl', 'launch', '--terminate-running-process', DEV, BUNDLE, '-serverURL', `http://127.0.0.1:${proxy.port}`,
+    '-serverToken', twin.token, '-onboarded', 'YES', '-noNotificationPrompt')
+  await Bun.sleep(5000)
+  sh('xcrun', 'simctl', 'launch', DEV, 'com.apple.Preferences')   // Otto to the background, socket kept open
+  await Bun.sleep(3000)
+  const mac = await phone(twin)
+  mac.send({ type: 'presence', focused: true })
+  await Bun.sleep(300)
+
+  const u0 = unread()
+  await twin.call('reply', { chat_id: 'app', text: 'quiet one', verbatim: true })
+  await twin.call('reply', { chat_id: 'app', text: 'quiet two', verbatim: true })
+  await waitFor(() => otto('quiet two'), 15000)
+  await Bun.sleep(1500)
+  check('quiet: held frames land in the thread', otto('quiet one')?.quiet === true && otto('quiet two')?.quiet === true)
+  check('quiet: and post no banner', unread() === u0, `${u0} -> ${unread()}`)
+
+  mac.send({ type: 'presence', focused: false })
+  await Bun.sleep(2500)
+  check('quiet: focus ending posts one banner', unread() === u0 + 1, `${u0} -> ${unread()}`)
+  check('quiet: and adds no bubble', thread().filter(m => m.text?.startsWith('quiet two')).length === 1)
+
+  await twin.call('reply', { chat_id: 'app', text: 'loud after focus', verbatim: true })
+  await waitFor(() => otto('loud after focus'), 15000)
+  await Bun.sleep(1500)
+  check('quiet: a normal frame still notifies', unread() === u0 + 2, `${u0} -> ${unread()}`)
+
+  // Catch-up: the phone is cut off while the desktop is focused, so these reach it from history.
+  mac.send({ type: 'presence', focused: true })
+  await Bun.sleep(300)
+  up = false
+  for (const c of conns) c.end()
+  await Bun.sleep(1000)
+  await twin.call('reply', { chat_id: 'app', text: 'quiet from history', verbatim: true })
+  await twin.call('reply', { chat_id: 'app', text: 'loud from history', verbatim: true, bark: true })
+  up = true
+  await waitFor(() => otto('loud from history'), 20000)
+  await Bun.sleep(1500)
+  check('quiet: catch-up brings both into the thread', otto('quiet from history')?.quiet === true && otto('loud from history') && !otto('loud from history').quiet)
+  check('quiet: catch-up banners only the loud one', unread() === u0 + 3, `${u0} -> ${unread()}`)
+  mac.close(); proxy.stop(true)
 }
 
 kill()
