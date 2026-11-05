@@ -574,8 +574,12 @@ struct Composer: View {
             Spacer(minLength: 0)
             Button { withAnimation(.snappy) { thread.replyingTo = nil } } label: {
                 Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(.secondary)
+                    // A 44pt target without growing the bar.
+                    .padding(13).contentShape(.rect).padding(-13)
             }
+            .accessibilityLabel("Cancel reply")
         }
+        .accessibilityElement(children: .contain)
         .padding(.horizontal, 14).padding(.top, 10)
         .transition(.opacity)
     }
@@ -758,6 +762,9 @@ private struct Row: View {
     let onTap: (ActionButton) -> Void
     @State private var morph: Double = 1
     @State private var swipe: CGFloat = 0
+    /// Decided on a drag's first move: sideways is a reply swipe, anything else belongs to the scroll.
+    @State private var sideways: Bool?
+    @State private var reacted = 0
     @State private var selecting = false
     @State private var link: URL?
     @State private var sharing: URL?
@@ -849,8 +856,41 @@ private struct Row: View {
     }
 
     static let tapbacks = ["❤️", "👍", "👎", "😂", "‼️", "❓"]
+    /// What VoiceOver calls each one (Messages' names).
+    static let tapbackNames = ["❤️": "Heart", "👍": "Thumbs Up", "👎": "Thumbs Down", "😂": "Ha Ha", "‼️": "Emphasize", "❓": "Question"]
     /// How far a swipe has to pull before letting go means "reply".
     private static let replyAt: CGFloat = 60
+
+    /// The tapback row at the top of a bubble's menu; the one already on it shows selected, and
+    /// picking it again takes it off.
+    @ViewBuilder static func palette(_ m: Message, react: @escaping (String) -> Void) -> some View {
+        // Palette: one row of emoji, like Messages. A plain ControlGroup caps at three
+        // across and stacks the rest down the menu.
+        ControlGroup {
+            ForEach(tapbacks, id: \.self) { e in
+                Toggle(isOn: Binding(get: { m.reaction == e }, set: { _ in react(e) })) { Text(e) }
+                    .accessibilityLabel(tapbackNames[e] ?? e)
+            }
+        }
+        .controlGroupStyle(.palette)
+        // Palette buttons keep the menu open by default; a tapback should close it like Messages.
+        .menuActionDismissBehavior(.enabled)
+    }
+
+    /// Yours, from the menu, a double-tap or VoiceOver. One tap of haptic here, and none when
+    /// Otto's lands, the way Messages only buzzes for what you did.
+    private func react(_ e: String) { thread.react(e, on: message.id); reacted += 1 }
+    private func reply() { withAnimation(.snappy) { thread.replyingTo = message.id } }
+    /// What VoiceOver reads for a plain bubble: who, then what. Nil when the bubble holds
+    /// something of its own to reach (a link, a chip's button, the play button), which one
+    /// combined element would swallow.
+    private var spoken: String? {
+        guard !message.isVoice, message.audio == nil, Self.previewURL(message) == nil,
+              (message.scheduled ?? []).isEmpty, (message.recorded ?? []).isEmpty, message.otp == nil else { return nil }
+        let who = mine ? "You" : thread.name
+        if let d = Self.draft(message) { return "\(who): \(d.head) \(d.body)" }
+        return "\(who): \(message.text)"
+    }
 
     var body: some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 6) {
@@ -859,17 +899,20 @@ private struct Row: View {
                     .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(.systemGray4)))
+                    .accessibilityLabel("In reply to \(quote.from == .me ? "you" : thread.name): \(quote.text.isEmpty ? (quote.image != nil ? "Photo" : "Voice message") : quote.text)")
             }
             if let img = Thumbs.image(for: message) {
                 Image(uiImage: img).resizable().scaledToFit()
                     .frame(maxWidth: 253, maxHeight: 320)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
                     .onTapGesture { MediaViewer.shared.start = message.id.uuidString }
-                    .modifier(Reactable(thread: thread, message: message, badge: !textShown))
+                    .accessibilityLabel(mine ? "You: photo" : "\(thread.name): photo")
+                    .accessibilityAddTraits([.isImage, .isButton])
+                    .modifier(Reactable(message: message, badge: !textShown, react: react, reply: reply, copy: { UIPasteboard.general.image = img }))
             }
             ForEach(Array((message.files ?? []).enumerated()), id: \.element.id) { i, f in
                 Group { if StudySet.isStudy(f) { StudyBubble(file: f) } else { RemoteFileView(file: f) } }
-                    .modifier(Reactable(thread: thread, message: message, badge: !textShown && Thumbs.image(for: message) == nil && i == 0))
+                    .modifier(Reactable(message: message, badge: !textShown && Thumbs.image(for: message) == nil && i == 0, react: react, reply: reply))
             }
             if textShown {
             VStack(alignment: .leading, spacing: 8) {
@@ -903,18 +946,10 @@ private struct Row: View {
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { morph = 1 }
                 }
                 // Double-tap: ❤️ straight away, no menu. Again takes it off.
-                .onTapGesture(count: 2) { thread.react("❤️", on: message.id) }
-                .sensoryFeedback(.impact(weight: .light), trigger: message.reaction)
+                .onTapGesture(count: 2) { react("❤️") }
                 .contextMenu {
-                    // Palette: one row of emoji, like Messages. A plain ControlGroup caps at three
-                    // across and stacks the rest down the menu.
-                    ControlGroup {
-                        ForEach(Self.tapbacks, id: \.self) { e in Button(e) { thread.react(e, on: message.id) } }
-                    }
-                    .controlGroupStyle(.palette)
-                    // Palette buttons keep the menu open by default; a tapback should close it like Messages.
-                    .menuActionDismissBehavior(.enabled)
-                    Button("Reply", systemImage: "arrowshape.turn.up.left") { thread.replyingTo = message.id }
+                    Self.palette(message, react: react)
+                    Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
                     Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
                     Button("Select Text", systemImage: "selection.pin.in.out") { selecting = true }
                     if !mine, message.why != nil {
@@ -942,6 +977,8 @@ private struct Row: View {
                     if let r = message.reaction { Tapback(emoji: r, mine: mine) }
                 }
                 .padding(.top, message.reaction == nil ? 0 : 14)
+                .modifier(SpokenActions(message: message, label: spoken, react: react, reply: reply,
+                                        copy: { UIPasteboard.general.string = message.text }))
             }
             if let md = preview {
                 // No frame here: a maxWidth frame is 280 wide and centres a narrower card in it.
@@ -951,11 +988,8 @@ private struct Row: View {
                     .contextMenu {
                         // A bare link is only this card, so the card takes the tapbacks.
                         if !textShown {
-                            ControlGroup {
-                                ForEach(Self.tapbacks, id: \.self) { e in Button(e) { thread.react(e, on: message.id) } }
-                            }
-                            .controlGroupStyle(.palette)
-                            .menuActionDismissBehavior(.enabled)
+                            Self.palette(message, react: react)
+                            Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
                         }
                         if let url = Self.previewURL(message) {
                             Button("Open Link", systemImage: "safari") { openURL(url) }
@@ -967,7 +1001,6 @@ private struct Row: View {
                         if !textShown, let r = message.reaction { Tapback(emoji: r, mine: mine) }
                     }
                     .padding(.top, !textShown && message.reaction != nil ? 14 : 0)
-                    .sensoryFeedback(.impact(weight: .light), trigger: message.reaction)
             }
             // What you said, under your voice note; Otto's sits inside its bubble.
             if mine, message.isVoice, !message.text.isEmpty {
@@ -1016,24 +1049,35 @@ private struct Row: View {
         // fills in behind it, and letting go past the mark picks it.
         .offset(x: swipe)
         .background(alignment: .leading) {
+            let armed = swipe >= Self.replyAt
             Image(systemName: "arrowshape.turn.up.left.circle.fill")
                 .font(.system(size: 24)).foregroundStyle(.secondary)
-                .opacity(Double(swipe / Self.replyAt))
-                .scaleEffect(swipe >= Self.replyAt ? 1.1 : 0.8)
+                .opacity(min(1, Double(swipe / Self.replyAt)))
+                .scaleEffect(armed ? 1.1 : 0.75)
+                // Pops when the pull crosses the mark, with the haptic, rather than snapping.
+                .animation(.spring(response: 0.25, dampingFraction: 0.55), value: armed)
                 .offset(x: swipe - 32)
+                .accessibilityHidden(true)
         }
         .simultaneousGesture(
             DragGesture(minimumDistance: 20)
                 .onChanged { g in
-                    guard g.translation.width > 0, abs(g.translation.width) > abs(g.translation.height) * 1.5 else { return }
-                    swipe = min(g.translation.width, Self.replyAt + 20)
+                    let t = g.translation
+                    // Locked on the first move, so a drag that drifts diagonally keeps doing one thing.
+                    if sideways == nil { sideways = t.width > 0 && t.width > abs(t.height) * 1.5 }
+                    guard sideways == true else { return }
+                    // Follows the finger to the mark, then resists (Messages' rubber band).
+                    let x = max(0, t.width)
+                    swipe = x <= Self.replyAt ? x : Self.replyAt + (x - Self.replyAt) * 0.25
                 }
                 .onEnded { _ in
-                    if swipe >= Self.replyAt { thread.replyingTo = message.id }
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { swipe = 0 }
+                    if swipe >= Self.replyAt { reply() }
+                    sideways = nil
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { swipe = 0 }
                 }
         )
         .sensoryFeedback(.impact(weight: .light), trigger: swipe >= Self.replyAt) { _, new in new }
+        .sensoryFeedback(.impact(weight: .light), trigger: reacted)
     }
 }
 
@@ -1311,24 +1355,53 @@ struct BubbleShape: Shape {
 /// Long press on a photo or file: the same tapback palette a text bubble has. `badge` puts the
 /// reaction on this one when there's no text bubble to carry it.
 private struct Reactable: ViewModifier {
-    let thread: any ChatThread
     let message: Message
     let badge: Bool
+    let react: (String) -> Void
+    let reply: () -> Void
+    /// A photo copies as the picture; files have nothing to copy.
+    var copy: (() -> Void)? = nil
     func body(content: Content) -> some View {
         content
             .contextMenu {
-                ControlGroup {
-                    ForEach(Row.tapbacks, id: \.self) { e in Button(e) { thread.react(e, on: message.id) } }
-                }
-                .controlGroupStyle(.palette)
-                .menuActionDismissBehavior(.enabled)
-                Button("Reply", systemImage: "arrowshape.turn.up.left") { thread.replyingTo = message.id }
+                Row.palette(message, react: react)
+                Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
+                if let copy { Button("Copy", systemImage: "doc.on.doc", action: copy) }
             }
             .overlay(alignment: message.from == .me ? .topLeading : .topTrailing) {
                 if badge, let r = message.reaction { Tapback(emoji: r, mine: message.from == .me) }
             }
             .padding(.top, badge && message.reaction != nil ? 14 : 0)
-            .sensoryFeedback(.impact(weight: .light), trigger: message.reaction)
+            .modifier(SpokenActions(message: message, label: nil, react: react, reply: reply, copy: copy))
+    }
+}
+
+/// A bubble's menu, for VoiceOver: Reply, each tapback and Copy as actions, the reaction as its value.
+private struct SpokenActions: ViewModifier {
+    let message: Message
+    /// Replaces what the bubble would read; nil keeps its own.
+    let label: String?
+    let react: (String) -> Void
+    let reply: () -> Void
+    let copy: (() -> Void)?
+    func body(content: Content) -> some View {
+        content
+            .modifier(Labelled(label: label))
+            .accessibilityValue(message.reaction.map { "Reaction: \(Row.tapbackNames[$0] ?? $0)" } ?? "")
+            .accessibilityAction(named: "Reply", reply)
+            .accessibilityActions {
+                ForEach(Row.tapbacks, id: \.self) { e in
+                    let name = Row.tapbackNames[e] ?? e
+                    Button(message.reaction == e ? "Remove \(name)" : name) { react(e) }
+                }
+                if let copy { Button("Copy", action: copy) }
+            }
+    }
+    private struct Labelled: ViewModifier {
+        let label: String?
+        func body(content: Content) -> some View {
+            if let label { content.accessibilityElement(children: .combine).accessibilityLabel(label) } else { content }
+        }
     }
 }
 
@@ -1341,6 +1414,11 @@ private struct Tapback: View {
             .background(Color(.systemGray5), in: .circle)
             .overlay(Circle().strokeBorder(Color(.systemBackground), lineWidth: 2.5))
             .offset(x: mine ? -14 : 14, y: -16)
+            // Pops onto the corner with a little overshoot, and a new pick pops in over the old.
+            .id(emoji)
+            .transition(.scale(scale: 0.3, anchor: mine ? .bottomTrailing : .bottomLeading).combined(with: .opacity)
+                .animation(.spring(response: 0.35, dampingFraction: 0.6)))
+            .accessibilityHidden(true)
     }
 }
 

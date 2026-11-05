@@ -314,6 +314,31 @@ final class OttoStore {
                 Message(from: .me, text: "whats a good place for dinner near the office thats not pizza", read: true),
             ]
         }
+        // `-actionsLab`: one of everything a bubble's actions touch (long text, a photo, voice notes,
+        // a link, a reply, tapbacks either way); Otto tapbacks your last text 8s in, to land mid-gesture.
+        if ProcessInfo.processInfo.arguments.contains("-actionsLab") {
+            let t = Date.now.addingTimeInterval(-300)
+            let photo = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 450)).jpegData(withCompressionQuality: 0.8) { ctx in
+                UIColor.systemTeal.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 600, height: 450))
+                UIColor.systemOrange.setFill(); ctx.fill(CGRect(x: 0, y: 300, width: 600, height: 150))
+            }
+            let first = Message(from: .otto, text: "morning. design review at 14:00, then you're free until 16:30.", date: t, serverID: "lab-1")
+            messages = [
+                first,
+                Message(from: .me, text: "nice. what's the plan for the boiler?", date: t, read: true, replyTo: "lab-1"),
+                Message(from: .otto, text: String(repeating: "Here's the long version, every step spelled out so nothing gets lost between now and Tuesday. ", count: 14), date: t),
+                Message(from: .me, text: "", date: t, image: photo, reaction: "❤️", read: true),
+                Message(from: .otto, text: "plumber reminder set for when you're home.", date: t, isVoice: true,
+                        audio: RemoteFile(id: "demo-voice", name: "reply.m4a", kind: "audio")),
+                Message(from: .otto, text: "the menu's here: https://www.apple.com/newsroom/", date: t, reaction: "👍"),
+                Message(from: .me, text: "ok", date: t, read: true),
+                Message(from: .me, text: "and can you book the 19:30 table for two?", date: t, read: true),
+            ]
+            Task {
+                try? await Task.sleep(for: .seconds(8))
+                if let i = messages.lastIndex(where: { $0.from == .me }) { messages[i].reaction = "😂" }
+            }
+        }
         // `-refThread`: the bubbles of a Messages reference screenshot, to compare pixel for pixel.
         if ProcessInfo.processInfo.arguments.contains("-refThread") {
             let t = Date.now.addingTimeInterval(-120)
