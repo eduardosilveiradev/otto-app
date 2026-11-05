@@ -78,9 +78,10 @@ struct SnapToOtto: AppIntent {
         }
         let words = note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let mine = Message(from: .me, text: words, image: jpeg)
-        // ponytail: an offline snap only stays in the thread; queue the upload like voice notes if that bites.
         guard let a = await OttoStore.shared.siri(mine, send: { await $0.snap(jpeg, note: words, id: mine.wireID) }) else {
-            return .result(dialog: "Otto's offline. The photo's in the chat; send it again when it's back.")
+            // Unreachable: it goes up as a plain photo when the app next connects, pending until then.
+            let sent = await OttoStore.shared.sendAndConfirm(mine.id)
+            return .result(dialog: sent ? "Sent." : "Otto's offline. The photo goes out next time the app connects.")
         }
         return .result(dialog: try await spoken(a))
     }
