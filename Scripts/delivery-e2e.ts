@@ -3,7 +3,7 @@
  * against a throwaway Otto server (otto-core's otto/tests/apptwin.ts) that can be stopped,
  * restarted and asked to reply. Each scenario prints PASS or FAIL.
  *
- *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|approval|tapread|oldedit|photo|corrupt|all]
+ *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|approval|tapread|oldedit|photo|lostphoto|corrupt|all]
  *
  * Use a simulator made for it (`xcrun simctl create`): the app is reinstalled, so its thread is wiped.
  */
@@ -217,6 +217,15 @@ if (scenario === 'all' || scenario === 'photo') {
   const after = JSON.parse(readFileSync(join(container(), 'Library/Application Support/chat-otto-server.json'), 'utf8')).find((x: any) => x.text === 'legacy photo')
   check('photo: an inline photo from an older thread is moved out on the next save', after?.photo === true && after?.image === undefined
     && existsSync(join(container(), 'Library/Application Support/images/0E0E0E0E-0000-4000-8000-000000000009.jpg')))
+}
+
+if (scenario === 'all' || scenario === 'lostphoto') {
+  launch('-e2eShareLostPhoto')
+  await waitFor(() => thread().find(m => m.text === 'lost photo caption'), 20000)
+  await Bun.sleep(2000)
+  const m = thread().find(x => x.text === 'lost photo caption')
+  check('share: a shared photo whose file is gone shows Not delivered, not its caption as sent', m?.failed === true && !m?.pending && count('lost photo caption') === 0,
+    JSON.stringify(m ?? null))
 }
 
 if (scenario === 'all' || scenario === 'corrupt') {

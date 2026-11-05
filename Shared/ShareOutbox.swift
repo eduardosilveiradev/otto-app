@@ -40,7 +40,9 @@ enum ShareOutbox {
     /// removes the files once `saved` says the app has them on disk. If it doesn't, they stay and
     /// come round again under the same ids. Returns the count handed over.
     @discardableResult
-    static func drain(_ handle: (_ id: UUID, _ text: String, _ jpeg: Data?) -> Void, saved: () -> Bool) -> Int {
+    /// `photoLost`: the item named a photo whose file can't be read, so the caller shows it as not
+    /// delivered rather than sending the caption alone (or nothing) as if that were the share.
+    static func drain(_ handle: (_ id: UUID, _ text: String, _ jpeg: Data?, _ photoLost: Bool) -> Void, saved: () -> Bool) -> Int {
         guard let dir, let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
         else { return 0 }
         var done: [URL] = [], n = 0
@@ -52,7 +54,8 @@ enum ShareOutbox {
             let image = item.image.map { dir.appending(path: $0) }
             // Named "<ms>-<uuid>.json" by put.
             let id = UUID(uuidString: String(json.deletingPathExtension().lastPathComponent.drop { $0 != "-" }.dropFirst())) ?? UUID()
-            handle(id, item.text, image.flatMap { try? Data(contentsOf: $0) })
+            let jpeg = image.flatMap { try? Data(contentsOf: $0) }
+            handle(id, item.text, jpeg, image != nil && jpeg == nil)
             done += [json] + (image.map { [$0] } ?? [])
             n += 1
         }

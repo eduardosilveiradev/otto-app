@@ -391,6 +391,17 @@ final class OttoStore {
                 try? "\(outcome)".write(to: .applicationSupportDirectory.appending(path: "e2e-decided"), atomically: true, encoding: .utf8)   // read back by Scripts/delivery-e2e.ts
             }
         }
+        if ProcessInfo.processInfo.arguments.contains("-e2eShareLostPhoto") {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                _ = ShareOutbox.put(text: "lost photo caption", jpeg: Data([0xFF, 0xD8]))
+                // Its JPEG gone before the app drains it.
+                if let dir = ShareOutbox.dir, let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+                    for f in files where f.pathExtension == "jpg" { try? FileManager.default.removeItem(at: f) }
+                }
+                sendShared()
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("-e2ePhoto") {
             Task {
                 try? await Task.sleep(for: .seconds(2))
@@ -768,9 +779,15 @@ final class OttoStore {
         replyingTo = nil   // a share is its own message, not an answer to the one being replied to
         // Each share keeps the id its outbox file was named with, so one handed over twice (the
         // thread didn't save, the files stayed) goes in once; the files go only once the thread is saved.
-        let n = ShareOutbox.drain({ id, text, jpeg in
+        let n = ShareOutbox.drain({ id, text, jpeg, photoLost in
             guard !messages.contains(where: { $0.id == id }) else { return }
             if let jpeg, let image = UIImage(data: jpeg) { sendPhoto(image, caption: text, shared: true, id: id) }
+            else if photoLost || jpeg != nil {
+                // The photo it carried can't be read: shown as yours, not delivered, never sent as its caption alone.
+                var m = Message(id: id, from: .me, text: text.isEmpty ? "Photo" : text, shared: true)
+                m.failed = true
+                messages.append(m)
+            }
             else if !text.isEmpty { send(text, shared: true, id: id) }
         }, saved: { saveNow() })
         replyingTo = draft
