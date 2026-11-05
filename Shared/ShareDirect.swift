@@ -65,9 +65,12 @@ enum ShareDirect {
         task.resume()
         // URLSession only reads control frames while a receive is pending, and the server
         // speaks first on connect: without this the pong below waits behind that frame forever.
-        drain(task)
+        // It also watches for the server's hello (it acks) and the ack for this message.
+        let id = UUID().uuidString
+        let seen = Seen()
+        drain(task, seen)
         defer { task.cancel(with: .normalClosure, reason: nil) }
-        let frame: [String: Any] = ["type": "message", "id": UUID().uuidString, "text": text, "shared": true]
+        let frame: [String: Any] = ["type": "message", "id": id, "text": text, "shared": true]
         guard let json = try? JSONSerialization.data(withJSONObject: frame), let s = String(data: json, encoding: .utf8)
         else { return false }
         do {
@@ -76,13 +79,31 @@ enum ShareDirect {
             try await withCheckedThrowingContinuation { (k: CheckedContinuation<Void, Error>) in
                 task.sendPing { e in if let e { k.resume(throwing: e) } else { k.resume() } }
             }
-            return true
+            // An older server stops there. One that acks only does so once the message is written down.
+            guard seen.has("hello") else { return true }
+            for _ in 0..<100 where !seen.has(id) { try await Task.sleep(for: .milliseconds(100)) }
+            return seen.has(id)
         } catch {
             return false
         }
     }
 
-    private static func drain(_ task: URLSessionWebSocketTask) {
-        task.receive { if case .success = $0 { drain(task) } }
+    /// What the share socket has heard: "hello", and the ids it acked.
+    private final class Seen: @unchecked Sendable {
+        private let lock = NSLock()
+        private var got: Set<String> = []
+        func add(_ s: String) { lock.withLock { _ = got.insert(s) } }
+        func has(_ s: String) -> Bool { lock.withLock { got.contains(s) } }
+    }
+
+    private static func drain(_ task: URLSessionWebSocketTask, _ seen: Seen) {
+        task.receive {
+            guard case .success(let m) = $0 else { return }
+            if case .string(let s) = m, let f = try? JSONSerialization.jsonObject(with: Data(s.utf8)) as? [String: Any] {
+                if f["type"] as? String == "hello" { seen.add("hello") }
+                if f["type"] as? String == "ack", let id = f["id"] as? String { seen.add(id) }
+            }
+            drain(task, seen)
+        }
     }
 }

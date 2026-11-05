@@ -3,7 +3,7 @@
  * against a throwaway Otto server (otto-core's otto/tests/apptwin.ts) that can be stopped,
  * restarted and asked to reply. Each scenario prints PASS or FAIL.
  *
- *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|all]
+ *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|approval|tapread|all]
  *
  * Use a simulator made for it (`xcrun simctl create`): the app is reinstalled, so its thread is wiped.
  */
@@ -159,6 +159,29 @@ if (scenario === 'all' || scenario === 'gap') {
   await waitFor(() => thread().filter(m => m.text?.startsWith('second backlog ')).length === 60, 30000)
   check('gap: a fresh message of yours in the page does not hide the hole', thread().filter(m => m.text?.startsWith('second backlog ')).length === 60,
     String(thread().filter(m => m.text?.startsWith('second backlog ')).length))
+}
+
+if (scenario === 'all' || scenario === 'approval') {
+  launch('-e2eDecide', 'no-such-approval')
+  const decided = () => { try { return readFileSync(join(container(), 'Library/Application Support/e2e-decided'), 'utf8') } catch { return '' } }
+  await waitFor(() => decided() !== '', 20000)
+  check('approval: a decision on one the Mac no longer has comes back gone, not done', decided() === 'gone', decided())
+  await waitFor(() => thread().some(m => /expired/.test(m.text)), 10000)
+  check('approval: the thread says nothing was done', thread().some(m => m.from === 'otto' && /expired/.test(m.text)))
+}
+
+if (scenario === 'all' || scenario === 'tapread') {
+  await twin.call('reply', { chat_id: 'app', text: 'ok?', buttons: [{ label: 'yes', data: 'tap read heal' }] })
+  launch('-e2eTapLast')
+  const d = await waitFor(() => twin.delivered.find((x: any) => x.content.includes('tap read heal')), 20000)
+  kill()   // its read receipt will go nowhere
+  const dir = join(twin.state, '..', '..', '.claude', 'projects', 'x')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'tr.jsonl'), JSON.stringify({ message_id: d?.meta.message_id }) + '\n')
+  await twin.hook({ hook_event_name: 'PreToolUse', tool_name: 'reply', transcript_path: join(dir, 'tr.jsonl') })
+  launch()
+  await waitFor(() => mine('yes')?.read, 15000)
+  check('tap: a read receipt missed while away heals from history', mine('yes')?.read === true, JSON.stringify(mine('yes') ?? null))
 }
 
 kill()

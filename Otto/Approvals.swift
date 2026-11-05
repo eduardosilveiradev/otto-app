@@ -51,7 +51,8 @@ struct ApprovalSheet: View {
                     Section { Text(failed).foregroundStyle(.red).font(.footnote) }
                 }
             }
-            .navigationTitle(paid ? "Paid" : request.title)
+            // "Approved", not "Paid": the Mac has the go-ahead; the payment itself is Otto's to report in the chat.
+            .navigationTitle(paid ? "Approved" : request.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if !paid {
@@ -178,15 +179,14 @@ struct ApprovalSheet: View {
             }
         }
         // A paid payment goes to the Mac now, then the sheet stays for the receipt until Done.
-        if approve, request.payment != nil {
-            guard await store.decide(request.id, approve: true, keep: true) else {
-                failed = "Couldn't reach your Mac, so nothing was paid. Try again."
-                return
-            }
-            withAnimation(.snappy) { paid = true }
-            return
+        let keep = approve && request.payment != nil   // the receipt stays up until Done
+        switch await store.decide(request.id, approve: approve, keep: keep) {
+        case .done: if keep { withAnimation(.snappy) { paid = true } }
+        case .gone: failed = "This had expired before your answer reached your Mac, so nothing was done. Ask Otto again."
+        // The decision may have landed and only its answer been lost: trying again is safe (same decision),
+        // but saying "nothing was paid" might not be true.
+        case .unknown: failed = "Couldn't confirm with your Mac. Check the chat, or try again."
         }
-        if !(await store.decide(request.id, approve: approve)) { failed = "Couldn't reach your Mac. Try again." }
     }
 }
 
@@ -241,7 +241,7 @@ struct PrintedReceipt: View {
                 Image(systemName: "creditcard.fill").font(.system(size: 13)).foregroundStyle(Color(white: 0.55))
                     .frame(width: 22, height: 22).background(Color(white: 0.22), in: .rect(cornerRadius: 5))
                 Spacer()
-                Text(payment.test == true ? "Test" : "Paid").font(.system(size: 12, weight: .medium))
+                Text(payment.test == true ? "Test" : "Approved").font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Color(white: 0.75))
                     .padding(.horizontal, 10).frame(height: 24).background(Color(white: 0.22), in: .capsule)
             }

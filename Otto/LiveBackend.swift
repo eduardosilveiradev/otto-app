@@ -78,8 +78,9 @@ final class LiveBackend: OttoBackend {
     }
     /// Whether this connection's server acks (its hello); nil until it has said, or 3s have passed.
     private var acksOn: Bool?
-    /// Op ids the server has acked and nobody has collected yet.
+    /// Op ids the server has acked and nobody has collected yet, and those it acked as gone.
     private var acked: Set<String> = []
+    private var gone: Set<String> = []
     private var loop: Task<Void, Never>?
 
     init(serverURL: URL, token: String) {
@@ -117,8 +118,10 @@ final class LiveBackend: OttoBackend {
 
     // MARK: OttoBackend
 
-    func history(background: Bool, limit: Int) async -> [Message] {
-        guard let rows: [WireHistory] = await get("app/history", background: background, query: [URLQueryItem(name: "limit", value: String(limit))]) else { return [] }
+    func history(background: Bool, limit: Int, since: Date?) async -> [Message] {
+        let q = since.map { [URLQueryItem(name: "since", value: $0.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: true)))] }
+            ?? [URLQueryItem(name: "limit", value: String(limit))]
+        guard let rows: [WireHistory] = await get("app/history", background: background, query: q) else { return [] }
         // Ids make the merge exact: yours come back under the UUID this phone sent them with.
         // One of yours without an id (written before they had one) can't be matched, so it's left out.
         return rows.filter { $0.dir != "in" || $0.id != nil || $0.kind == "terminal" }.map { r in
@@ -155,10 +158,12 @@ final class LiveBackend: OttoBackend {
         await handOver(fields.merging(["type": "wallet", "op": id]) { a, _ in a }, op: id)
     }
 
-    /// Straight to the socket and waited on, not the outbox: see OttoStore.decide.
-    func decide(approval id: String, approve: Bool) async -> Bool {
-        let op = UUID().uuidString
-        return await handOver(["type": "approval", "op": op, "id": id, "decision": approve ? "approve" : "decline"], op: op)
+    /// Straight to the socket and waited on, not the outbox: see OttoStore.decide. One op per
+    /// approval, so "Try again" after a lost ack is recognised as the same decision.
+    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome {
+        let op = "approval-\(id)"
+        guard await handOver(["type": "approval", "op": op, "id": id, "decision": approve ? "approve" : "decline"], op: op) else { return .unknown }
+        return lock.withLock { gone.remove(op) != nil } ? .gone : .done
     }
 
     func react(to id: String, emoji: String) async {
@@ -342,12 +347,12 @@ final class LiveBackend: OttoBackend {
         @unknown default: return
         }
         // Before WireMessage: an approval's `files` aren't RemoteFiles, so it would fail that decode whole.
-        struct Kind: Decodable { let type: String; let id: String? }
+        struct Kind: Decodable { let type: String; let id: String?; let gone: Bool? }
         if let k = try? JSONDecoder().decode(Kind.self, from: data) {
             if k.type == "approval" { if let a = try? JSONDecoder().decode(ApprovalRequest.self, from: data) { approvalOut.yield(.show(a)) }; return }
             if k.type == "approval_done", let id = k.id { approvalOut.yield(.done(id)); return }
             if k.type == "hello" { lock.withLock { acksOn = true }; return }
-            if k.type == "ack", let id = k.id { lock.withLock { _ = acked.insert(id) }; return }
+            if k.type == "ack", let id = k.id { lock.withLock { acked.insert(id); if k.gone == true { gone.insert(id) } }; return }
         }
         guard let f = try? JSONDecoder().decode(WireMessage.self, from: data) else { return }
         if f.type == "react", let id = f.id, let emoji = f.emoji { reacted.yield((id, emoji)); return }

@@ -348,6 +348,14 @@ final class OttoStore {
             let text = ProcessInfo.processInfo.arguments[i + 1]
             Task { try? await Task.sleep(for: .seconds(2)); _ = ShareOutbox.put(text: text, jpeg: nil); sendShared() }
         }
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-e2eDecide"), i + 1 < ProcessInfo.processInfo.arguments.count {
+            let id = ProcessInfo.processInfo.arguments[i + 1]
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                let outcome = await decide(id, approve: true, keep: true)
+                try? "\(outcome)".write(to: .applicationSupportDirectory.appending(path: "e2e-decided"), atomically: true, encoding: .utf8)   // read back by Scripts/delivery-e2e.ts
+            }
+        }
         if ProcessInfo.processInfo.arguments.contains("-e2eTapLast") {
             Task {
                 try? await Task.sleep(for: .seconds(3))
@@ -582,13 +590,14 @@ final class OttoStore {
     /// the fact that the server has it after all.
     private func catchUp(notify: Bool, background: Bool = false) async {
         guard !(backend is MockBackend) else { return }
-        var all = await backend.history(background: background, limit: 50)
+        var all = await backend.history(background: background, limit: 50, since: nil)
         // Continuous with the last sync only if the page reaches back to it. If even the oldest of the 50
         // is newer, more came in than the page holds (a long time offline): go further back. Anything
         // local in the page (a message just sent) says nothing about what's missing before it.
         let synced = UserDefaults.standard.object(forKey: "otto.syncedThrough") as? Date ?? .distantPast
         if let oldest = all.first, oldest.date > synced, !messages.isEmpty {
-            all = await backend.history(background: background, limit: 500)
+            // Everything since the last sync, as far back as the server's history goes; the first sync ever takes 500.
+            all = await backend.history(background: background, limit: 500, since: synced == .distantPast ? nil : synced)
         }
         if let newest = all.map(\.date).max() { UserDefaults.standard.set(max(newest, synced), forKey: "otto.syncedThrough") }
         let lastOtto = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
@@ -731,14 +740,12 @@ final class OttoStore {
     /// True once the Mac has the decision. False leaves the approval up: it isn't queued for later,
     /// since a payment approved now shouldn't go through half an hour on, and the Mac shows it again
     /// on the next connect while it's still live.
-    func decide(_ id: String, approve: Bool, keep: Bool = false) async -> Bool {
+    func decide(_ id: String, approve: Bool, keep: Bool = false) async -> ApprovalOutcome {
         if keep { keptApprovals.insert(id) }   // before the send: the Mac's "done" can beat its reply
-        guard await backend.decide(approval: id, approve: approve) else {
-            keptApprovals.remove(id)
-            return false
-        }
-        if !keep { approvals.removeAll { $0.id == id } }
-        return true
+        let outcome = await backend.decide(approval: id, approve: approve)
+        if outcome != .done { keptApprovals.remove(id) }
+        if outcome == .gone || (outcome == .done && !keep) { approvals.removeAll { $0.id == id } }
+        return outcome
     }
 
     /// A message that can't be sent after all (Siri's saved place, with the Mac out of reach).
@@ -787,7 +794,6 @@ final class OttoStore {
         Task { await deliver(m.id) }
     }
 
-    // ponytail: a note the server took but whose answer was lost is sent twice; dedupe by id server-side if it shows up.
     private func deliverVoice(_ m: Message) async {
         guard let audio = VoiceStore.data(m.id) else {
             // The audio is gone, so there's nothing to retry: say so rather than look delivered.

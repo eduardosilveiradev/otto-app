@@ -127,6 +127,10 @@ struct Brief {
     var triggers: [Trigger]
 }
 
+/// What became of an approval decision: the Mac has it; there was nothing left to decide (it
+/// expired, or a restart dropped it), so nothing was done; or no answer came, so either may be true.
+enum ApprovalOutcome { case done, gone, unknown }
+
 // MARK: - The backend seam
 
 /// Everything the app knows about the server goes through here.
@@ -155,10 +159,9 @@ protocol OttoBackend: AnyObject {
     var voices: AsyncStream<(String, RemoteFile?)> { get }
     /// Otto rewriting a message it already sent: (wireID, new text).
     var edits: AsyncStream<(String, String)> { get }
-    /// True once the server has the decision.
-    func decide(approval id: String, approve: Bool) async -> Bool
-    /// The newest `limit` messages of the thread on the server.
-    func history(background: Bool, limit: Int) async -> [Message]
+    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome
+    /// The newest `limit` messages of the thread on the server, or with `since`, every one after it.
+    func history(background: Bool, limit: Int, since: Date?) async -> [Message]
     /// True once the server has the message; false means try again later.
     func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool
     /// Same contract as `send`, for a button tap under its bubble's id.
@@ -204,7 +207,7 @@ extension OttoBackend {
     func stamps() async -> StampsReply? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
-    func decide(approval id: String, approve: Bool) async -> Bool { true }
+    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome { .done }
     func wallet(_ fields: [String: String], id: String) async -> Bool { true }
 }
 
@@ -263,7 +266,7 @@ final class MockBackend: OttoBackend {
         return try? JSONSerialization.data(withJSONObject: o)
     }
 
-    func history(background: Bool, limit: Int) async -> [Message] {
+    func history(background: Bool, limit: Int, since: Date?) async -> [Message] {
         return []
     }
 
