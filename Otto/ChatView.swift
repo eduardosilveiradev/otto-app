@@ -76,6 +76,24 @@ struct ChatView: View {
     private static let page = 60
 
     private var lastMine: Message.ID? { thread.messages.last(where: { $0.from == .me })?.id }
+    /// The message a tapped quote jumped to, lit up for a moment.
+    @State private var flashed: Message.ID?
+    /// A row is being swiped to reply: the thread holds still under it, like Messages.
+    @State private var swiping = false
+
+    /// A tapped quote: scroll its original into the middle (laying out older pages if it's up
+    /// there) and light it up, so the eye lands on it.
+    private func jump(to id: Message.ID) {
+        let messages = thread.messages
+        guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
+        shown = max(shown, messages.count - i + 4)
+        Task {
+            withAnimation(.snappy) { scroll.scrollTo(id: id, anchor: .center) }
+            withAnimation(.easeOut(duration: 0.2)) { flashed = id }
+            try? await Task.sleep(for: .seconds(0.9))
+            withAnimation(.easeInOut(duration: 0.4)) { if flashed == id { flashed = nil } }
+        }
+    }
 
     /// "Read" once Otto has taken the message in (or answered after it); until then it
     /// may be sitting in his queue, which is "Delivered".
@@ -98,12 +116,16 @@ struct ChatView: View {
                         if m.from == .terminal {
                             TerminalLine(message: m, afterStamp: newBlock).id(m.id).transition(.opacity)
                         } else {
+                            let quote = m.replyTo.flatMap { byWire[$0] }
                             Row(thread: thread, message: m,
-                                quote: m.replyTo.flatMap { byWire[$0] },
+                                quote: quote,
                                 tail: next?.from != m.from || next.map { $0.date.timeIntervalSince(m.date) > 3600 } ?? true,
                                 receipt: m.id == lastMine && m.pending != true && m.failed != true ? receipt(for: i, in: messages) : nil,
                                 fresh: m.from == .me && m.pending == true && Date.now.timeIntervalSince(m.date) < 1,
                                 lift: ui.height + 12,   // the bubble starts on the field (tuned against recordings)
+                                highlighted: flashed == m.id,
+                                onQuote: { if let quote { jump(to: quote.id) } },
+                                onSwiping: { swiping = $0 },
                                 onTap: { thread.tap($0, on: m.id) })
                                 .padding(.top, newBlock || prev?.from == .terminal ? 0 : (prev?.from == m.from ? 4 : 10))
                                 .id(m.id)
@@ -143,6 +165,7 @@ struct ChatView: View {
         // Pinned to the bottom as content grows (new bubbles, typing dots, the keyboard),
         // so nothing has to scroll after the fact and fight the insert animation.
         .scrollPosition($scroll)
+        .scrollDisabled(swiping)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
         // The composer rides the keyboard's layout guide, so it follows a drag-to-dismiss.
@@ -453,7 +476,7 @@ struct Composer: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 8)
                         .transition(.opacity)
-                        Button { withAnimation(.snappy) { if let url = recorder.stop() { store.sendVoice(url) } } } label: {
+                        Button { withAnimation(.snappy) { if let url = recorder.stop() { store.sendVoice(url, replyTo: store.takeReply()) } } } label: {
                             Image(systemName: "arrow.up.circle.fill")
                                 .font(.system(size: 28))
                                 .symbolRenderingMode(.palette)
@@ -568,14 +591,14 @@ struct Composer: View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(m.from == .me ? "Replying to yourself" : "Replying to \(thread.name)").font(.system(size: 12, weight: .semibold))
-                Text(m.text.isEmpty ? (m.image != nil ? "Photo" : "Voice message") : m.text)
+                Text(Row.summary(m))
                     .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
             Button { withAnimation(.snappy) { thread.replyingTo = nil } } label: {
                 Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(.secondary)
-                    // A 44pt target without growing the bar.
-                    .padding(13).contentShape(.rect).padding(-13)
+                    // A 44pt-wide target without growing the bar; not so tall it takes taps meant for the field below.
+                    .padding(.horizontal, 13).padding(.vertical, 6).contentShape(.rect).padding(.horizontal, -13).padding(.vertical, -6)
             }
             .accessibilityLabel("Cancel reply")
         }
@@ -613,8 +636,10 @@ struct Composer: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let photos = attachments
         guard !text.isEmpty || !photos.isEmpty else { return }
+        // A reply goes with the first photo; the text rides on the last as its caption.
+        let reply = photos.isEmpty ? nil : store.takeReply()
         for (i, a) in photos.enumerated() {
-            store.sendPhoto(a.image, caption: i == photos.count - 1 ? text : "")
+            store.sendPhoto(a.image, caption: i == photos.count - 1 ? text : "", replyTo: i == 0 ? reply : nil)
         }
         if photos.isEmpty { thread.send(text) }
         withAnimation(.snappy) { attachments = [] }
@@ -759,7 +784,12 @@ private struct Row: View {
     var fresh = false
     /// From the bubble's bottom down to the text field's bottom, before the receipt line.
     var lift: CGFloat = 0
+    /// Just jumped to from a quote.
+    var highlighted = false
+    var onQuote: () -> Void = {}
+    var onSwiping: (Bool) -> Void = { _ in }
     let onTap: (ActionButton) -> Void
+    @GestureState private var dragging = false
     @State private var morph: Double = 1
     @State private var swipe: CGFloat = 0
     /// Decided on a drag's first move: sideways is a reply swipe, anything else belongs to the scroll.
@@ -863,10 +893,11 @@ private struct Row: View {
 
     /// The tapback row at the top of a bubble's menu; the one already on it shows selected, and
     /// picking it again takes it off.
+    /// Only on Otto's: one tapback a message, and the one on yours is Otto's, not yours to change.
     @ViewBuilder static func palette(_ m: Message, react: @escaping (String) -> Void) -> some View {
         // Palette: one row of emoji, like Messages. A plain ControlGroup caps at three
         // across and stacks the rest down the menu.
-        ControlGroup {
+        if m.from == .otto { ControlGroup {
             ForEach(tapbacks, id: \.self) { e in
                 Toggle(isOn: Binding(get: { m.reaction == e }, set: { _ in react(e) })) { Text(e) }
                     .accessibilityLabel(tapbackNames[e] ?? e)
@@ -874,32 +905,107 @@ private struct Row: View {
         }
         .controlGroupStyle(.palette)
         // Palette buttons keep the menu open by default; a tapback should close it like Messages.
-        .menuActionDismissBehavior(.enabled)
+        .menuActionDismissBehavior(.enabled) }
+    }
+
+    /// What a message is, for a quote, the reply bar and VoiceOver: its words, or a word for what it holds.
+    static func summary(_ m: Message) -> String {
+        if !m.text.isEmpty { return draft(m)?.body ?? m.text }
+        if m.isVoice || m.audio != nil { return "Voice message" }
+        if m.image != nil { return "Photo" }
+        switch m.files?.first?.kind {
+        case "image": return "Photo"
+        case "video": return "Video"
+        default: return m.files?.first?.name ?? "Attachment"
+        }
     }
 
     /// Yours, from the menu, a double-tap or VoiceOver. One tap of haptic here, and none when
     /// Otto's lands, the way Messages only buzzes for what you did.
-    private func react(_ e: String) { thread.react(e, on: message.id); reacted += 1 }
+    private func settle() {
+        if sideways == true { onSwiping(false) }
+        sideways = nil
+        guard swipe != 0 else { return }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { swipe = 0 }
+    }
+    private func react(_ e: String) {
+        guard !mine else { return }
+        thread.react(e, on: message.id); reacted += 1
+    }
     private func reply() { withAnimation(.snappy) { thread.replyingTo = message.id } }
-    /// What VoiceOver reads for a plain bubble: who, then what. Nil when the bubble holds
-    /// something of its own to reach (a link, a chip's button, the play button), which one
-    /// combined element would swallow.
-    private var spoken: String? {
-        guard !message.isVoice, message.audio == nil, Self.previewURL(message) == nil,
-              (message.scheduled ?? []).isEmpty, (message.recorded ?? []).isEmpty, message.otp == nil else { return nil }
+    /// A draft copies as the words that would go out, without its "draft:" line.
+    private func copyText() { UIPasteboard.general.string = Self.draft(message)?.body ?? message.text }
+    private var firstLink: URL? { Self.linked(message.text).runs.lazy.compactMap(\.link).first }
+    /// Who put the tapback there: on yours it's Otto's, on Otto's it's yours.
+    private var reactor: String { mine ? thread.name : "you" }
+    /// What VoiceOver reads for the bubble: who, then what.
+    private var spoken: String {
         let who = mine ? "You" : thread.name
+        if message.isVoice || message.audio != nil { return "\(who): voice message. \(message.text)" }
         if let d = Self.draft(message) { return "\(who): \(d.head) \(d.body)" }
         return "\(who): \(message.text)"
+    }
+    /// The menu's other choices, for VoiceOver, which can't long-press: links are inside the
+    /// combined element, so they're here too.
+    private var spokenExtras: [(String, () -> Void)] {
+        var a: [(String, () -> Void)] = [("Select Text", { selecting = true })]
+        if !mine, message.why != nil { a.append(("Why this?", { whyShown = true })) }
+        if let url = firstLink { a.append(("Open Link", { openURL(url) })) }
+        return a
+    }
+    /// A long message lifts as its first lines: the whole of it filled the screen and ran under the menu.
+    private var longPreview: Bool { Self.draft(message) == nil && message.text.count > 500 }
+
+    @ViewBuilder private var bubbleMenu: some View {
+        Self.palette(message, react: react)
+        Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
+        Button("Copy", systemImage: "doc.on.doc", action: copyText)
+        Button("Select Text", systemImage: "selection.pin.in.out") { selecting = true }
+        if !mine, message.why != nil {
+            Divider()
+            Button("Why this?", systemImage: "questionmark.circle") { whyShown = true }
+        }
+        // The same choices a tapped link gets, for the first link in the message.
+        if let url = firstLink {
+            Divider()
+            Button("Open Link", systemImage: "safari") { openURL(url) }
+            Button("Copy Link", systemImage: "link") { UIPasteboard.general.url = url }
+            Button("Share Link…", systemImage: "square.and.arrow.up") { sharing = url }
+        }
+    }
+
+    /// The menu's lifted copy of a long bubble: its first fourteen lines, the bubble's width and colours.
+    private var shortBubble: some View {
+        Text(text).lineLimit(14)
+            .font(.body.leading(.tight))
+            .foregroundStyle(mine ? .white : .primary)
+            .padding(.horizontal, 14).padding(.vertical, 9.5)
+            .frame(width: UIScreen.main.bounds.width - 121, alignment: .leading)
+            .background(mine ? Color.outgoingBubble : Color.incomingBubble)
     }
 
     var body: some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 6) {
             if let quote {
-                Text(quote.text.isEmpty ? (quote.image != nil ? "Photo" : "Voice message") : quote.text)
-                    .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(.systemGray4)))
-                    .accessibilityLabel("In reply to \(quote.from == .me ? "you" : thread.name): \(quote.text.isEmpty ? (quote.image != nil ? "Photo" : "Voice message") : quote.text)")
+                // The answered message, small and faded, on its own sender's side (Messages). Tap to go to it.
+                Button(action: onQuote) {
+                    // Narrower and fainter than a bubble, so it reads as a quote and not a second copy.
+                    Label(Self.summary(quote), systemImage: "arrowshape.turn.up.left.fill")
+                        .labelStyle(QuoteLabel())
+                        .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .frame(maxWidth: 240, alignment: .leading)
+                        .background(quote.from == .me ? AnyShapeStyle(Color.outgoingBubble.opacity(0.35)) : AnyShapeStyle(Color.incomingBubble.opacity(0.6)),
+                                    in: .rect(cornerRadius: 14, style: .continuous))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: quote.from == .me ? .trailing : .leading)
+                // Out past the row's inset when it's the other side's, so it lines up with their bubbles.
+                .padding(mine ? .leading : .trailing, quote.from == message.from ? 0 : -89)
+                .accessibilityLabel("In reply to \(quote.from == .me ? "you" : thread.name): \(Self.summary(quote))")
+                .accessibilityHint("Shows the original message")
             }
             if let img = Thumbs.image(for: message) {
                 Image(uiImage: img).resizable().scaledToFit()
@@ -908,15 +1014,19 @@ private struct Row: View {
                     .onTapGesture { MediaViewer.shared.start = message.id.uuidString }
                     .accessibilityLabel(mine ? "You: photo" : "\(thread.name): photo")
                     .accessibilityAddTraits([.isImage, .isButton])
-                    .modifier(Reactable(message: message, badge: !textShown, react: react, reply: reply, copy: { UIPasteboard.general.image = img }))
+                    .modifier(Reactable(message: message, badge: !textShown, reactor: reactor, react: react, reply: reply, copy: { UIPasteboard.general.image = img }))
             }
             ForEach(Array((message.files ?? []).enumerated()), id: \.element.id) { i, f in
                 Group { if StudySet.isStudy(f) { StudyBubble(file: f) } else { RemoteFileView(file: f) } }
-                    .modifier(Reactable(message: message, badge: !textShown && Thumbs.image(for: message) == nil && i == 0, react: react, reply: reply))
+                    .modifier(Reactable(message: message, badge: !textShown && Thumbs.image(for: message) == nil && i == 0, reactor: reactor, react: react, reply: reply,
+                                        copy: f.kind == "image" ? { if let d = MediaCache.data[f.id], let img = UIImage(data: d) { UIPasteboard.general.image = img } } : nil))
             }
             if textShown {
             VStack(alignment: .leading, spacing: 8) {
+                // One element for VoiceOver, with the menu as its actions; the chips below keep their own buttons.
                 content
+                    .modifier(SpokenActions(message: message, label: spoken, reactor: reactor, react: react, reply: reply,
+                                            copy: copyText, extra: spokenExtras))
                 ForEach(message.scheduled ?? []) { ScheduleChip(trigger: $0) }
                 ForEach(message.recorded ?? []) { RecordedChip(card: $0, message: message.id) }
                 OTPChip(message: message)
@@ -945,25 +1055,9 @@ private struct Row: View {
                     morph = 0
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { morph = 1 }
                 }
-                // Double-tap: ❤️ straight away, no menu. Again takes it off.
+                // Double-tap: ❤️ straight away, no menu. Again takes it off. Otto's only (see palette).
                 .onTapGesture(count: 2) { react("❤️") }
-                .contextMenu {
-                    Self.palette(message, react: react)
-                    Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
-                    Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
-                    Button("Select Text", systemImage: "selection.pin.in.out") { selecting = true }
-                    if !mine, message.why != nil {
-                        Divider()
-                        Button("Why this?", systemImage: "questionmark.circle") { whyShown = true }
-                    }
-                    // The same choices a tapped link gets, for the first link in the message.
-                    if let url = Self.linked(message.text).runs.lazy.compactMap(\.link).first {
-                        Divider()
-                        Button("Open Link", systemImage: "safari") { openURL(url) }
-                        Button("Copy Link", systemImage: "link") { UIPasteboard.general.url = url }
-                        Button("Share Link…", systemImage: "square.and.arrow.up") { sharing = url }
-                    }
-                }
+                .bubbleMenu(long: longPreview) { bubbleMenu } preview: { shortBubble }
                 .sheet(isPresented: $selecting) {
                     SelectableText(text: message.text)
                         .presentationDetents([.medium, .large])
@@ -977,20 +1071,17 @@ private struct Row: View {
                     if let r = message.reaction { Tapback(emoji: r, mine: mine) }
                 }
                 .padding(.top, message.reaction == nil ? 0 : 14)
-                .modifier(SpokenActions(message: message, label: spoken, react: react, reply: reply,
-                                        copy: { UIPasteboard.general.string = message.text }))
             }
             if let md = preview {
                 // No frame here: a maxWidth frame is 280 wide and centres a narrower card in it.
                 // LinkPreview already caps itself at 280 and hugs its content.
                 LinkPreview(metadata: md)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
+                    .contentShape(.contextMenuPreview, .rect(cornerRadius: 18, style: .continuous))
                     .contextMenu {
-                        // A bare link is only this card, so the card takes the tapbacks.
-                        if !textShown {
-                            Self.palette(message, react: react)
-                            Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
-                        }
+                        // Part of the same message, so the same tapbacks and Reply as its bubble.
+                        Self.palette(message, react: react)
+                        Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
                         if let url = Self.previewURL(message) {
                             Button("Open Link", systemImage: "safari") { openURL(url) }
                             Button("Copy Link", systemImage: "link") { UIPasteboard.general.url = url }
@@ -1001,6 +1092,9 @@ private struct Row: View {
                         if !textShown, let r = message.reaction { Tapback(emoji: r, mine: mine) }
                     }
                     .padding(.top, !textShown && message.reaction != nil ? 14 : 0)
+                    // A bare link is only this card: it carries the message's actions for VoiceOver too.
+                    .modifier(SpokenActions(message: message, label: nil, reactor: reactor, react: react, reply: reply,
+                                            copy: nil, extra: [], enabled: !textShown))
             }
             // What you said, under your voice note; Otto's sits inside its bubble.
             if mine, message.isVoice, !message.text.isEmpty {
@@ -1045,6 +1139,8 @@ private struct Row: View {
         }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         .padding(mine ? .leading : .trailing, 89)
+        .scaleEffect(highlighted ? 1.03 : 1, anchor: mine ? .trailing : .leading)
+        .brightness(highlighted ? 0.12 : 0)
         // Swipe right to reply, as in Messages: the row follows the finger, an arrow
         // fills in behind it, and letting go past the mark picks it.
         .offset(x: swipe)
@@ -1061,23 +1157,39 @@ private struct Row: View {
         }
         .simultaneousGesture(
             DragGesture(minimumDistance: 20)
+                .updating($dragging) { _, d, _ in d = true }
                 .onChanged { g in
                     let t = g.translation
                     // Locked on the first move, so a drag that drifts diagonally keeps doing one thing.
-                    if sideways == nil { sideways = t.width > 0 && t.width > abs(t.height) * 1.5 }
+                    if sideways == nil {
+                        sideways = t.width > 0 && t.width > abs(t.height) * 1.5
+                        if sideways == true { onSwiping(true) }
+                    }
                     guard sideways == true else { return }
-                    // Follows the finger to the mark, then resists (Messages' rubber band).
+                    // Follows the finger to the mark, then resists and eases to a stop 40pt on (Messages' rubber band).
                     let x = max(0, t.width)
-                    swipe = x <= Self.replyAt ? x : Self.replyAt + (x - Self.replyAt) * 0.25
+                    swipe = x <= Self.replyAt ? x : Self.replyAt + 40 * (1 - exp(-(x - Self.replyAt) / 80))
                 }
-                .onEnded { _ in
-                    if swipe >= Self.replyAt { reply() }
-                    sideways = nil
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { swipe = 0 }
+                .onEnded { g in
+                    // Past the mark, or a quick flick that would have carried past it.
+                    if sideways == true, swipe >= Self.replyAt || g.predictedEndTranslation.width > Self.replyAt * 1.5 { reply() }
+                    settle()
                 }
         )
+        // A drag the system took away (the menu opening, a call) never ends: put the row back anyway.
+        .onChange(of: dragging) { _, on in if !on { settle() } }
         .sensoryFeedback(.impact(weight: .light), trigger: swipe >= Self.replyAt) { _, new in new }
         .sensoryFeedback(.impact(weight: .light), trigger: reacted)
+    }
+}
+
+/// A quote's small reply arrow, set on its first line.
+private struct QuoteLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            configuration.icon.font(.system(size: 9, weight: .semibold))
+            configuration.title
+        }
     }
 }
 
@@ -1205,7 +1317,10 @@ private struct VoiceRow: View {
                     .background(ink, in: .circle)
                     .contentTransition(.symbolEffect(.replace))
                     .opacity(waiting ? 0.4 : 1)
+                    // A 44pt target around the 26pt disc; the bubble's padding has the room.
+                    .padding(9).contentShape(.rect).padding(-9)
             }
+            .accessibilityLabel(playing ? "Pause voice message" : "Play voice message")
             .buttonStyle(.plain)
             .disabled(waiting)
             TimelineView(.animation(paused: !playing && !waiting)) { tl in
@@ -1357,12 +1472,14 @@ struct BubbleShape: Shape {
 private struct Reactable: ViewModifier {
     let message: Message
     let badge: Bool
+    let reactor: String
     let react: (String) -> Void
     let reply: () -> Void
-    /// A photo copies as the picture; files have nothing to copy.
+    /// A photo copies as the picture; other files have nothing to copy.
     var copy: (() -> Void)? = nil
     func body(content: Content) -> some View {
         content
+            .contentShape(.contextMenuPreview, .rect(cornerRadius: 18, style: .continuous))
             .contextMenu {
                 Row.palette(message, react: react)
                 Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
@@ -1372,53 +1489,70 @@ private struct Reactable: ViewModifier {
                 if badge, let r = message.reaction { Tapback(emoji: r, mine: message.from == .me) }
             }
             .padding(.top, badge && message.reaction != nil ? 14 : 0)
-            .modifier(SpokenActions(message: message, label: nil, react: react, reply: reply, copy: copy))
+            .modifier(SpokenActions(message: message, label: nil, reactor: reactor, react: react, reply: reply, copy: copy, extra: [], enabled: badge))
     }
 }
 
-/// A bubble's menu, for VoiceOver: Reply, each tapback and Copy as actions, the reaction as its value.
+/// A bubble's menu, for VoiceOver: Reply, the tapbacks (Otto's messages), Copy and the rest as
+/// actions, and the tapback, with whose it is, as its value.
 private struct SpokenActions: ViewModifier {
     let message: Message
-    /// Replaces what the bubble would read; nil keeps its own.
+    /// Makes the bubble one element read as this; nil leaves its elements as they are.
     let label: String?
+    let reactor: String
     let react: (String) -> Void
     let reply: () -> Void
     let copy: (() -> Void)?
+    let extra: [(String, () -> Void)]
+    /// Off where another part of the same message already carries them, so they're said once.
+    var enabled = true
     func body(content: Content) -> some View {
-        content
-            .modifier(Labelled(label: label))
-            .accessibilityValue(message.reaction.map { "Reaction: \(Row.tapbackNames[$0] ?? $0)" } ?? "")
-            .accessibilityAction(named: "Reply", reply)
-            .accessibilityActions {
-                ForEach(Row.tapbacks, id: \.self) { e in
-                    let name = Row.tapbackNames[e] ?? e
-                    Button(message.reaction == e ? "Remove \(name)" : name) { react(e) }
+        if !enabled { content } else {
+            labelled(content)
+                .accessibilityValue(message.reaction.map { "\(Row.tapbackNames[$0] ?? $0) from \(reactor)" } ?? "")
+                .accessibilityAction(named: "Reply", reply)
+                .accessibilityActions {
+                    if message.from == .otto {
+                        ForEach(Row.tapbacks, id: \.self) { e in
+                            let name = Row.tapbackNames[e] ?? e
+                            Button(message.reaction == e ? "Remove \(name)" : name) { react(e) }
+                        }
+                    }
+                    if let copy { Button("Copy", action: copy) }
+                    ForEach(extra.indices, id: \.self) { i in Button(extra[i].0, action: extra[i].1) }
                 }
-                if let copy { Button("Copy", action: copy) }
-            }
-    }
-    private struct Labelled: ViewModifier {
-        let label: String?
-        func body(content: Content) -> some View {
-            if let label { content.accessibilityElement(children: .combine).accessibilityLabel(label) } else { content }
         }
+    }
+    @ViewBuilder private func labelled(_ content: Content) -> some View {
+        if let label { content.accessibilityElement(children: .combine).accessibilityLabel(label) } else { content }
     }
 }
 
+/// The tapback on a bubble's corner: Otto's on yours in grey, yours on Otto's in your bubble's colour.
 private struct Tapback: View {
     let emoji: String
+    /// On your bubble, so it's Otto's.
     let mine: Bool
+    @Environment(\.accessibilityReduceMotion) private var still
     var body: some View {
-        Text(emoji).font(.system(size: 13))
-            .frame(width: 30, height: 30)
-            .background(Color(.systemGray5), in: .circle)
+        Text(emoji).font(.system(size: 16))
+            .frame(width: 32, height: 32)
+            .background(mine ? Color(.systemGray5) : Color.outgoingBubble, in: .circle)
             .overlay(Circle().strokeBorder(Color(.systemBackground), lineWidth: 2.5))
-            .offset(x: mine ? -14 : 14, y: -16)
+            .offset(x: mine ? -14 : 14, y: -17)
             // Pops onto the corner with a little overshoot, and a new pick pops in over the old.
             .id(emoji)
-            .transition(.scale(scale: 0.3, anchor: mine ? .bottomTrailing : .bottomLeading).combined(with: .opacity)
-                .animation(.spring(response: 0.35, dampingFraction: 0.6)))
-            .accessibilityHidden(true)
+            .transition(still ? .opacity
+                        : .scale(scale: 0.3, anchor: mine ? .bottomTrailing : .bottomLeading).combined(with: .opacity)
+                            .animation(.spring(response: 0.35, dampingFraction: 0.6)))
+            .accessibilityHidden(true)   // the bubble says it, as its value
+    }
+}
+
+extension View {
+    /// The bubble's long-press menu; a long bubble lifts as `preview` instead of itself.
+    @ViewBuilder func bubbleMenu<M: View, P: View>(long: Bool, @ViewBuilder _ menu: () -> M, @ViewBuilder preview: () -> P) -> some View {
+        if long { contextMenu(menuItems: menu, preview: preview) } else { contextMenu(menuItems: menu) }
     }
 }
 

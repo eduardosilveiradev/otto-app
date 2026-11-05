@@ -604,8 +604,9 @@ final class OttoStore {
             messages.insert(s, at: messages.firstIndex { $0.date > s.date } ?? messages.endIndex)
         }
         // Otto's tapbacks: the frame can land before the message it's on (a share-sheet one comes in just above).
+        // Only on yours: the one on Otto's is your own, already here, and one you took off stays off.
         for h in all where h.reaction != nil {
-            if let i = messages.firstIndex(where: { $0.wireID == h.wireID }) { messages[i].reaction = h.reaction }
+            if let i = messages.firstIndex(where: { $0.wireID == h.wireID && $0.from == .me }) { messages[i].reaction = h.reaction }
         }
         let history = all.filter { $0.from != .me }
         // A reply that came as text with its voice to follow: the "voice" frame may have gone into a
@@ -630,10 +631,15 @@ final class OttoStore {
     func send(_ text: String, shared: Bool = false) {
         var m = Message(from: .me, text: text, pending: true)
         if shared { m.shared = true }
-        m.replyTo = replyingTo.flatMap { id in messages.first { $0.id == id }?.wireID }
-        replyingTo = nil
+        m.replyTo = takeReply()
         messages.append(m)
         Task { await deliver(m.id) }
+    }
+
+    /// The message a swipe picked, by wire id, used up by whatever the composer sends next.
+    func takeReply() -> String? {
+        defer { replyingTo = nil }
+        return replyingTo.flatMap { id in messages.first { $0.id == id }?.wireID }
     }
 
     /// For Siri when /app/ask can't be reached: mark it unsent and keep trying until the server has it
@@ -722,22 +728,22 @@ final class OttoStore {
         return small.jpegData(compressionQuality: 0.7)
     }
 
-    func sendPhoto(_ image: UIImage, caption: String = "", shared: Bool = false) {
+    func sendPhoto(_ image: UIImage, caption: String = "", shared: Bool = false, replyTo: String? = nil) {
         guard let jpeg = Self.jpeg(image) else { return }
-        let m = Message(from: .me, text: caption, image: jpeg)
+        let m = Message(from: .me, text: caption, image: jpeg, replyTo: replyTo)
         messages.append(m)
         ottoTyping = true
         // One after another, so a burst arrives in order with the caption on the last photo.
         let previous = photoUpload
-        photoUpload = Task { await previous?.value; await backend.sendPhoto(jpeg, caption: caption, id: m.wireID, shared: shared) }
+        photoUpload = Task { await previous?.value; await backend.sendPhoto(jpeg, caption: caption, id: m.wireID, replyTo: replyTo, shared: shared) }
     }
     @ObservationIgnored private var photoUpload: Task<Void, Never>?
 
     /// The bubble shows up at once; the transcript fills it in when the server has it.
     /// Pending until the upload lands, so a dropped one (a weak hotspot) is retried on the
     /// next connection instead of vanishing.
-    func sendVoice(_ file: URL) {
-        let m = Message(from: .me, text: "", isVoice: true, pending: true)
+    func sendVoice(_ file: URL, replyTo: String? = nil) {
+        let m = Message(from: .me, text: "", isVoice: true, pending: true, replyTo: replyTo)
         // Kept so the note plays back from the thread, and so a retry has the audio.
         try? FileManager.default.removeItem(at: VoiceStore.url(m.id))
         guard (try? FileManager.default.moveItem(at: file, to: VoiceStore.url(m.id))) != nil else { return }
@@ -752,9 +758,9 @@ final class OttoStore {
             if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i].pending = nil }   // the audio is gone; nothing to retry
             return
         }
-        guard let text = await backend.sendVoice(audio, id: m.wireID),
+        guard let text = await backend.sendVoice(audio, id: m.wireID, replyTo: m.replyTo),
               let i = messages.firstIndex(where: { $0.id == m.id }) else { return }
-        messages[i] = Message(id: m.id, from: .me, text: text, date: m.date, isVoice: true)
+        messages[i] = Message(id: m.id, from: .me, text: text, date: m.date, isVoice: true, replyTo: m.replyTo)
     }
 
     func tap(_ button: ActionButton, on id: Message.ID) {
@@ -770,8 +776,9 @@ final class OttoStore {
         guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
         let same = messages[i].reaction == emoji
         messages[i].reaction = same ? nil : emoji
-        // ponytail: removal is local only; the server has no "unreact" to pass on.
-        if !same { Task { await backend.react(to: messages[i].wireID, emoji: emoji) } }
+        // ponytail: removal is local only; the server has no "unreact" to pass on (catchUp leaves it off).
+        let wire = messages[i].wireID
+        if !same { Task { await backend.react(to: wire, emoji: emoji) } }
     }
 
     func refreshBrief() async { brief = await backend.brief() }
