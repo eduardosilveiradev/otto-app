@@ -3,7 +3,7 @@
  * against a throwaway Otto server (otto-core's otto/tests/apptwin.ts) that can be stopped,
  * restarted and asked to reply. Each scenario prints PASS or FAIL.
  *
- *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|approval|tapread|all]
+ *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|approval|tapread|corrupt|all]
  *
  * Use a simulator made for it (`xcrun simctl create`): the app is reinstalled, so its thread is wiped.
  */
@@ -182,6 +182,16 @@ if (scenario === 'all' || scenario === 'tapread') {
   launch()
   await waitFor(() => mine('yes')?.read, 15000)
   check('tap: a read receipt missed while away heals from history', mine('yes')?.read === true, JSON.stringify(mine('yes') ?? null))
+}
+
+if (scenario === 'all' || scenario === 'corrupt') {
+  kill()
+  const dir = join(container(), 'Library/Application Support')
+  writeFileSync(join(dir, 'chat-otto-server.json'), '[{"from":"me","text":')   // cut off mid-write
+  launch('-e2eSend', 'after the bad file')
+  await waitFor(() => mine('after the bad file'), 20000)
+  const { readdirSync } = await import('fs')
+  check('corrupt: an unreadable thread is kept aside, not overwritten', readdirSync(dir).some(f => f.startsWith('chat-otto-server.json.unreadable-')))
 }
 
 kill()

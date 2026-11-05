@@ -36,6 +36,8 @@ struct ApprovalSheet: View {
     let request: ApprovalRequest
     @State private var busy = false
     @State private var failed: String?
+    /// The decision sent without an answer: the sheet then only offers that one again.
+    @State private var unconfirmed: Bool?
     /// Paid: the decision has gone to the Mac, and the receipt prints before the sheet closes.
     /// `-receiptDemo`: straight to the receipt, for recordings (Face ID can't be tapped in the simulator).
     @State private var paid = ProcessInfo.processInfo.arguments.contains("-receiptDemo")
@@ -67,6 +69,14 @@ struct ApprovalSheet: View {
                         .buttonStyle(.borderedProminent).controlSize(.large)
                         .padding(.horizontal, 20).padding(.vertical, 12)
                         .background(.bar)
+                } else if let tried = unconfirmed {
+                    // The first answer may have landed: only the same one can be sent again, never the other.
+                    Button { Task { await decide(tried) } } label: {
+                        Text(tried ? "Try again: \(request.payment.map { "Pay \($0.money($0.total))" } ?? "Approve")" : "Try again: Decline").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .padding(.horizontal, 20).padding(.vertical, 12)
+                    .background(.bar)
                 } else {
                 HStack(spacing: 12) {
                     Button(role: .destructive) { Task { await decide(false) } } label: {
@@ -185,7 +195,9 @@ struct ApprovalSheet: View {
         case .gone: failed = "This had expired before your answer reached your Mac, so nothing was done. Ask Otto again."
         // The decision may have landed and only its answer been lost: trying again is safe (same decision),
         // but saying "nothing was paid" might not be true.
-        case .unknown: failed = "Couldn't confirm with your Mac. Check the chat, or try again."
+        case .unknown:
+            failed = "Couldn't confirm with your Mac. Check the chat, or try again."
+            unconfirmed = approve
         }
     }
 }
@@ -302,7 +314,7 @@ struct PrintedReceipt: View {
         switch stage {
         case .processing: "Processing your payment"
         case .printing: "Printing your receipt"
-        case .complete: payment.test == true ? "Test complete" : "Payment complete"
+        case .complete: payment.test == true ? "Test complete" : "Sent to Otto"
         }
     }
 
@@ -335,7 +347,7 @@ struct PrintedReceipt: View {
                 .padding(.vertical, 4)
             }
             dashed
-            row("TOTAL PAID", payment.money(payment.total)).font(.system(size: 13, weight: .bold, design: .monospaced)).padding(.vertical, 6)
+            row("TOTAL", payment.money(payment.total)).font(.system(size: 13, weight: .bold, design: .monospaced)).padding(.vertical, 6)
             dashed
             VStack(alignment: .leading, spacing: 3) {
                 row("Merchant", payment.site ?? payment.merchant)

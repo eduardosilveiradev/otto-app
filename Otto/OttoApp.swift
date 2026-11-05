@@ -165,7 +165,11 @@ final class OttoStore {
         let dir = URL.applicationSupportDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         file = dir.appending(path: "chat-\(backend.name.lowercased().replacing(" ", with: "-")).json")
-        messages = (try? JSONDecoder().decode([Message].self, from: Data(contentsOf: file))) ?? []
+        if let data = try? Data(contentsOf: file) {
+            if let saved = try? JSONDecoder().decode([Message].self, from: data) { messages = saved }
+            // Unreadable (a bad row, a schema it doesn't know): kept aside, not overwritten by the next save.
+            else { try? FileManager.default.moveItem(at: file, to: file.appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970))")) }
+        }
     }
 
     private func checkForUpdate() async {
@@ -184,26 +188,49 @@ final class OttoStore {
     /// thread, and once per burst of changes (a send flips pending, read and typing in a row).
     private func save() {
         saving?.cancel()
-        let snapshot = messages, file = file
+        generation += 1
+        let snapshot = messages, file = file, gen = generation, cursor = syncCursor
         saving = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
-            try? JSONEncoder().encode(snapshot).write(to: file, options: .atomic)
+            Self.write(snapshot, gen: gen, to: file, cursor: cursor)
         }
     }
     @ObservationIgnored private var saving: Task<Void, Never>?
+    /// Bumped per change; a write only lands if nothing newer is already on disk.
+    @ObservationIgnored private var generation = 0
+    /// How far catch-up has merged the server's history into `messages`. It is stored only by the
+    /// write that puts those messages on disk, so a crash can't leave it ahead of the thread.
+    @ObservationIgnored private var syncCursor: Date?
+
+    nonisolated private static let disk = DispatchQueue(label: "otto.thread")
+    nonisolated(unsafe) private static var committed = 0   // the generation on disk; only touched on `disk`
+
+    /// One write at a time, and never an older snapshot over a newer one: a slow encode that started
+    /// before a `saveNow` must not land after it. True when this snapshot (or a newer one) is on disk.
+    @discardableResult
+    nonisolated private static func write(_ snapshot: [Message], gen: Int, to file: URL, cursor: Date?) -> Bool {
+        disk.sync {
+            guard gen > committed else { return true }
+            guard let data = try? JSONEncoder().encode(snapshot), (try? data.write(to: file, options: .atomic)) != nil else { return false }
+            committed = gen
+            if let cursor { UserDefaults.standard.set(cursor, forKey: "otto.syncedThrough") }
+            return true
+        }
+    }
 
     /// Writes now, for when the app is about to be suspended and a pending save could be lost.
     func flush() {
-        guard let s = saving, !s.isCancelled else { return }
-        _ = saveNow()
+        guard Self.disk.sync(execute: { Self.committed }) < generation else { return }   // nothing newer than disk
+        saveNow()
     }
 
     /// Writes the thread now, whatever is pending. False when it didn't make it to disk.
     @discardableResult func saveNow() -> Bool {
         saving?.cancel()
         saving = nil
-        return (try? JSONEncoder().encode(messages).write(to: file, options: .atomic)) != nil
+        generation += 1
+        return Self.write(messages, gen: generation, to: file, cursor: syncCursor)
     }
 
     /// A reply whose voice never came (the server restarted mid-synthesis, so neither the frame nor
@@ -236,6 +263,9 @@ final class OttoStore {
             }
             expireVoiceWaits()
             markUndelivered()
+            // An approval past its time is gone on the Mac too: off the screen, unless it's showing its receipt.
+            let lapsed = { (a: ApprovalRequest) in !self.keptApprovals.contains(a.id) && (LiveBackend.date(a.expires).map { $0 < .now } ?? false) }
+            if approvals.contains(where: lapsed) { approvals.removeAll(where: lapsed) }
             // An ack that never came on a socket that still looks fine: try again every 15s.
             if live && n % 15 == 0 { Task { await resendPending() } }
             if live != connected { connected = live }
@@ -594,12 +624,13 @@ final class OttoStore {
         // Continuous with the last sync only if the page reaches back to it. If even the oldest of the 50
         // is newer, more came in than the page holds (a long time offline): go further back. Anything
         // local in the page (a message just sent) says nothing about what's missing before it.
-        let synced = UserDefaults.standard.object(forKey: "otto.syncedThrough") as? Date ?? .distantPast
+        let synced = syncCursor ?? UserDefaults.standard.object(forKey: "otto.syncedThrough") as? Date ?? .distantPast
         if let oldest = all.first, oldest.date > synced, !messages.isEmpty {
             // Everything since the last sync, as far back as the server's history goes; the first sync ever takes 500.
             all = await backend.history(background: background, limit: 500, since: synced == .distantPast ? nil : synced)
         }
-        if let newest = all.map(\.date).max() { UserDefaults.standard.set(max(newest, synced), forKey: "otto.syncedThrough") }
+        // Stored with the save that writes these messages (see write), never ahead of them.
+        if let newest = all.map(\.date).max() { syncCursor = max(newest, synced); save() }
         let lastOtto = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
         let index = Dictionary(messages.indices.map { (messages[$0].wireID, $0) }, uniquingKeysWith: { a, _ in a })
         var fresh: [Message] = []

@@ -35,14 +35,16 @@ enum ShareDirect {
     }
 
     /// Sends what was shared straight to Otto. True once the server has it.
-    static func send(text: String, jpegs: [Data]) async -> Bool {
+    /// `id`: one per share, the same on every attempt, so a retry after a lost answer (or after one
+    /// photo of three failed) is deduped by the server instead of arriving twice.
+    static func send(text: String, jpegs: [Data], id: UUID) async -> Bool {
         guard let (base, token) = load() else { return false }
-        if jpegs.isEmpty { return await sendText(text, base: base, token: token) }
+        if jpegs.isEmpty { return await sendText(text, id: id.uuidString, base: base, token: token) }
         var ok = true
         // The words ride along with the first photo, as a caption.
         for (i, jpeg) in jpegs.enumerated() {
             var c = URLComponents(url: base.appending(path: "app/photo"), resolvingAgainstBaseURL: false)!
-            c.queryItems = [URLQueryItem(name: "id", value: UUID().uuidString), URLQueryItem(name: "shared", value: "1")]
+            c.queryItems = [URLQueryItem(name: "id", value: "\(id.uuidString)-\(i)"), URLQueryItem(name: "shared", value: "1")]
                 + (i == 0 && !text.isEmpty ? [URLQueryItem(name: "text", value: text)] : [])
             var req = URLRequest(url: c.url!, timeoutInterval: 30)
             req.httpMethod = "POST"
@@ -54,7 +56,7 @@ enum ShareDirect {
         return ok
     }
 
-    private static func sendText(_ text: String, base: URL, token: String) async -> Bool {
+    private static func sendText(_ text: String, id: String, base: URL, token: String) async -> Bool {
         var c = URLComponents(url: base.appending(path: "app"), resolvingAgainstBaseURL: false)!
         c.scheme = c.scheme == "https" ? "wss" : "ws"
         // A one-shot socket: the server mustn't hand it what's waiting for the app, or count it as the app open.
@@ -66,7 +68,6 @@ enum ShareDirect {
         // URLSession only reads control frames while a receive is pending, and the server
         // speaks first on connect: without this the pong below waits behind that frame forever.
         // It also watches for the server's hello (it acks) and the ack for this message.
-        let id = UUID().uuidString
         let seen = Seen()
         drain(task, seen)
         defer { task.cancel(with: .normalClosure, reason: nil) }

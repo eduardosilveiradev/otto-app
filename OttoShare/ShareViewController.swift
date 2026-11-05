@@ -46,6 +46,11 @@ final class ShareModel {
         text = parts.joined(separator: "\n")
     }
 
+    /// One id per share, kept across a retry (ShareDirect.send).
+
+    private let shareID = UUID()
+
+
     func send() {
         state = .sending
         let message = [note, text].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: "\n")
@@ -61,7 +66,7 @@ final class ShareModel {
         guard ok else {
             // No app group on this build: hand it to the server directly instead.
             Task {
-                let direct = await ShareDirect.send(text: message, jpegs: images.compactMap { $0.jpegData(compressionQuality: 0.85) })
+                let direct = await ShareDirect.send(text: message, jpegs: images.compactMap { $0.jpegData(compressionQuality: 0.85) }, id: shareID)
                 if direct { finish() } else { state = .failed }
             }
             return
