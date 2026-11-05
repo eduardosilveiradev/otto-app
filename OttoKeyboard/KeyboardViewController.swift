@@ -570,6 +570,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         if isOttoAfterglow { model.otto = .closed; ottoUndo = nil }
     }
 
+    /// The ask whose answer is still wanted; a newer ask replaces it, so an older answer is dropped.
+    private var askGen = UUID()
+
     private func askOtto(_ instruction: String) {
         guard hasFullAccess else {
             model.otto = .failed("Turn on Allow Full Access: Settings › General › Keyboard › Keyboards › Otto.")
@@ -589,20 +592,23 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         req.httpBody = try? JSONSerialization.data(withJSONObject: [
             "id": UUID().uuidString, "text": instruction, "via": "keyboard", "field": field,
         ])
+        let gen = UUID(), doc = textDocumentProxy.documentIdentifier
+        askGen = gen
+        // Still this ask, still open, still the same field (not another one that happens to read the same).
+        let current = { [weak self] in self.map { $0.askGen == gen && $0.model.otto == .thinking && $0.textDocumentProxy.documentIdentifier == doc } ?? false }
         Task { @MainActor in
             do {
                 let (data, resp) = try await URLSession.shared.data(for: req)
+                guard current() else { return }
                 guard (resp as? HTTPURLResponse)?.statusCode == 200,
                       let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let reply = json["reply"] as? [String: Any], let text = reply["text"] as? String, !text.isEmpty
-                else { if model.otto == .thinking { model.otto = .failed("Otto didn't answer in time. It'll be in the app.") }; return }
-                // Closed while it worked, or the field moved on (another field, or typed into): the answer
-                // is stale here, and pasting it whole would land text where it wasn't asked for.
-                guard model.otto == .thinking else { return }
+                else { model.otto = .failed("Otto didn't answer in time. It'll be in the app."); return }
+                // Typed into while it worked: pasting the answer whole would land text where it wasn't asked for.
                 guard before == field else { model.otto = .failed("The text changed while Otto was writing. It's in the app."); return }
                 apply(text, replacing: rewrite ? field : nil)
             } catch {
-                if model.otto == .thinking { model.otto = .failed("Couldn't reach Otto.") }
+                if current() { model.otto = .failed("Couldn't reach Otto.") }
             }
         }
     }

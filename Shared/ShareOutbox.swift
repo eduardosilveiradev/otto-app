@@ -21,10 +21,12 @@ enum ShareOutbox {
     }
 
     /// False when there's no shared container to write to.
-    static func put(text: String, jpeg: Data?) -> Bool {
+    /// `id`: the item's id, the same one ShareDirect would send it under, so a share that falls
+    /// back to the direct path after some items were queued isn't delivered twice.
+    static func put(text: String, jpeg: Data?, id: UUID = UUID()) -> Bool {
         guard let dir else { return false }
         // The name sorts by time, so the app sends them in the order they were shared.
-        let name = "\(Int(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString)"
+        let name = "\(Int(Date().timeIntervalSince1970 * 1000))-\(id.uuidString)"
         var item = Item(text: text)
         if let jpeg {
             guard (try? jpeg.write(to: dir.appending(path: name + ".jpg"))) != nil else { return false }

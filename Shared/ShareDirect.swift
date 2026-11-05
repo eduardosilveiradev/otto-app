@@ -35,16 +35,16 @@ enum ShareDirect {
     }
 
     /// Sends what was shared straight to Otto. True once the server has it.
-    /// `id`: one per share, the same on every attempt, so a retry after a lost answer (or after one
-    /// photo of three failed) is deduped by the server instead of arriving twice.
-    static func send(text: String, jpegs: [Data], id: UUID) async -> Bool {
-        guard let (base, token) = load() else { return false }
-        if jpegs.isEmpty { return await sendText(text, id: id.uuidString, base: base, token: token) }
+    /// `ids`: one per item (the text, or each photo), the same on every attempt and the same the
+    /// outbox used, so a retry, or a fallback after some items were queued, is deduped by the server.
+    static func send(text: String, jpegs: [Data], ids: [UUID]) async -> Bool {
+        guard let (base, token) = load(), let first = ids.first else { return false }
+        if jpegs.isEmpty { return await sendText(text, id: first.uuidString, base: base, token: token) }
         var ok = true
         // The words ride along with the first photo, as a caption.
         for (i, jpeg) in jpegs.enumerated() {
             var c = URLComponents(url: base.appending(path: "app/photo"), resolvingAgainstBaseURL: false)!
-            c.queryItems = [URLQueryItem(name: "id", value: "\(id.uuidString)-\(i)"), URLQueryItem(name: "shared", value: "1")]
+            c.queryItems = [URLQueryItem(name: "id", value: (i < ids.count ? ids[i] : UUID()).uuidString), URLQueryItem(name: "shared", value: "1")]
                 + (i == 0 && !text.isEmpty ? [URLQueryItem(name: "text", value: text)] : [])
             var req = URLRequest(url: c.url!, timeoutInterval: 30)
             req.httpMethod = "POST"

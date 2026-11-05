@@ -59,27 +59,28 @@ final class ShareModel {
         text = parts.joined(separator: "\n")
     }
 
-    /// One id per share, kept across a retry (ShareDirect.send).
-
-    private let shareID = UUID()
+    /// One id per item (the text, or each photo), made once and used by both the outbox and the
+    /// direct path, so a retry or a fallback after a partial queue is deduped, not doubled.
+    @ObservationIgnored private var itemIDs: [UUID] = []
 
 
     func send() {
         state = .sending
         let message = [note, text].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: "\n")
+        if itemIDs.isEmpty { itemIDs = (0..<max(1, images.count)).map { _ in UUID() } }
         var ok = true
         if images.isEmpty {
-            ok = ShareOutbox.put(text: message, jpeg: nil)
+            ok = ShareOutbox.put(text: message, jpeg: nil, id: itemIDs[0])
         } else {
             // The words ride along with the first photo, as a caption.
             for (i, img) in images.enumerated() {
-                ok = ok && ShareOutbox.put(text: i == 0 ? message : "", jpeg: img.jpegData(compressionQuality: 0.85))
+                ok = ok && ShareOutbox.put(text: i == 0 ? message : "", jpeg: img.jpegData(compressionQuality: 0.85), id: itemIDs[i])
             }
         }
         guard ok else {
             // No app group on this build: hand it to the server directly instead.
             Task {
-                let direct = await ShareDirect.send(text: message, jpegs: images.compactMap { $0.jpegData(compressionQuality: 0.85) }, id: shareID)
+                let direct = await ShareDirect.send(text: message, jpegs: images.compactMap { $0.jpegData(compressionQuality: 0.85) }, ids: itemIDs)
                 if direct { finish() } else { state = .failed }
             }
             return

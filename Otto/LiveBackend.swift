@@ -478,7 +478,6 @@ final class LiveBackend: OttoBackend {
     }
 
     /// Uploads go over plain HTTP, not the socket: its frames are capped at 64 KB.
-    /// ponytail: no retry — a failed upload is lost; queue them like `outbox` if that bites.
     private func post(_ path: String, _ body: Data, query: [URLQueryItem] = []) async -> Data? {
         var c = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { c.queryItems = query }
