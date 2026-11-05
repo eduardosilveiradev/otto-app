@@ -51,7 +51,9 @@ private struct MainRoot: View {
             if !ready {
                 Color(.systemBackground).task { try? await Task.sleep(for: .seconds(12)); gaveUp = true }
             } else {
-                ChatScreen(store: store).ignoresSafeArea(.keyboard)
+                // Up under the status bar: the header's scroll-edge blur then fades the thread out at the
+                // screen's edge. Stopped at the safe area, the blurred bubbles were cut off there in a band.
+                ChatScreen(store: store).ignoresSafeArea(.keyboard).ignoresSafeArea(.container, edges: .top)
             }
         }
             // Over the content, so it is already laid out underneath when the splash fades.
