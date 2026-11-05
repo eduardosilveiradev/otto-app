@@ -516,6 +516,12 @@ final class OttoStore {
             }
         }
         Task {
+            // A focused desktop let go: one banner for what it held. Those messages are already in the thread.
+            for await (id, text) in backend.notifies where !foreground {
+                Notifier.shared.post(title: "Otto", body: text, thread: "otto", id: id)
+            }
+        }
+        Task {
             for await (id, text) in backend.edits {
                 if let i = messages.firstIndex(where: { $0.wireID == id }) { messages[i].text = text; messages[i].otp = nil }
                 if otpDrawer?.wireID == id { otpDrawer = nil }
@@ -535,7 +541,7 @@ final class OttoStore {
             guard !messages.contains(where: { $0.wireID == m.wireID }) else { continue }
             messages.append(m)
             if m.otp != nil { otpDrawer = m }
-            if !foreground && m.from == .otto { Notifier.shared.post(m) }
+            if !foreground && m.from == .otto && m.quiet != true { Notifier.shared.post(m) }
         }
     }
 
@@ -717,7 +723,7 @@ final class OttoStore {
         guard !fresh.isEmpty else { return }
         if !serverTyping && fresh.contains(where: { $0.from == .otto }) { ottoTyping = false }
         for m in fresh { messages.insert(m, at: messages.lastIndex { $0.date <= m.date }.map { $0 + 1 } ?? 0) }
-        if notify { for m in fresh where m.from == .otto { Notifier.shared.post(m) } }
+        if notify { for m in fresh where m.from == .otto && m.quiet != true { Notifier.shared.post(m) } }
     }
 
     func send(_ text: String, shared: Bool = false, id: UUID = UUID()) {

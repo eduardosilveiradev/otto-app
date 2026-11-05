@@ -22,6 +22,8 @@ import Foundation
 ///                  {"type":"terminal","text":"first six words…","ts":"<ISO>"}   a prompt typed in Otto's terminal
 ///                  {"type":"echo","id","text","ts","shared"?}   yours, from the share sheet or the dashboard
 ///                  {"type":"todos","items":[{"text","status":"pending"|"in_progress"|"completed"}]}   Otto's to-do list while it works; [] when done
+///                  a "message" (and its history row) may carry "quiet":true: a desktop was focused, so no banner
+///                  {"type":"notify","id":"<newest held id>","text":"...","count":N}   focus ended: one banner for what was held, no bubble
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
 ///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
 ///   GET  <server>/app/brief    brief JSON
@@ -50,6 +52,7 @@ final class LiveBackend: OttoBackend {
     let approvalUpdates: AsyncStream<ApprovalUpdate>
     let voices: AsyncStream<(String, RemoteFile?)>
     let edits: AsyncStream<(String, String)>
+    let notifies: AsyncStream<(String, String)>
 
     private let base: URL       // http(s)://host:port
     private let token: String
@@ -62,6 +65,7 @@ final class LiveBackend: OttoBackend {
     private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
     private let voiceOut: AsyncStream<(String, RemoteFile?)>.Continuation
     private let edited: AsyncStream<(String, String)>.Continuation
+    private let notifyOut: AsyncStream<(String, String)>.Continuation
     private let session = URLSession(configuration: .default)
     /// The socket's own session, replaced on every drop. After iOS suspends the app a
     /// session can be left where every new websocket handshake fails while plain HTTP on
@@ -99,6 +103,7 @@ final class LiveBackend: OttoBackend {
         (approvalUpdates, approvalOut) = AsyncStream.makeStream()
         (voices, voiceOut) = AsyncStream.makeStream()
         (edits, edited) = AsyncStream.makeStream()
+        (notifies, notifyOut) = AsyncStream.makeStream()
         loop = Task { [weak self] in await self?.run() }
     }
 
@@ -133,7 +138,7 @@ final class LiveBackend: OttoBackend {
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
                           buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: r.voice != nil || r.voicePending == true, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
-                          thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled, recorded: r.recorded)
+                          thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled, recorded: r.recorded, quiet: r.quiet)
             m.reaction = r.reaction
             if r.kind == "edit" || r.kind == "reaction" { m.patch = r.kind }
             return m
@@ -367,6 +372,9 @@ final class LiveBackend: OttoBackend {
         if f.type == "typing", let on = f.on { typingOn.yield(on); return }
         if f.type == "terminal", let text = f.text, let ts = f.ts { out.yield(Self.terminal(text, ts: ts)); return }
         if f.type == "voice", let id = f.id { voiceOut.yield((id, f.voice)); return }
+        if f.type == "notify", let id = f.id, let text = f.text {
+            notifyOut.yield((id, (f.count ?? 1) > 1 ? "\(text) (+\(f.count! - 1) more)" : text)); return
+        }
         // Yours, sent from somewhere other than this thread (the share sheet, the dashboard). Same id as /app/history gives it.
         if f.type == "echo", let text = f.text {
             out.yield(Message(id: f.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: text, date: Self.date(f.ts) ?? Date(), shared: f.shared))
@@ -376,7 +384,7 @@ final class LiveBackend: OttoBackend {
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
                           buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: f.voice != nil || f.voicePending == true, serverID: f.id, replyTo: f.reply_to,
-                          files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why, scheduled: f.scheduled, recorded: f.recorded, otp: f.otp))
+                          files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why, scheduled: f.scheduled, recorded: f.recorded, otp: f.otp, quiet: f.quiet))
     }
 
     private func write(_ frame: [String: String]) async {
@@ -509,6 +517,7 @@ final class LiveBackend: OttoBackend {
         let voicePending: Bool?; let scheduled: [DashTrigger]?; let recorded: [RecordedCard]?; let shared: Bool?
         let items: [TodoItem]?
         let otp: OTPCode?
+        let quiet: Bool?; let count: Int?
     }
     /// Otto's entries carry what the live frame did, so a message that arrived while the
     /// socket was asleep still has its photos, voice and buttons.
@@ -516,7 +525,7 @@ final class LiveBackend: OttoBackend {
         let dir: String; let text: String; let ts: String; let id: String?; let kind: String?
         let files: [RemoteFile]?; let voice: RemoteFile?; let voicePending: Bool?; let reply_to: String?; let buttons: [WireButton]?
         let thread: String?; let level: String?; let src: String?; let why: String?; let scheduled: [DashTrigger]?; let recorded: [RecordedCard]?
-        let shared: Bool?; let reaction: String?; let read: Bool?
+        let shared: Bool?; let reaction: String?; let read: Bool?; let quiet: Bool?
     }
     private struct WireBrief: Decodable {
         struct Event: Decodable { let title: String; let start: String; let minutes: Int }
