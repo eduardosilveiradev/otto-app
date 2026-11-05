@@ -1,0 +1,112 @@
+/**
+ * Delivery and status, end to end: the real app (a Debug build) in a simulator of its own,
+ * against a throwaway Otto server (otto-core's otto/tests/apptwin.ts) that can be stopped,
+ * restarted and asked to reply. Each scenario prints PASS or FAIL.
+ *
+ *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|all]
+ *
+ * Use a simulator made for it (`xcrun simctl create`): the app is reinstalled, so its thread is wiped.
+ */
+import { readFileSync, mkdirSync, writeFileSync } from 'fs'
+import { join } from 'path'
+const { startTwin, waitFor } = await import(join(process.env.OTTO_CORE!, 'otto/tests/apptwin.ts'))
+type Twin = Awaited<ReturnType<typeof startTwin>>
+const DEV = process.env.SIM!
+const BUNDLE = 'dev.otto.app'
+const sh = (...a: string[]) => { const p = Bun.spawnSync(a); return String(p.stdout).trim() }
+const container = () => sh('xcrun', 'simctl', 'get_app_container', DEV, BUNDLE, 'data')
+const thread = (): any[] => { try { return JSON.parse(readFileSync(join(container(), 'Library/Application Support/chat-otto-server.json'), 'utf8')) } catch { return [] } }
+let twin: Twin
+const launch = (...extra: string[]) => sh('xcrun', 'simctl', 'launch', '--terminate-running-process', DEV, BUNDLE,
+  '-serverURL', twin.url, '-serverToken', twin.token, '-onboarded', 'YES', '-noNotificationPrompt', ...extra)
+const kill = () => sh('xcrun', 'simctl', 'terminate', DEV, BUNDLE)
+const results: [string, boolean, string][] = []
+const check = (name: string, ok: boolean, detail = '') => { results.push([name, ok, detail]); console.log(`${ok ? 'PASS' : 'FAIL'} ${name} ${detail}`) }
+const mine = (text: string): any => thread().find(m => m.from === 'me' && m.text === text)
+const count = (text: string) => twin.delivered.filter((d: any) => d.content.includes(text)).length
+
+// fresh app data
+sh('xcrun', 'simctl', 'uninstall', DEV, BUNDLE)
+sh('xcrun', 'simctl', 'install', DEV, process.env.APP!)
+twin = await startTwin()
+launch(); await Bun.sleep(6000); kill()   // the first launch after an install is slow
+const scenario = process.argv[2] ?? 'all'
+
+if (scenario === 'all' || scenario === 'offline') {
+  await twin.stop()
+  launch('-e2eSend', 'offline one')
+  await waitFor(() => mine('offline one'), 20000)
+  check('offline: shows Sending', mine('offline one')?.pending === true && !mine('offline one')?.failed, JSON.stringify(mine('offline one') ?? null))
+  await Bun.sleep(62000)
+  check('offline: a minute on, Not delivered', mine('offline one')?.failed === true)
+  twin = await twin.restart()
+  await waitFor(() => !mine('offline one')?.pending, 20000)
+  await Bun.sleep(1500)
+  check('offline: delivered on reconnect', !mine('offline one')?.pending && !mine('offline one')?.failed, JSON.stringify(mine('offline one')))
+  check('offline: reached the session once', count('offline one') === 1, String(count('offline one')))
+}
+
+if (scenario === 'all' || scenario === 'killed') {
+  await twin.stop()
+  launch('-e2eSend', 'killed one')
+  await waitFor(() => mine('killed one'), 20000)
+  await Bun.sleep(1000)
+  kill()
+  twin = await twin.restart()
+  launch()
+  await waitFor(() => count('killed one') > 0, 20000)
+  await Bun.sleep(2000)
+  check('killed: pending survives the app being killed', count('killed one') === 1, String(count('killed one')))
+  check('killed: status cleared', !mine('killed one')?.pending)
+}
+
+if (scenario === 'all' || scenario === 'tap') {
+  await twin.call('reply', { chat_id: 'app', text: 'draft ready', buttons: [{ label: 'send ✓', data: 'send the draft' }] })
+  launch()
+  await waitFor(() => thread().find(m => m.text === 'draft ready'), 15000)
+  await twin.stop()
+  launch('-e2eTapLast')
+  await waitFor(() => mine('send ✓'), 20000)
+  await Bun.sleep(1000)
+  check('tap: offline tap is pending', mine('send ✓')?.pending === true, JSON.stringify(mine('send ✓') ?? null))
+  kill()
+  twin = await twin.restart()
+  launch()
+  await waitFor(() => count('send the draft') > 0, 20000)
+  await Bun.sleep(2000)
+  check('tap: delivered once after kill and reconnect', count('send the draft') === 1, String(count('send the draft')))
+  check('tap: status cleared', !mine('send ✓')?.pending)
+}
+
+if (scenario === 'all' || scenario === 'missed') {
+  kill()
+  await twin.call('reply', { chat_id: 'app', text: 'missed A' })
+  await twin.call('reply', { chat_id: 'app', text: 'missed B\n\nmissed C' })
+  launch()
+  await waitFor(() => thread().find(m => m.text === 'missed C'), 15000)
+  await Bun.sleep(2000)
+  const t = thread().map(m => m.text)
+  check('missed: all replies, in order', t.indexOf('missed A') >= 0 && t.indexOf('missed A') < t.indexOf('missed B') && t.indexOf('missed B') < t.indexOf('missed C'), JSON.stringify(t.slice(-4)))
+  launch()
+  await Bun.sleep(5000)
+  check('missed: no duplicates after relaunch', thread().filter(m => m.text === 'missed A').length === 1)
+}
+
+if (scenario === 'all' || scenario === 'read') {
+  launch('-e2eSend', 'read me')
+  const d = await waitFor(() => twin.delivered.find((x: any) => x.content === 'read me'), 20000)
+  await Bun.sleep(1000)
+  check('read: Delivered, not Read, before Otto takes it in', !mine('read me')?.pending && !mine('read me')?.read)
+  await twin.call('reply', { chat_id: 'app', text: 'unrelated proactive line' })
+  const dir = join(twin.state, '..', '..', '.claude', 'projects', 'x')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'r.jsonl'), JSON.stringify({ message_id: d?.meta.message_id }) + '\n')
+  await twin.hook({ hook_event_name: 'PreToolUse', tool_name: 'reply', transcript_path: join(dir, 'r.jsonl') })
+  await waitFor(() => mine('read me')?.read, 10000)
+  check('read: Read once the session has it', mine('read me')?.read === true)
+}
+
+kill()
+await twin.stop()
+console.log(`\n${results.filter(r => r[1]).length}/${results.length} passed`)
+process.exit(results.every(r => r[1]) ? 0 : 1)

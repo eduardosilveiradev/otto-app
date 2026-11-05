@@ -27,6 +27,8 @@ import VoiceGlowKit
     func send(_ text: String)
     func react(_ emoji: String, on id: Message.ID)
     func tap(_ button: ActionButton, on id: Message.ID)
+    /// One of yours marked "Not delivered", sent again now.
+    func retry(_ id: Message.ID)
 }
 
 extension OttoStore: ChatThread {
@@ -77,10 +79,11 @@ struct ChatView: View {
 
     private var lastMine: Message.ID? { thread.messages.last(where: { $0.from == .me })?.id }
 
-    /// "Read" once Otto has taken the message in (or answered after it); until then it
-    /// may be sitting in his queue, which is "Delivered".
+    /// "Read" once the server says Otto has taken the message in; until then it may be sitting
+    /// in the queue behind a long turn, which is "Delivered". Not guessed from a later message of
+    /// Otto's: that can be a proactive one, or an answer to something else.
     private func receipt(for i: Int, in messages: [Message]) -> Bool {
-        messages[i].read == true || messages[(i + 1)...].contains { $0.from == .otto }
+        messages[i].read == true
     }
 
     var body: some View {
@@ -979,8 +982,12 @@ private struct Row: View {
             }
 
             if message.failed == true {
-                Text("Not delivered").font(.system(size: 11)).foregroundStyle(.red)
-                    .padding(.trailing, 4)
+                // Still retried on its own at the next connection; the tap just doesn't wait for one.
+                Button { thread.retry(message.id) } label: {
+                    Text("Not delivered · ").foregroundStyle(.red) + Text("Try again").foregroundStyle(.blue)
+                }
+                .font(.system(size: 11)).buttonStyle(.plain)
+                .padding(.trailing, 4)
             } else if message.pending == true {
                 Text("Sending…").font(.system(size: 11)).foregroundStyle(.secondary)
                     .padding(.trailing, 4)

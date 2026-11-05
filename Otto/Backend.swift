@@ -65,6 +65,8 @@ struct Message: Identifiable, Codable {
     var recorded: [RecordedCard]? = nil
     /// A verification code to show in the drawer (OTP.swift). Cleared when the server edits the message after it expires.
     var otp: OTPCode? = nil
+    /// Yours, a button tap: the data that goes up (the bubble shows the label). Pending until the server has it.
+    var tap: String? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }
@@ -150,12 +152,15 @@ protocol OttoBackend: AnyObject {
     /// Otto rewriting a message it already sent: (wireID, new text).
     var edits: AsyncStream<(String, String)> { get }
     func decide(approval id: String, approve: Bool) async
-    func history(background: Bool) async -> [Message]
+    /// The newest `limit` messages of the thread on the server.
+    func history(background: Bool, limit: Int) async -> [Message]
     /// True once the server has the message; false means try again later.
     func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool
-    func tap(_ button: ActionButton) async
+    /// Same contract as `send`, for a button tap under its bubble's id.
+    func tap(_ button: ActionButton, id: String) async -> Bool
     func react(to id: String, emoji: String) async
-    func sendPhoto(_ jpeg: Data, caption: String, id: String, shared: Bool) async
+    /// Same contract as `send`.
+    func sendPhoto(_ jpeg: Data, caption: String, id: String, shared: Bool) async -> Bool
     /// Uploads an m4a voice note and returns its transcript ("" when there is none),
     /// or nil when the upload didn't make it, so the note stays pending and is retried.
     func sendVoice(_ m4a: Data, id: String) async -> String?
@@ -250,7 +255,7 @@ final class MockBackend: OttoBackend {
         return try? JSONSerialization.data(withJSONObject: o)
     }
 
-    func history(background: Bool) async -> [Message] {
+    func history(background: Bool, limit: Int) async -> [Message] {
         return []
     }
 
@@ -262,13 +267,17 @@ final class MockBackend: OttoBackend {
         return true
     }
 
-    func tap(_ button: ActionButton) async {
-        try? await Task.sleep(for: .milliseconds(600))
-        out.yield(Message(from: .otto, text: "(mock) \(button.data ?? button.url ?? "") ✓"))
+    func tap(_ button: ActionButton, id: String) async -> Bool {
+        Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            out.yield(Message(from: .otto, text: "(mock) \(button.data ?? button.url ?? "") ✓"))
+        }
+        return true
     }
 
-    func sendPhoto(_ jpeg: Data, caption: String, id: String, shared: Bool) async {
+    func sendPhoto(_ jpeg: Data, caption: String, id: String, shared: Bool) async -> Bool {
         out.yield(Message(from: .otto, text: "(mock) nice photo"))
+        return true
     }
 
     func sendVoice(_ m4a: Data, id: String) async -> String? {

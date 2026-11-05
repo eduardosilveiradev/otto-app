@@ -57,6 +57,8 @@ enum ShareDirect {
     private static func sendText(_ text: String, base: URL, token: String) async -> Bool {
         var c = URLComponents(url: base.appending(path: "app"), resolvingAgainstBaseURL: false)!
         c.scheme = c.scheme == "https" ? "wss" : "ws"
+        // A one-shot socket: the server mustn't hand it what's waiting for the app, or count it as the app open.
+        c.queryItems = [URLQueryItem(name: "share", value: "1")]
         var req = URLRequest(url: c.url!, timeoutInterval: 15)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let task = URLSession.shared.webSocketTask(with: req)
