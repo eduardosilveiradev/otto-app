@@ -86,14 +86,20 @@ struct ChatView: View {
     private func jump(to id: Message.ID) {
         let messages = thread.messages
         guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
-        shown = max(shown, messages.count - i + 4)
+        let grew = messages.count - i + 4 > shown
+        if grew { shown = messages.count - i + 4 }
         Task {
-            withAnimation(.snappy) { scroll.scrollTo(id: id, anchor: .center) }
+            // Rows just paged in aren't built yet; give them a frame before scrolling to one.
+            if grew { try? await Task.sleep(for: .milliseconds(32)) }
+            withAnimation(still ? nil : .snappy) { scroll.scrollTo(id: id, anchor: .center) }
+            // On the bubble once it has stopped moving, not while it flies past.
+            if !still { try? await Task.sleep(for: .seconds(0.3)) }
             withAnimation(.easeOut(duration: 0.2)) { flashed = id }
             try? await Task.sleep(for: .seconds(0.9))
             withAnimation(.easeInOut(duration: 0.4)) { if flashed == id { flashed = nil } }
         }
     }
+    @Environment(\.accessibilityReduceMotion) private var still
 
     /// "Read" once Otto has taken the message in (or answered after it); until then it
     /// may be sitting in his queue, which is "Delivered".
@@ -123,9 +129,13 @@ struct ChatView: View {
                                 receipt: m.id == lastMine && m.pending != true && m.failed != true ? receipt(for: i, in: messages) : nil,
                                 fresh: m.from == .me && m.pending == true && Date.now.timeIntervalSince(m.date) < 1,
                                 lift: ui.height + 12,   // the bubble starts on the field (tuned against recordings)
-                                highlighted: flashed == m.id,
+                                highlighted: flashed == m.id, still: still,
                                 onQuote: { if let quote { jump(to: quote.id) } },
-                                onSwiping: { swiping = $0 },
+                                onSwiping: { on in
+                                    swiping = on
+                                    // Something grew while the anchor was off: back down, if that's where the reader was.
+                                    if !on, !scrolledUp { withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) } }
+                                },
                                 onTap: { thread.tap($0, on: m.id) })
                                 .padding(.top, newBlock || prev?.from == .terminal ? 0 : (prev?.from == m.from ? 4 : 10))
                                 .id(m.id)
@@ -167,7 +177,9 @@ struct ChatView: View {
         .scrollPosition($scroll)
         .scrollDisabled(swiping)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        // Off mid-swipe: the anchor's offset fix for a row that grew (Otto's tapback landing) cancelled
+        // the finger's drag (found by recording one landing mid-swipe). The release puts it right (below).
+        .defaultScrollAnchor(swiping ? nil : .bottom, for: .sizeChanges)
         // The composer rides the keyboard's layout guide, so it follows a drag-to-dismiss.
         .scrollDismissesKeyboard(.interactively)
         // Tapping anywhere in the thread puts the keyboard away; buttons still win their own taps.
@@ -786,6 +798,8 @@ private struct Row: View {
     var lift: CGFloat = 0
     /// Just jumped to from a quote.
     var highlighted = false
+    /// Reduce Motion: the highlight brightens without growing.
+    var still = false
     var onQuote: () -> Void = {}
     var onSwiping: (Bool) -> Void = { _ in }
     let onTap: (ActionButton) -> Void
@@ -795,6 +809,8 @@ private struct Row: View {
     /// Decided on a drag's first move: sideways is a reply swipe, anything else belongs to the scroll.
     @State private var sideways: Bool?
     @State private var reacted = 0
+    /// A flick that replied without reaching the mark, so the arming tick never came.
+    @State private var flicked = 0
     @State private var selecting = false
     @State private var link: URL?
     @State private var sharing: URL?
@@ -872,7 +888,11 @@ private struct Row: View {
         let t = m.text.trimmingCharacters(in: .whitespacesAndNewlines)
         return t == url.absoluteString || URL(string: t)?.absoluteString == url.absoluteString
     }
-    private var textShown: Bool { (message.image == nil || !message.text.isEmpty) && !hidesText }
+    /// A photo or file with no words is only itself: no empty bubble under it. A voice note is its bubble.
+    private var textShown: Bool {
+        let attached = message.image != nil || !(message.files ?? []).isEmpty
+        return (!attached || !message.text.isEmpty || message.isVoice || message.audio != nil) && !hidesText
+    }
     private var hidesText: Bool { preview != nil && Self.previewURL(message).map { Self.isOnlyLink(message, $0) } == true }
 
     /// Otto's "draft:" messages: the first line is the heading, the rest the words that would go out.
@@ -954,7 +974,10 @@ private struct Row: View {
         return a
     }
     /// A long message lifts as its first lines: the whole of it filled the screen and ran under the menu.
-    private var longPreview: Bool { Self.draft(message) == nil && message.text.count > 500 }
+    // ponytail: a length/line-count guess, not a measurement; at the largest text sizes a shorter bubble can still fill the screen.
+    private var longPreview: Bool {
+        Self.draft(message) == nil && (message.text.count > 500 || message.text.filter { $0 == "\n" }.count > 12)
+    }
 
     @ViewBuilder private var bubbleMenu: some View {
         Self.palette(message, react: react)
@@ -978,6 +1001,8 @@ private struct Row: View {
     private var shortBubble: some View {
         Text(text).lineLimit(14)
             .font(.body.leading(.tight))
+            // Fewer lines at large text sizes: never more than about 40% of the screen.
+            .frame(maxHeight: UIScreen.main.bounds.height * 0.4, alignment: .top)
             .foregroundStyle(mine ? .white : .primary)
             .padding(.horizontal, 14).padding(.vertical, 9.5)
             .frame(width: UIScreen.main.bounds.width - 121, alignment: .leading)
@@ -1042,11 +1067,15 @@ private struct Row: View {
                         Button("Share…") { sharing = url }
                     }
                 }
-                .sheet(item: $sharing) { ShareSheet(items: [$0]).presentationDetents([.medium, .large]) }
                 .padding(.horizontal, 14).padding(.vertical, 9.5)
                 .foregroundStyle(mine ? .white : .primary)
                 .background(BubbleShape(mine: mine, tail: tail).fill(mine ? .outgoingBubble : .incomingBubble))
-                .contentShape(.contextMenuPreview, BubbleShape(mine: mine, tail: false))
+                // Before the menu, so the bubble lifts with its tapback (and its tail), as it looks in the thread.
+                .overlay(alignment: mine ? .topLeading : .topTrailing) {
+                    if let r = message.reaction { Tapback(emoji: r, mine: mine) }
+                }
+                .padding(.top, message.reaction == nil ? 0 : 14)
+                .contentShape(.contextMenuPreview, BubblePreview(mine: mine, tail: tail, badge: message.reaction != nil))
                 // The field's width and place at 0, the bubble at 1: on the bubble itself, so the
                 // stretch is field width over bubble width (the row is as wide as the screen).
                 .modifier(SendMorph(progress: morph, lift: lift))
@@ -1056,7 +1085,8 @@ private struct Row: View {
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { morph = 1 }
                 }
                 // Double-tap: ❤️ straight away, no menu. Again takes it off. Otto's only (see palette).
-                .onTapGesture(count: 2) { react("❤️") }
+                // Not attached on yours, so a tap on a link there doesn't wait to see if it's a double.
+                .gesture(TapGesture(count: 2).onEnded { react("❤️") }, including: mine ? .subviews : .all)
                 .bubbleMenu(long: longPreview) { bubbleMenu } preview: { shortBubble }
                 .sheet(isPresented: $selecting) {
                     SelectableText(text: message.text)
@@ -1067,10 +1097,6 @@ private struct Row: View {
                     Button("Less of this", role: .destructive) { onTap(ActionButton(label: "Less of this", data: Self.lessOfThis(message))) }
                     Button("OK", role: .cancel) {}
                 } message: { Text($0) }
-                .overlay(alignment: mine ? .topLeading : .topTrailing) {
-                    if let r = message.reaction { Tapback(emoji: r, mine: mine) }
-                }
-                .padding(.top, message.reaction == nil ? 0 : 14)
             }
             if let md = preview {
                 // No frame here: a maxWidth frame is 280 wide and centres a narrower card in it.
@@ -1094,7 +1120,9 @@ private struct Row: View {
                     .padding(.top, !textShown && message.reaction != nil ? 14 : 0)
                     // A bare link is only this card: it carries the message's actions for VoiceOver too.
                     .modifier(SpokenActions(message: message, label: nil, reactor: reactor, react: react, reply: reply,
-                                            copy: nil, extra: [], enabled: !textShown))
+                                            copy: nil, extra: Self.previewURL(message).map { url in
+                                                [("Copy Link", { UIPasteboard.general.url = url }), ("Share Link", { sharing = url })]
+                                            } ?? [], enabled: !textShown))
             }
             // What you said, under your voice note; Otto's sits inside its bubble.
             if mine, message.isVoice, !message.text.isEmpty {
@@ -1132,6 +1160,8 @@ private struct Row: View {
                 .animation(.snappy, value: receipt)
             }
         }
+        // On the row, not the bubble: a bare link's bubble gives way to its card, and the card shares too.
+        .sheet(item: $sharing) { ShareSheet(items: [$0]).presentationDetents([.medium, .large]) }
         .task(id: message.text) {
             guard let u = Self.previewURL(message) else { preview = nil; return }   // an edit that dropped the link drops its card
             preview = LinkMeta.cached(u)
@@ -1139,7 +1169,7 @@ private struct Row: View {
         }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         .padding(mine ? .leading : .trailing, 89)
-        .scaleEffect(highlighted ? 1.03 : 1, anchor: mine ? .trailing : .leading)
+        .scaleEffect(highlighted && !still ? 1.03 : 1, anchor: mine ? .trailing : .leading)
         .brightness(highlighted ? 0.12 : 0)
         // Swipe right to reply, as in Messages: the row follows the finger, an arrow
         // fills in behind it, and letting go past the mark picks it.
@@ -1155,6 +1185,8 @@ private struct Row: View {
                 .offset(x: swipe - 32)
                 .accessibilityHidden(true)
         }
+        // The whole row takes the swipe, not just the bubble: yours start 105pt in from the edge.
+        .contentShape(.rect)
         .simultaneousGesture(
             DragGesture(minimumDistance: 20)
                 .updating($dragging) { _, d, _ in d = true }
@@ -1172,12 +1204,18 @@ private struct Row: View {
                 }
                 .onEnded { g in
                     // Past the mark, or a quick flick that would have carried past it.
-                    if sideways == true, swipe >= Self.replyAt || g.predictedEndTranslation.width > Self.replyAt * 1.5 { reply() }
+                    if sideways == true, swipe >= Self.replyAt || g.predictedEndTranslation.width > Self.replyAt * 1.5 {
+                        if swipe < Self.replyAt { flicked += 1 }
+                        reply()
+                    }
                     settle()
                 }
         )
         // A drag the system took away (the menu opening, a call) never ends: put the row back anyway.
         .onChange(of: dragging) { _, on in if !on { settle() } }
+        // Gone mid-swipe (paged out, replaced): don't leave the thread unable to scroll.
+        .onDisappear { if sideways == true { onSwiping(false) } }
+        .sensoryFeedback(.impact(weight: .light), trigger: flicked)
         .sensoryFeedback(.impact(weight: .light), trigger: swipe >= Self.replyAt) { _, new in new }
         .sensoryFeedback(.impact(weight: .light), trigger: reacted)
     }
@@ -1216,6 +1254,7 @@ private struct RemoteFileView: View {
                     .frame(maxWidth: 240, maxHeight: 320)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
                     .onTapGesture { MediaViewer.shared.start = file.id }
+                    .accessibilityLabel("Otto: photo").accessibilityAddTraits([.isImage, .isButton])
             } else if file.kind == "video", let thumb {
                 Image(uiImage: thumb).resizable().scaledToFit()
                     .frame(maxWidth: 240, maxHeight: 320)
@@ -1467,6 +1506,21 @@ struct BubbleShape: Shape {
     }
 }
 
+/// What a bubble lifts as in its menu: the bubble, its tail, and the tapback on its corner
+/// (the 14pt above it is the badge's room; see Tapback for where it sits).
+struct BubblePreview: Shape {
+    let mine: Bool
+    let tail: Bool
+    let badge: Bool
+    func path(in rect: CGRect) -> Path {
+        let bubble = rect.inset(by: UIEdgeInsets(top: badge ? 14 : 0, left: 0, bottom: 0, right: 0))
+        let p = BubbleShape(mine: mine, tail: tail).path(in: bubble)
+        guard badge else { return p }
+        let c = CGPoint(x: mine ? bubble.minX + 2 : bubble.maxX - 2, y: bubble.minY - 1)
+        return p.union(Path(ellipseIn: CGRect(x: c.x - 16, y: c.y - 16, width: 32, height: 32)))
+    }
+}
+
 /// Long press on a photo or file: the same tapback palette a text bubble has. `badge` puts the
 /// reaction on this one when there's no text bubble to carry it.
 private struct Reactable: ViewModifier {
@@ -1489,6 +1543,7 @@ private struct Reactable: ViewModifier {
                 if badge, let r = message.reaction { Tapback(emoji: r, mine: message.from == .me) }
             }
             .padding(.top, badge && message.reaction != nil ? 14 : 0)
+            // The message's own actions once (where the tapback sits); a photo's Copy on every photo.
             .modifier(SpokenActions(message: message, label: nil, reactor: reactor, react: react, reply: reply, copy: copy, extra: [], enabled: badge))
     }
 }
@@ -1507,7 +1562,10 @@ private struct SpokenActions: ViewModifier {
     /// Off where another part of the same message already carries them, so they're said once.
     var enabled = true
     func body(content: Content) -> some View {
-        if !enabled { content } else {
+        if !enabled {
+            // Only what's this part's own: a photo's Copy.
+            if let copy { content.accessibilityAction(named: "Copy", copy) } else { content }
+        } else {
             labelled(content)
                 .accessibilityValue(message.reaction.map { "\(Row.tapbackNames[$0] ?? $0) from \(reactor)" } ?? "")
                 .accessibilityAction(named: "Reply", reply)

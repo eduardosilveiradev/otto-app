@@ -334,8 +334,14 @@ final class OttoStore {
                 Message(from: .me, text: "ok", date: t, read: true),
                 Message(from: .me, text: "and can you book the 19:30 table for two?", date: t, read: true),
             ]
+            // `-farQuote`: 70 messages between the reply and what it quotes, past the first page.
+            if ProcessInfo.processInfo.arguments.contains("-farQuote") {
+                messages.insert(contentsOf: (0..<70).map { Message(from: $0 % 2 == 0 ? .otto : .me, text: "filler \($0)", date: t, read: true) }, at: 1)
+            }
             Task {
-                try? await Task.sleep(for: .seconds(8))
+                // `-labReactAt <s>` moves it, to land inside a recorded gesture.
+                let at = UserDefaults.standard.double(forKey: "labReactAt")
+                try? await Task.sleep(for: .seconds(at > 0 ? at : 8))
                 if let i = messages.lastIndex(where: { $0.from == .me }) { messages[i].reaction = "😂" }
             }
         }
