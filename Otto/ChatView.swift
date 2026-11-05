@@ -310,20 +310,8 @@ struct ChatView: View {
         }
         .animation(.snappy, value: calls.live?.id)
         .animation(.snappy, value: gate.card?.key)
-        // The header's fade, carried down behind the banner so the thread doesn't show through it.
-        .background(alignment: .top) {
-            if calls.live != nil || gate.visible() != nil {
-                // Solid to the banner's edge, then a fixed 36pt fade, whatever the header's height.
-                VStack(spacing: 0) {
-                    Color(.systemBackground)
-                    LinearGradient(colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
-                                   startPoint: .top, endPoint: .bottom)
-                        .frame(height: 36)
-                }
-                .padding(.bottom, -36)
-                .ignoresSafeArea(edges: .top)
-            }
-        }
+        // No fill behind the banner: the bar's soft scroll edge already blurs the thread under
+        // the whole bar, banner included. A systemBackground fill here is the solid black band.
     }
 
     private var header: some View {
