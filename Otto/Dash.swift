@@ -198,8 +198,13 @@ struct Pill: View {
     var body: some View {
         Text(text)
             .font(.caption.weight(.medium))
-            .foregroundStyle(tint == .secondary ? Color.secondary : tint)
+            .foregroundStyle(tint == .secondary ? Color.secondary : tint == .orange ? Color.pillOrange : tint)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(tint == .secondary ? Color(.tertiarySystemFill) : tint.opacity(0.15), in: .capsule)
     }
+}
+
+extension Color {
+    /// Orange text on a 15% orange capsule: system orange in dark mode, a burnt orange in light so it reads.
+    static let pillOrange = Color(UIColor { $0.userInterfaceStyle == .dark ? .systemOrange : UIColor(red: 0.70, green: 0.33, blue: 0, alpha: 1) })
 }

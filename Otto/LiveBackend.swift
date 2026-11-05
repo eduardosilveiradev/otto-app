@@ -202,8 +202,10 @@ final class LiveBackend: OttoBackend {
     }
 
     /// True once the server has it (a 2xx), which it sends only after writing it down.
-    func sendPhoto(_ jpeg: Data, caption: String, id: String, shared: Bool) async -> Bool {
+    // ponytail: the server's /app/photo and /app/voice don't read reply_to yet; it's sent so they can.
+    func sendPhoto(_ jpeg: Data, caption: String, id: String, replyTo: String?, shared: Bool) async -> Bool {
         await post("app/photo", jpeg, query: [URLQueryItem(name: "id", value: id)]
+                   + (replyTo.map { [URLQueryItem(name: "reply_to", value: $0)] } ?? [])
                    + (caption.isEmpty ? [] : [URLQueryItem(name: "text", value: caption)])
                    + (shared ? [URLQueryItem(name: "shared", value: "1")] : [])) != nil
     }
@@ -216,8 +218,9 @@ final class LiveBackend: OttoBackend {
         return data
     }
 
-    func sendVoice(_ m4a: Data, id: String) async -> String? {
-        guard let data = await post("app/voice", m4a, query: [URLQueryItem(name: "id", value: id)]) else { return nil }
+    func sendVoice(_ m4a: Data, id: String, replyTo: String?) async -> String? {
+        guard let data = await post("app/voice", m4a, query: [URLQueryItem(name: "id", value: id)]
+                                    + (replyTo.map { [URLQueryItem(name: "reply_to", value: $0)] } ?? [])) else { return nil }
         return (try? JSONDecoder().decode([String: String].self, from: data))?["text"] ?? ""
     }
 

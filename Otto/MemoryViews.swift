@@ -42,7 +42,7 @@ private struct MemoryList: View {
                         ScrollView { MarkdownText(text: m.summary.text).padding() }
                             .navigationTitle("Summary").navigationBarTitleDisplayMode(.inline)
                     } label: {
-                        Label("What Otto knows about you", systemImage: "text.alignleft")
+                        Label { Text("What Otto knows about you") } icon: { RowIcon(symbol: "text.alignleft") }
                     }
                 } footer: { Text(m.summary.note) }
             }
@@ -79,7 +79,8 @@ private struct MemoryList: View {
                 Divider()
                 Button("Rebuild the index", systemImage: "arrow.clockwise") { Task { await rebuild() } }
             } label: {
-                Image(systemName: source != "all" || cluster != nil || needsLook ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                Image(systemName: "line.3.horizontal.decrease")
+                    .foregroundStyle(source != "all" || cluster != nil || needsLook ? Color.blue : Color.primary)
             }
         }
     }

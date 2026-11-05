@@ -338,6 +338,37 @@ final class OttoStore {
                 Message(from: .me, text: "whats a good place for dinner near the office thats not pizza", read: true),
             ]
         }
+        // `-actionsLab`: one of everything a bubble's actions touch (long text, a photo, voice notes,
+        // a link, a reply, tapbacks either way); Otto tapbacks your last text 8s in, to land mid-gesture.
+        if ProcessInfo.processInfo.arguments.contains("-actionsLab") {
+            let t = Date.now.addingTimeInterval(-300)
+            let photo = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 450)).jpegData(withCompressionQuality: 0.8) { ctx in
+                UIColor.systemTeal.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 600, height: 450))
+                UIColor.systemOrange.setFill(); ctx.fill(CGRect(x: 0, y: 300, width: 600, height: 150))
+            }
+            let first = Message(from: .otto, text: "morning. design review at 14:00, then you're free until 16:30.", date: t, serverID: "lab-1")
+            messages = [
+                first,
+                Message(from: .me, text: "nice. what's the plan for the boiler?", date: t, read: true, replyTo: "lab-1"),
+                Message(from: .otto, text: String(repeating: "Here's the long version, every step spelled out so nothing gets lost between now and Tuesday. ", count: 14), date: t),
+                Message(from: .me, text: "", date: t, image: photo, reaction: "❤️", read: true),
+                Message(from: .otto, text: "plumber reminder set for when you're home.", date: t, isVoice: true,
+                        audio: RemoteFile(id: "demo-voice", name: "reply.m4a", kind: "audio")),
+                Message(from: .otto, text: "the menu's here: https://www.apple.com/newsroom/", date: t, reaction: "👍"),
+                Message(from: .me, text: "ok", date: t, read: true),
+                Message(from: .me, text: "and can you book the 19:30 table for two?", date: t, read: true),
+            ]
+            // `-farQuote`: 70 messages between the reply and what it quotes, past the first page.
+            if ProcessInfo.processInfo.arguments.contains("-farQuote") {
+                messages.insert(contentsOf: (0..<70).map { Message(from: $0 % 2 == 0 ? .otto : .me, text: "filler \($0)", date: t, read: true) }, at: 1)
+            }
+            Task {
+                // `-labReactAt <s>` moves it, to land inside a recorded gesture.
+                let at = UserDefaults.standard.double(forKey: "labReactAt")
+                try? await Task.sleep(for: .seconds(at > 0 ? at : 8))
+                if let i = messages.lastIndex(where: { $0.from == .me }) { messages[i].reaction = "😂" }
+            }
+        }
         // `-refThread`: the bubbles of a Messages reference screenshot, to compare pixel for pixel.
         if ProcessInfo.processInfo.arguments.contains("-refThread") {
             let t = Date.now.addingTimeInterval(-120)
@@ -660,7 +691,8 @@ final class OttoStore {
         for h in all {
             if let kind = h.patch {   // an edit or tapback for a message older than the page
                 guard let i = index[h.wireID] else { continue }
-                if kind == "reaction" { messages[i].reaction = h.reaction } else if messages[i].text != h.text { messages[i].text = h.text; messages[i].otp = nil }
+                // Otto's tapback, only ever on yours: the one on Otto's is your own, and one you took off stays off.
+                if kind == "reaction" { if messages[i].from == .me { messages[i].reaction = h.reaction } } else if messages[i].text != h.text { messages[i].text = h.text; messages[i].otp = nil }
                 continue
             }
             guard let i = index[h.wireID] else {
@@ -669,7 +701,8 @@ final class OttoStore {
                 fresh.append(h)
                 continue
             }
-            if let r = h.reaction { messages[i].reaction = r }
+            // Otto's tapbacks, only on yours: the one on Otto's is your own, already here, and one you took off stays off.
+            if let r = h.reaction, messages[i].from == .me { messages[i].reaction = r }
             if h.from == .me {
                 if messages[i].pending == true || messages[i].failed == true { messages[i].pending = nil; messages[i].failed = nil }
                 if h.read == true { messages[i].read = true }
@@ -688,10 +721,15 @@ final class OttoStore {
     func send(_ text: String, shared: Bool = false, id: UUID = UUID()) {
         var m = Message(id: id, from: .me, text: text, pending: true)
         if shared { m.shared = true }
-        m.replyTo = replyingTo.flatMap { id in messages.first { $0.id == id }?.wireID }
-        replyingTo = nil
+        m.replyTo = takeReply()
         messages.append(m)
         Task { await deliver(m.id) }
+    }
+
+    /// The message a swipe picked, by wire id, used up by whatever the composer sends next.
+    func takeReply() -> String? {
+        defer { replyingTo = nil }
+        return replyingTo.flatMap { id in messages.first { $0.id == id }?.wireID }
     }
 
     /// For Siri when /app/ask can't be reached: mark it unsent and keep trying until the server has it
@@ -744,7 +782,7 @@ final class OttoStore {
         // A photo whose JPEG is gone has nothing to send: said, rather than sent as its caption alone.
         if m.photo == true && m.imageData == nil { if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].pending = nil; messages[i].failed = true }; return }
         let ok = if let jpeg = m.imageData, m.snap == true, let live = backend as? LiveBackend { await live.snap(jpeg, note: m.text, id: m.wireID) != nil }
-            else if let jpeg = m.imageData { await backend.sendPhoto(jpeg, caption: m.text, id: m.wireID, shared: m.shared == true) }
+            else if let jpeg = m.imageData { await backend.sendPhoto(jpeg, caption: m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true) }
             else if let data = m.tap { await backend.tap(ActionButton(label: m.text, data: data), id: m.wireID) }
             else if let w = m.wallet { await backend.wallet(w, id: m.wireID) }
             else { await backend.send(m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true) }
@@ -836,10 +874,10 @@ final class OttoStore {
         return small.jpegData(compressionQuality: 0.7)
     }
 
-    func sendPhoto(_ image: UIImage, caption: String = "", shared: Bool = false, id: UUID = UUID()) {
+    func sendPhoto(_ image: UIImage, caption: String = "", shared: Bool = false, replyTo: String? = nil, id: UUID = UUID()) {
         guard let jpeg = Self.jpeg(image) else { return }
         // Pending like a text: an upload that fails on a weak network is retried, not lost.
-        let m = Message(id: id, from: .me, text: caption, image: jpeg, pending: true, shared: shared ? true : nil)
+        let m = Message(id: id, from: .me, text: caption, image: jpeg, pending: true, shared: shared ? true : nil, replyTo: replyTo)
         messages.append(m)
         ottoTyping = true
         // One after another, so a burst arrives in order with the caption on the last photo.
@@ -851,8 +889,8 @@ final class OttoStore {
     /// The bubble shows up at once; the transcript fills it in when the server has it.
     /// Pending until the upload lands, so a dropped one (a weak hotspot) is retried on the
     /// next connection instead of vanishing.
-    func sendVoice(_ file: URL) {
-        let m = Message(from: .me, text: "", isVoice: true, pending: true)
+    func sendVoice(_ file: URL, replyTo: String? = nil) {
+        let m = Message(from: .me, text: "", isVoice: true, pending: true, replyTo: replyTo)
         // Kept so the note plays back from the thread, and so a retry has the audio.
         try? FileManager.default.removeItem(at: VoiceStore.url(m.id))
         guard (try? FileManager.default.moveItem(at: file, to: VoiceStore.url(m.id))) != nil else { return }
@@ -867,7 +905,7 @@ final class OttoStore {
             if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i].pending = nil; messages[i].failed = true }
             return
         }
-        guard let text = await backend.sendVoice(audio, id: m.wireID),
+        guard let text = await backend.sendVoice(audio, id: m.wireID, replyTo: m.replyTo),
               let i = messages.firstIndex(where: { $0.id == m.id }) else { return }
         // In place: a read receipt or a tapback that landed while the upload was out stays.
         messages[i].text = text
@@ -890,7 +928,7 @@ final class OttoStore {
         guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
         let same = messages[i].reaction == emoji
         messages[i].reaction = same ? nil : emoji
-        // ponytail: removal is local only; the server has no "unreact" to pass on.
+        // ponytail: removal is local only; the server has no "unreact" to pass on (catchUp leaves it off).
         // The id now, not inside the task: a catch-up insert before it runs would shift the index.
         let wire = messages[i].wireID
         if !same { Task { await backend.react(to: wire, emoji: emoji) } }
