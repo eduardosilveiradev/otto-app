@@ -3,7 +3,7 @@
  * against a throwaway Otto server (otto-core's otto/tests/apptwin.ts) that can be stopped,
  * restarted and asked to reply. Each scenario prints PASS or FAIL.
  *
- *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|approval|tapread|oldedit|corrupt|all]
+ *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|approval|tapread|oldedit|photo|corrupt|all]
  *
  * Use a simulator made for it (`xcrun simctl create`): the app is reinstalled, so its thread is wiped.
  */
@@ -195,6 +195,28 @@ if (scenario === 'all' || scenario === 'oldedit') {
   await waitFor(() => thread().find(x => x.serverID === m?.serverID)?.text === 'old line, fixed', 20000)
   check('edit: a missed edit on a message older than the last 50 lands', thread().find(x => x.serverID === m?.serverID)?.text === 'old line, fixed')
   check('edit: and is not shown as a message of its own', thread().filter(x => x.text === 'old line, fixed').length === 1)
+}
+
+if (scenario === 'all' || scenario === 'photo') {
+  launch('-e2ePhoto')
+  await waitFor(() => twin.delivered.some((d: any) => d.content === 'e2e photo'), 20000)
+  await Bun.sleep(1500)
+  const raw = readFileSync(join(container(), 'Library/Application Support/chat-otto-server.json'), 'utf8')
+  const m = JSON.parse(raw).find((x: any) => x.text === 'e2e photo')
+  const { existsSync, readdirSync } = await import('fs')
+  check('photo: delivered once and no longer pending', twin.delivered.filter((d: any) => d.content === 'e2e photo').length === 1 && !m?.pending)
+  check('photo: the thread file keeps a flag, the JPEG lives in its own file', m?.photo === true && m?.image === undefined
+    && existsSync(join(container(), `Library/Application Support/images/${m?.id}.jpg`)))
+  // An older thread with the JPEG inline is moved out on the next save.
+  kill()
+  const thread0 = JSON.parse(raw)
+  const legacy = { ...thread0.find((x: any) => x.text === 'e2e photo'), id: '0E0E0E0E-0000-4000-8000-000000000009', photo: undefined, image: Buffer.from(readFileSync(join(container(), `Library/Application Support/images/${m?.id}.jpg`))).toString('base64'), text: 'legacy photo' }
+  writeFileSync(join(container(), 'Library/Application Support/chat-otto-server.json'), JSON.stringify([...thread0, legacy]))
+  launch('-e2eSend', 'nudge a save')
+  await waitFor(() => mine('nudge a save') && !readFileSync(join(container(), 'Library/Application Support/chat-otto-server.json'), 'utf8').includes(legacy.image.slice(0, 40)), 20000)
+  const after = JSON.parse(readFileSync(join(container(), 'Library/Application Support/chat-otto-server.json'), 'utf8')).find((x: any) => x.text === 'legacy photo')
+  check('photo: an inline photo from an older thread is moved out on the next save', after?.photo === true && after?.image === undefined
+    && existsSync(join(container(), 'Library/Application Support/images/0E0E0E0E-0000-4000-8000-000000000009.jpg')))
 }
 
 if (scenario === 'all' || scenario === 'corrupt') {

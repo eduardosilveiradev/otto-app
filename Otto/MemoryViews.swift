@@ -85,12 +85,15 @@ private struct MemoryList: View {
     }
 
     private func search() async {
-        struct Hits: Decodable { let results: [[Double]] }
+        struct Hits: Decodable { let results: [[Double]]; let generatedAt: String? }
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { rankedIn = nil; return }
         let snapshot = m.generatedAt
         if let r: Hits = await store.backend.dash("memory/search", query: ["q": q]) {
-            rankedIn = (snapshot, r.results.compactMap { $0.first.map(Int.init) })
+            // The positions are into the index the Mac searched; if that's newer than this list, reload
+            // the list so they line up (until then they're held back, not shown against the old one).
+            rankedIn = (r.generatedAt ?? snapshot, r.results.compactMap { $0.first.map(Int.init) })
+            if let g = r.generatedAt, g != snapshot { await reload() }
         }
     }
 

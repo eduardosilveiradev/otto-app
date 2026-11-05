@@ -606,8 +606,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
             do {
                 let (data, resp) = try await URLSession.shared.data(for: req)
                 guard mine(), here() else { return }
-                guard (resp as? HTTPURLResponse)?.statusCode == 200,
-                      let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                // Only a 200 means the Mac has the ask; anything else (a 503 "send again", Funnel's 502
+                // with the Mac away) means it never landed, and the keyboard keeps no copy to retry.
+                guard (resp as? HTTPURLResponse)?.statusCode == 200 else { model.otto = .failed("Couldn't reach Otto. Try again."); return }
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let reply = json["reply"] as? [String: Any], let text = reply["text"] as? String, !text.isEmpty
                 else { model.otto = .failed("Otto didn't answer in time. It'll be in the app."); return }
                 // Typed into while it worked: pasting the answer whole would land text where it wasn't asked for.

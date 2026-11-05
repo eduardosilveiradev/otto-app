@@ -212,7 +212,12 @@ final class OttoStore {
     nonisolated private static func write(_ snapshot: [Message], gen: Int, to file: URL, cursor: Date?) -> Bool {
         disk.sync {
             guard gen > committed else { return true }
-            guard let data = try? JSONEncoder().encode(snapshot), (try? data.write(to: file, options: .atomic)) != nil else { return false }
+            // Photos go to their own files; the thread keeps a flag. One whose file can't be written stays inline.
+            let lean = snapshot.map { m -> Message in
+                guard let jpeg = m.image, ImageStore.save(jpeg, for: m.id) else { return m }
+                var c = m; c.image = nil; c.photo = true; return c
+            }
+            guard let data = try? JSONEncoder().encode(lean), (try? data.write(to: file, options: .atomic)) != nil else { return false }
             committed = gen
             if let cursor { UserDefaults.standard.set(cursor, forKey: "otto.syncedThrough") }
             return true
@@ -384,6 +389,13 @@ final class OttoStore {
                 try? await Task.sleep(for: .seconds(3))
                 let outcome = await decide(id, approve: true, keep: true)
                 try? "\(outcome)".write(to: .applicationSupportDirectory.appending(path: "e2e-decided"), atomically: true, encoding: .utf8)   // read back by Scripts/delivery-e2e.ts
+            }
+        }
+        if ProcessInfo.processInfo.arguments.contains("-e2ePhoto") {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                let img = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).image { ctx in UIColor.systemTeal.setFill(); ctx.fill(ctx.format.bounds) }
+                sendPhoto(img, caption: "e2e photo")
             }
         }
         if ProcessInfo.processInfo.arguments.contains("-e2eTapLast") {
@@ -718,8 +730,8 @@ final class OttoStore {
         sending.insert(id)
         defer { sending.remove(id) }
         if m.isVoice { return await deliverVoice(m) }
-        let ok = if let jpeg = m.image, m.snap == true, let live = backend as? LiveBackend { await live.snap(jpeg, note: m.text, id: m.wireID) != nil }
-            else if let jpeg = m.image { await backend.sendPhoto(jpeg, caption: m.text, id: m.wireID, shared: m.shared == true) }
+        let ok = if let jpeg = m.imageData, m.snap == true, let live = backend as? LiveBackend { await live.snap(jpeg, note: m.text, id: m.wireID) != nil }
+            else if let jpeg = m.imageData { await backend.sendPhoto(jpeg, caption: m.text, id: m.wireID, shared: m.shared == true) }
             else if let data = m.tap { await backend.tap(ActionButton(label: m.text, data: data), id: m.wireID) }
             else if let w = m.wallet { await backend.wallet(w, id: m.wireID) }
             else { await backend.send(m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true) }
@@ -860,7 +872,9 @@ final class OttoStore {
         let same = messages[i].reaction == emoji
         messages[i].reaction = same ? nil : emoji
         // ponytail: removal is local only; the server has no "unreact" to pass on.
-        if !same { Task { await backend.react(to: messages[i].wireID, emoji: emoji) } }
+        // The id now, not inside the task: a catch-up insert before it runs would shift the index.
+        let wire = messages[i].wireID
+        if !same { Task { await backend.react(to: wire, emoji: emoji) } }
     }
 
     func refreshBrief() async { brief = await backend.brief() }

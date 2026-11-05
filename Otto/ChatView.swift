@@ -561,7 +561,7 @@ struct Composer: View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(m.from == .me ? "Replying to yourself" : "Replying to \(thread.name)").font(.system(size: 12, weight: .semibold))
-                Text(m.text.isEmpty ? (m.image != nil ? "Photo" : "Voice message") : m.text)
+                Text(m.text.isEmpty ? (m.isPhoto ? "Photo" : "Voice message") : m.text)
                     .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -820,7 +820,7 @@ private struct Row: View {
     }
     /// The first link worth a card: not for photos, voice notes, audio or drafts.
     static func previewURL(_ m: Message) -> URL? {
-        if m.image != nil || m.isVoice || m.audio != nil || draft(m) != nil { return nil }
+        if m.isPhoto || m.isVoice || m.audio != nil || draft(m) != nil { return nil }
         return linked(m.text).runs.lazy.compactMap(\.link).first
     }
     /// A message that is nothing but the link: the bubble gives way to the card once metadata lands (Messages behaviour).
@@ -828,7 +828,7 @@ private struct Row: View {
         let t = m.text.trimmingCharacters(in: .whitespacesAndNewlines)
         return t == url.absoluteString || URL(string: t)?.absoluteString == url.absoluteString
     }
-    private var textShown: Bool { (message.image == nil || !message.text.isEmpty) && !hidesText }
+    private var textShown: Bool { (!message.isPhoto || !message.text.isEmpty) && !hidesText }
     private var hidesText: Bool { preview != nil && Self.previewURL(message).map { Self.isOnlyLink(message, $0) } == true }
 
     /// Otto's "draft:" messages: the first line is the heading, the rest the words that would go out.
@@ -848,7 +848,7 @@ private struct Row: View {
     var body: some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 6) {
             if let quote {
-                Text(quote.text.isEmpty ? (quote.image != nil ? "Photo" : "Voice message") : quote.text)
+                Text(quote.text.isEmpty ? (quote.isPhoto ? "Photo" : "Voice message") : quote.text)
                     .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(.systemGray4)))
@@ -1132,6 +1132,21 @@ private struct RemoteFileView: View {
 /// Your voice notes, kept on the phone so they play back. Otto's live on the server.
 /// Your voice notes, kept in Application Support: iOS empties Caches when space runs low, and an
 /// unsent note's audio is the only copy. Notes saved by older builds are still read from Caches.
+/// Photos you sent, one JPEG per message in Application Support, out of the thread file.
+enum ImageStore {
+    static func url(_ id: UUID) -> URL {
+        let dir = URL.applicationSupportDirectory.appending(path: "images", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appending(path: "\(id.uuidString).jpg")
+    }
+    static func data(_ id: UUID) -> Data? { try? Data(contentsOf: url(id)) }
+    /// True once it's on disk (already, or now).
+    static func save(_ data: Data, for id: UUID) -> Bool {
+        let u = url(id)
+        return FileManager.default.fileExists(atPath: u.path) || (try? data.write(to: u, options: .atomic)) != nil
+    }
+}
+
 enum VoiceStore {
     static func url(_ id: UUID) -> URL {
         let dir = URL.applicationSupportDirectory.appending(path: "voice", directoryHint: .isDirectory)
@@ -1645,9 +1660,9 @@ final class VoiceRecorder {
 private enum Thumbs {
     static let cache = NSCache<NSUUID, UIImage>()
     static func image(for m: Message) -> UIImage? {
-        guard let data = m.image else { return nil }
+        guard m.isPhoto else { return nil }
         if let hit = cache.object(forKey: m.id as NSUUID) { return hit }
-        guard let img = UIImage(data: data) else { return nil }
+        guard let data = m.imageData, let img = UIImage(data: data) else { return nil }
         cache.setObject(img, forKey: m.id as NSUUID)
         return img
     }

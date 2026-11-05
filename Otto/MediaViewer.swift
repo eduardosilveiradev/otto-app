@@ -48,7 +48,8 @@ struct MediaItem: Identifiable {
     let id: String
     let date: Date
     let mine: Bool
-    let local: Data?
+    /// A photo of yours, read from disk only when it's shown.
+    let local: (() -> Data?)?
     let file: RemoteFile?
     var isVideo: Bool { file?.kind == "video" }
 
@@ -56,7 +57,7 @@ struct MediaItem: Identifiable {
     static func all(in messages: [Message]) -> [MediaItem] {
         messages.flatMap { m -> [MediaItem] in
             var out: [MediaItem] = []
-            if let img = m.image { out.append(MediaItem(id: m.id.uuidString, date: m.date, mine: m.from == .me, local: img, file: nil)) }
+            if m.isPhoto { out.append(MediaItem(id: m.id.uuidString, date: m.date, mine: m.from == .me, local: { m.imageData }, file: nil)) }
             for f in m.files ?? [] where f.kind == "image" || f.kind == "video" {
                 out.append(MediaItem(id: f.id, date: m.date, mine: m.from == .me, local: nil, file: f))
             }
@@ -174,7 +175,7 @@ private struct MediaPage: View {
     @State private var panBase: CGSize = .zero
 
     static func image(_ item: MediaItem, store: OttoStore) async -> UIImage? {
-        if let d = item.local { return UIImage(data: d) }
+        if let load = item.local { return load().flatMap(UIImage.init(data:)) }
         guard let f = item.file, let d = await MediaCache.load(f, from: store.backend) else { return nil }
         return UIImage(data: d)
     }

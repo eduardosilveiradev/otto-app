@@ -31,7 +31,9 @@ struct Message: Identifiable, Codable {
     var date = Date()
     var buttons: [ActionButton] = []
     var isVoice = false
-    /// A photo you sent, as the JPEG that went up. Kept small (see `OttoStore.sendPhoto`).
+    /// A photo you sent, as the JPEG that went up. Kept small (see `OttoStore.sendPhoto`). Only in
+    /// memory once saved: the thread file keeps `photo` and the JPEG lives in ImageStore, so the
+    /// file (decoded whole at every launch) doesn't grow with every photo ever sent.
     var image: Data? = nil
     /// Yours, written but not yet handed to the server. Saved with the thread, so a
     /// restart resends it. Optional so threads saved before it existed still decode.
@@ -71,6 +73,11 @@ struct Message: Identifiable, Codable {
     var wallet: [String: String]? = nil
     /// Yours, a photo from Snap to Otto: filed, not discussed, so a retry goes up as a snap too.
     var snap: Bool? = nil
+    /// Its photo is in ImageStore under `id` (see `image`).
+    var photo: Bool? = nil
+    var isPhoto: Bool { image != nil || photo == true }
+    /// The JPEG, from memory or from disk.
+    var imageData: Data? { image ?? (photo == true ? ImageStore.data(id) : nil) }
     /// Only from history: not a message but an "edit" or "reaction" for one older than the page,
     /// applied to the message it names and never shown on its own.
     var patch: String? = nil

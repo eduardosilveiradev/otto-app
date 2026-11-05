@@ -76,9 +76,16 @@ enum ShareDirect {
         else { return false }
         do {
             try await task.send(.string(s))
-            // A pong means the server read everything before it, the frame included.
+            // A pong means the server read everything before it, the frame included. Bounded: a network
+            // switch can strand the pong handler, and the sheet would sit on Sending for good.
             try await withCheckedThrowingContinuation { (k: CheckedContinuation<Void, Error>) in
-                task.sendPing { e in if let e { k.resume(throwing: e) } else { k.resume() } }
+                let once = Seen()
+                let finish: @Sendable (Error?) -> Void = { e in
+                    guard once.claim("done") else { return }
+                    if let e { k.resume(throwing: e) } else { k.resume() }
+                }
+                task.sendPing { finish($0) }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 15) { finish(URLError(.timedOut)) }
             }
             // An older server stops there. One that acks only does so once the message is written down.
             guard seen.has("hello") else { return true }
@@ -95,6 +102,8 @@ enum ShareDirect {
         private var got: Set<String> = []
         func add(_ s: String) { lock.withLock { _ = got.insert(s) } }
         func has(_ s: String) -> Bool { lock.withLock { got.contains(s) } }
+        /// True for the first caller only.
+        func claim(_ s: String) -> Bool { lock.withLock { got.insert(s).inserted } }
     }
 
     private static func drain(_ task: URLSessionWebSocketTask, _ seen: Seen) {
