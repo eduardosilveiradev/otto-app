@@ -596,19 +596,17 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         askGen = gen
         // Still this ask and still open: otherwise the answer is someone else's business, drop it.
         let mine = { [weak self] in self.map { $0.askGen == gen && $0.model.otto == .thinking } ?? false }
-        // Still the same field (not another one that happens to read the same). If not, say where the
-        // answer went rather than leave the panel thinking forever.
-        let here = { [weak self] () -> Bool in
-            guard let self, self.textDocumentProxy.documentIdentifier == doc else { self?.model.otto = .failed("You moved to another field. The answer is in the app."); return false }
-            return true
-        }
+        // Still the same field (not another one that happens to read the same)? Asked only once the
+        // Mac is known to have the ask, so "the answer is in the app" is never said for one that didn't land.
+        let here = { [weak self] in self?.textDocumentProxy.documentIdentifier == doc }
         Task { @MainActor in
             do {
                 let (data, resp) = try await URLSession.shared.data(for: req)
-                guard mine(), here() else { return }
+                guard mine() else { return }
                 // Only a 200 means the Mac has the ask; anything else (a 503 "send again", Funnel's 502
                 // with the Mac away) means it never landed, and the keyboard keeps no copy to retry.
                 guard (resp as? HTTPURLResponse)?.statusCode == 200 else { model.otto = .failed("Couldn't reach Otto. Try again."); return }
+                guard here() else { model.otto = .failed("You moved to another field. The answer is in the app."); return }
                 guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let reply = json["reply"] as? [String: Any], let text = reply["text"] as? String, !text.isEmpty
                 else { model.otto = .failed("Otto didn't answer in time. It'll be in the app."); return }
@@ -616,7 +614,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
                 guard before == field else { model.otto = .failed("The text changed while Otto was writing. It's in the app."); return }
                 apply(text, replacing: rewrite ? field : nil)
             } catch {
-                if mine(), here() { model.otto = .failed("Couldn't reach Otto.") }
+                if mine() { model.otto = .failed("Couldn't reach Otto. Try again.") }
             }
         }
     }

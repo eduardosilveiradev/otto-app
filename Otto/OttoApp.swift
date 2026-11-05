@@ -730,6 +730,8 @@ final class OttoStore {
         sending.insert(id)
         defer { sending.remove(id) }
         if m.isVoice { return await deliverVoice(m) }
+        // A photo whose JPEG is gone has nothing to send: said, rather than sent as its caption alone.
+        if m.photo == true && m.imageData == nil { if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].pending = nil; messages[i].failed = true }; return }
         let ok = if let jpeg = m.imageData, m.snap == true, let live = backend as? LiveBackend { await live.snap(jpeg, note: m.text, id: m.wireID) != nil }
             else if let jpeg = m.imageData { await backend.sendPhoto(jpeg, caption: m.text, id: m.wireID, shared: m.shared == true) }
             else if let data = m.tap { await backend.tap(ActionButton(label: m.text, data: data), id: m.wireID) }
