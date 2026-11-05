@@ -71,6 +71,9 @@ struct Message: Identifiable, Codable {
     var wallet: [String: String]? = nil
     /// Yours, a photo from Snap to Otto: filed, not discussed, so a retry goes up as a snap too.
     var snap: Bool? = nil
+    /// Only from history: not a message but an "edit" or "reaction" for one older than the page,
+    /// applied to the message it names and never shown on its own.
+    var patch: String? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }

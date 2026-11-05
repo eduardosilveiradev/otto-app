@@ -625,7 +625,7 @@ final class OttoStore {
         // is newer, more came in than the page holds (a long time offline): go further back. Anything
         // local in the page (a message just sent) says nothing about what's missing before it.
         let synced = syncCursor ?? UserDefaults.standard.object(forKey: "otto.syncedThrough") as? Date ?? .distantPast
-        if let oldest = all.first, oldest.date > synced, !messages.isEmpty {
+        if let oldest = all.first(where: { $0.patch == nil }), oldest.date > synced, !messages.isEmpty {
             // Everything since the last sync, as far back as the server's history goes; the first sync ever takes 500.
             all = await backend.history(background: background, limit: 500, since: synced == .distantPast ? nil : synced)
         }
@@ -635,6 +635,11 @@ final class OttoStore {
         let index = Dictionary(messages.indices.map { (messages[$0].wireID, $0) }, uniquingKeysWith: { a, _ in a })
         var fresh: [Message] = []
         for h in all {
+            if let kind = h.patch {   // an edit or tapback for a message older than the page
+                guard let i = index[h.wireID] else { continue }
+                if kind == "reaction" { messages[i].reaction = h.reaction } else if messages[i].text != h.text { messages[i].text = h.text; messages[i].otp = nil }
+                continue
+            }
             guard let i = index[h.wireID] else {
                 // Otto's rows from before history carried ids can only be matched by time.
                 if h.from == .otto && h.serverID == nil && h.date <= lastOtto.addingTimeInterval(1) { continue }

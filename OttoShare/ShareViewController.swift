@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 import UniformTypeIdentifiers
 
 /// "Otto" in the share sheet: what you shared, a line to add, Send. It goes to the app
@@ -30,13 +31,25 @@ final class ShareModel {
 
     enum State { case editing, sending, queued, failed }
 
+    /// At most 1600 px on the long side, decoded straight to that size: a full-size 24 MP photo
+    /// decodes to ~96 MB, and two of them get the extension killed for memory mid-share. The app
+    /// scales to 1600 px anyway (OttoStore.jpeg).
+    static func downsampled(_ data: Data) -> UIImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 1600, kCGImageSourceShouldCacheImmediately: true,
+              ] as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
+    }
+
     /// Pulls out the link, text and images. Safari hands over the page URL, plus its title
     /// as the item's text, which is noise next to the link.
     func load(_ items: [NSExtensionItem]) async {
         var parts: [String] = []
         for p in items.flatMap({ $0.attachments ?? [] }) {
             if p.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-                if let data = try? await p.loadData(UTType.image), let img = UIImage(data: data) { images.append(img) }
+                if let data = try? await p.loadData(UTType.image), let img = Self.downsampled(data) { images.append(img) }
             } else if p.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
                 if let url = try? await p.loadItem(forTypeIdentifier: UTType.url.identifier) as? URL { parts.append(url.absoluteString) }
             } else if p.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {

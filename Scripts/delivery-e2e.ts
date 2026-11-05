@@ -3,7 +3,7 @@
  * against a throwaway Otto server (otto-core's otto/tests/apptwin.ts) that can be stopped,
  * restarted and asked to reply. Each scenario prints PASS or FAIL.
  *
- *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|approval|tapread|corrupt|all]
+ *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|approval|tapread|oldedit|corrupt|all]
  *
  * Use a simulator made for it (`xcrun simctl create`): the app is reinstalled, so its thread is wiped.
  */
@@ -182,6 +182,19 @@ if (scenario === 'all' || scenario === 'tapread') {
   launch()
   await waitFor(() => mine('yes')?.read, 15000)
   check('tap: a read receipt missed while away heals from history', mine('yes')?.read === true, JSON.stringify(mine('yes') ?? null))
+}
+
+if (scenario === 'all' || scenario === 'oldedit') {
+  await twin.call('reply', { chat_id: 'app', text: 'old line to fix', verbatim: true })
+  launch()
+  const m = await waitFor(() => thread().find(x => x.text === 'old line to fix'), 15000)
+  kill()
+  for (let i = 0; i < 55; i++) await twin.call('reply', { chat_id: 'app', text: `edit filler ${i}`, verbatim: true })
+  await twin.call('edit_message', { chat_id: 'app', message_id: m?.serverID, text: 'old line, fixed' })
+  launch()
+  await waitFor(() => thread().find(x => x.serverID === m?.serverID)?.text === 'old line, fixed', 20000)
+  check('edit: a missed edit on a message older than the last 50 lands', thread().find(x => x.serverID === m?.serverID)?.text === 'old line, fixed')
+  check('edit: and is not shown as a message of its own', thread().filter(x => x.text === 'old line, fixed').length === 1)
 }
 
 if (scenario === 'all' || scenario === 'corrupt') {

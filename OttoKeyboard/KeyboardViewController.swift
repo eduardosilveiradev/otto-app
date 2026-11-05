@@ -595,10 +595,14 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
                 guard (resp as? HTTPURLResponse)?.statusCode == 200,
                       let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let reply = json["reply"] as? [String: Any], let text = reply["text"] as? String, !text.isEmpty
-                else { model.otto = .failed("Otto didn't answer in time. It'll be in the app."); return }
+                else { if model.otto == .thinking { model.otto = .failed("Otto didn't answer in time. It'll be in the app.") }; return }
+                // Closed while it worked, or the field moved on (another field, or typed into): the answer
+                // is stale here, and pasting it whole would land text where it wasn't asked for.
+                guard model.otto == .thinking else { return }
+                guard before == field else { model.otto = .failed("The text changed while Otto was writing. It's in the app."); return }
                 apply(text, replacing: rewrite ? field : nil)
             } catch {
-                model.otto = .failed("Couldn't reach Otto.")
+                if model.otto == .thinking { model.otto = .failed("Couldn't reach Otto.") }
             }
         }
     }

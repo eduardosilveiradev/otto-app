@@ -135,6 +135,7 @@ final class LiveBackend: OttoBackend {
                           isVoice: r.voice != nil || r.voicePending == true, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
                           thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled, recorded: r.recorded)
             m.reaction = r.reaction
+            if r.kind == "edit" || r.kind == "reaction" { m.patch = r.kind }
             return m
         }
     }
