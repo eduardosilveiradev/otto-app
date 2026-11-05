@@ -21,10 +21,12 @@ enum ShareOutbox {
     }
 
     /// False when there's no shared container to write to.
-    static func put(text: String, jpeg: Data?) -> Bool {
+    /// `id`: the item's id, the same one ShareDirect would send it under, so a share that falls
+    /// back to the direct path after some items were queued isn't delivered twice.
+    static func put(text: String, jpeg: Data?, id: UUID = UUID()) -> Bool {
         guard let dir else { return false }
         // The name sorts by time, so the app sends them in the order they were shared.
-        let name = "\(Int(Date().timeIntervalSince1970 * 1000))-\(UUID().uuidString)"
+        let name = "\(Int(Date().timeIntervalSince1970 * 1000))-\(id.uuidString)"
         var item = Item(text: text)
         if let jpeg {
             guard (try? jpeg.write(to: dir.appending(path: name + ".jpg"))) != nil else { return false }
@@ -34,20 +36,31 @@ enum ShareOutbox {
         return (try? data.write(to: dir.appending(path: name + ".json"), options: .atomic)) != nil
     }
 
-    /// Hands over everything waiting, oldest first, removing each as it goes. Returns the count.
+    /// Hands over everything waiting, oldest first, each under the id in its file name, then
+    /// removes the files once `saved` says the app has them on disk. If it doesn't, they stay and
+    /// come round again under the same ids. Returns the count handed over.
     @discardableResult
-    static func drain(_ handle: (_ text: String, _ jpeg: Data?) -> Void) -> Int {
+    /// `photoLost`: the item named a photo whose file can't be read, so the caller shows it as not
+    /// delivered rather than sending the caption alone (or nothing) as if that were the share.
+    static func drain(_ handle: (_ id: UUID, _ text: String, _ jpeg: Data?, _ photoLost: Bool) -> Void, saved: () -> Bool) -> Int {
         guard let dir, let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
         else { return 0 }
-        var n = 0
+        var done: [URL] = [], n = 0
         for json in files.filter({ $0.pathExtension == "json" }).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            defer { try? FileManager.default.removeItem(at: json) }
-            guard let data = try? Data(contentsOf: json), let item = try? JSONDecoder().decode(Item.self, from: data) else { continue }
+            guard let data = try? Data(contentsOf: json), let item = try? JSONDecoder().decode(Item.self, from: data) else {
+                try? FileManager.default.removeItem(at: json)   // unreadable: nothing to hand over
+                continue
+            }
             let image = item.image.map { dir.appending(path: $0) }
-            handle(item.text, image.flatMap { try? Data(contentsOf: $0) })
-            if let image { try? FileManager.default.removeItem(at: image) }
+            // Named "<ms>-<uuid>.json" by put.
+            let id = UUID(uuidString: String(json.deletingPathExtension().lastPathComponent.drop { $0 != "-" }.dropFirst())) ?? UUID()
+            let jpeg = image.flatMap { try? Data(contentsOf: $0) }
+            handle(id, item.text, jpeg, image != nil && jpeg == nil)
+            done += [json] + (image.map { [$0] } ?? [])
             n += 1
         }
+        guard n > 0, saved() else { return n }
+        for f in done { try? FileManager.default.removeItem(at: f) }
         return n
     }
 

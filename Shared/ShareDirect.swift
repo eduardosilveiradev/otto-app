@@ -35,14 +35,16 @@ enum ShareDirect {
     }
 
     /// Sends what was shared straight to Otto. True once the server has it.
-    static func send(text: String, jpegs: [Data]) async -> Bool {
-        guard let (base, token) = load() else { return false }
-        if jpegs.isEmpty { return await sendText(text, base: base, token: token) }
+    /// `ids`: one per item (the text, or each photo), the same on every attempt and the same the
+    /// outbox used, so a retry, or a fallback after some items were queued, is deduped by the server.
+    static func send(text: String, jpegs: [Data], ids: [UUID]) async -> Bool {
+        guard let (base, token) = load(), let first = ids.first else { return false }
+        if jpegs.isEmpty { return await sendText(text, id: first.uuidString, base: base, token: token) }
         var ok = true
         // The words ride along with the first photo, as a caption.
         for (i, jpeg) in jpegs.enumerated() {
             var c = URLComponents(url: base.appending(path: "app/photo"), resolvingAgainstBaseURL: false)!
-            c.queryItems = [URLQueryItem(name: "id", value: UUID().uuidString), URLQueryItem(name: "shared", value: "1")]
+            c.queryItems = [URLQueryItem(name: "id", value: (i < ids.count ? ids[i] : UUID()).uuidString), URLQueryItem(name: "shared", value: "1")]
                 + (i == 0 && !text.isEmpty ? [URLQueryItem(name: "text", value: text)] : [])
             var req = URLRequest(url: c.url!, timeoutInterval: 30)
             req.httpMethod = "POST"
@@ -54,33 +56,64 @@ enum ShareDirect {
         return ok
     }
 
-    private static func sendText(_ text: String, base: URL, token: String) async -> Bool {
+    private static func sendText(_ text: String, id: String, base: URL, token: String) async -> Bool {
         var c = URLComponents(url: base.appending(path: "app"), resolvingAgainstBaseURL: false)!
         c.scheme = c.scheme == "https" ? "wss" : "ws"
+        // A one-shot socket: the server mustn't hand it what's waiting for the app, or count it as the app open.
+        c.queryItems = [URLQueryItem(name: "share", value: "1")]
         var req = URLRequest(url: c.url!, timeoutInterval: 15)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let task = URLSession.shared.webSocketTask(with: req)
         task.resume()
         // URLSession only reads control frames while a receive is pending, and the server
         // speaks first on connect: without this the pong below waits behind that frame forever.
-        drain(task)
+        // It also watches for the server's hello (it acks) and the ack for this message.
+        let seen = Seen()
+        drain(task, seen)
         defer { task.cancel(with: .normalClosure, reason: nil) }
-        let frame: [String: Any] = ["type": "message", "id": UUID().uuidString, "text": text, "shared": true]
+        let frame: [String: Any] = ["type": "message", "id": id, "text": text, "shared": true]
         guard let json = try? JSONSerialization.data(withJSONObject: frame), let s = String(data: json, encoding: .utf8)
         else { return false }
         do {
             try await task.send(.string(s))
-            // A pong means the server read everything before it, the frame included.
+            // A pong means the server read everything before it, the frame included. Bounded: a network
+            // switch can strand the pong handler, and the sheet would sit on Sending for good.
             try await withCheckedThrowingContinuation { (k: CheckedContinuation<Void, Error>) in
-                task.sendPing { e in if let e { k.resume(throwing: e) } else { k.resume() } }
+                let once = Seen()
+                let finish: @Sendable (Error?) -> Void = { e in
+                    guard once.claim("done") else { return }
+                    if let e { k.resume(throwing: e) } else { k.resume() }
+                }
+                task.sendPing { finish($0) }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 15) { finish(URLError(.timedOut)) }
             }
-            return true
+            // An older server stops there. One that acks only does so once the message is written down.
+            guard seen.has("hello") else { return true }
+            for _ in 0..<100 where !seen.has(id) { try await Task.sleep(for: .milliseconds(100)) }
+            return seen.has(id)
         } catch {
             return false
         }
     }
 
-    private static func drain(_ task: URLSessionWebSocketTask) {
-        task.receive { if case .success = $0 { drain(task) } }
+    /// What the share socket has heard: "hello", and the ids it acked.
+    private final class Seen: @unchecked Sendable {
+        private let lock = NSLock()
+        private var got: Set<String> = []
+        func add(_ s: String) { lock.withLock { _ = got.insert(s) } }
+        func has(_ s: String) -> Bool { lock.withLock { got.contains(s) } }
+        /// True for the first caller only.
+        func claim(_ s: String) -> Bool { lock.withLock { got.insert(s).inserted } }
+    }
+
+    private static func drain(_ task: URLSessionWebSocketTask, _ seen: Seen) {
+        task.receive {
+            guard case .success(let m) = $0 else { return }
+            if case .string(let s) = m, let f = try? JSONSerialization.jsonObject(with: Data(s.utf8)) as? [String: Any] {
+                if f["type"] as? String == "hello" { seen.add("hello") }
+                if f["type"] as? String == "ack", let id = f["id"] as? String { seen.add(id) }
+            }
+            drain(task, seen)
+        }
     }
 }

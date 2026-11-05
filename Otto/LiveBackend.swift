@@ -5,8 +5,12 @@ import Foundation
 /// Wire protocol (documented in full at the "App transport" block in server.ts):
 ///   GET  <server>/app          websocket, `Authorization: Bearer <token>`
 ///     app -> otto  {"type":"message","id":"<uuid>","text":"...","reply_to":"<id>"?}
-///                  {"type":"tap","data":"<button data>","label":"..."}
-///                  {"type":"react","id":"<id>","emoji":"❤️"}
+///                  {"type":"tap","op":"<uuid>","data":"<button data>","label":"..."}
+///                  {"type":"react","op":"<uuid>","id":"<id>","emoji":"❤️"}
+///                  {"type":"approval","op":"<uuid>","id":"<id>","decision":"approve"|"decline"}
+///                  Each op is kept until {"type":"ack","id":"<op or message id>"} comes back and resent on the
+///                  next connect until it does; the server handles a repeat once. A server that says
+///                  {"type":"hello","acks":true} on connect acks; with an older one the write is all we get.
 ///     otto -> app  {"type":"message","id":"...","text":"...","ts":"<ISO>","buttons":[{"label","data"} or {"label","url"}],
 ///                   "files":[{"id","name","kind"}]?,"voice":{"id","name","kind"}?,"reply_to":"<id>"?,
 ///                   "src"?,"why"?  (only on messages Otto sent unprompted)}
@@ -21,9 +25,9 @@ import Foundation
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
 ///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
 ///   GET  <server>/app/brief    brief JSON
-///   GET  <server>/app/history  [{"dir":"in"|"out","text","ts","id"?,"kind":"terminal"?, and on Otto's: "files","voice","reply_to","buttons"?,"src"?,"why"?}]   (X-Otto-Background: 1 from the background refresh)
+///   GET  <server>/app/history?limit=  [{"dir":"in"|"out","text","ts","id"?,"kind":"terminal"?,"read"?, and on Otto's: "files","voice","reply_to","buttons"?,"src"?,"why"?}]   (X-Otto-Background: 1 from the background refresh)
 ///   GET  <server>/app/file/<id>  a file or voice clip from a message
-///   POST <server>/app/photo?text=<caption>&id=<uuid>  JPEG body
+///   POST <server>/app/photo?text=<caption>&id=<uuid>  JPEG body -> 204 once the server has it
 ///   POST <server>/app/voice?id=<uuid>    m4a body -> {"text": "<transcript>"}
 ///   POST <server>/app/ask     {"id","text","via":"siri"|"here","place"?} -> {"reply"?:{"id","text","buttons"}}  (Siri; waits for Otto's first reply)
 ///   POST <server>/app/photo?snap=1&id=<uuid>  JPEG body -> the same answer, for the Snap intent
@@ -67,8 +71,16 @@ final class LiveBackend: OttoBackend {
     private var live = false
     private var connects = 0
     private var socket: URLSessionWebSocketTask?
-    /// Frames written while disconnected; sent first thing on reconnect.
-    private var outbox: [String] = []
+    /// Tapbacks not yet acked, oldest first. On disk, so one made just before the app is
+    /// killed still goes. (Messages, taps and payments are kept in the thread instead.)
+    private var outbox: [String] = UserDefaults.standard.stringArray(forKey: "otto.outbox") ?? [] {
+        didSet { UserDefaults.standard.set(outbox, forKey: "otto.outbox") }
+    }
+    /// Whether this connection's server acks (its hello); nil until it has said, or 3s have passed.
+    private var acksOn: Bool?
+    /// Op ids the server has acked and nobody has collected yet, and those it acked as gone.
+    private var acked: Set<String> = []
+    private var gone: Set<String> = []
     private var loop: Task<Void, Never>?
 
     init(serverURL: URL, token: String) {
@@ -106,18 +118,24 @@ final class LiveBackend: OttoBackend {
 
     // MARK: OttoBackend
 
-    func history(background: Bool) async -> [Message] {
-        guard let rows: [WireHistory] = await get("app/history", background: background) else { return [] }
+    func history(background: Bool, limit: Int, since: Date?) async -> [Message] {
+        let q = since.map { [URLQueryItem(name: "since", value: $0.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: true)))] }
+            ?? [URLQueryItem(name: "limit", value: String(limit))]
+        guard let rows: [WireHistory] = await get("app/history", background: background, query: q) else { return [] }
         // Ids make the merge exact: yours come back under the UUID this phone sent them with.
-        return rows.map { r in
+        // One of yours without an id (written before they had one) can't be matched, so it's left out.
+        return rows.filter { $0.dir != "in" || $0.id != nil || $0.kind == "terminal" }.map { r in
             var m = r.kind == "terminal" ? Self.terminal(r.text, ts: r.ts)
             : r.dir == "in"
-                ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date(), shared: r.shared)
+                // A dashboard message's id isn't a UUID: it rides as serverID so the merge still matches it.
+                ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date(), shared: r.shared,
+                          serverID: r.id.flatMap { UUID(uuidString: $0) == nil ? $0 : nil }, read: r.read)
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
                           buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: r.voice != nil || r.voicePending == true, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
                           thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled, recorded: r.recorded)
             m.reaction = r.reaction
+            if r.kind == "edit" || r.kind == "reaction" { m.patch = r.kind }
             return m
         }
     }
@@ -128,30 +146,68 @@ final class LiveBackend: OttoBackend {
         var frame: [String: Any] = ["type": "message", "text": text, "id": id]
         if let replyTo { frame["reply_to"] = replyTo }
         if shared { frame["shared"] = true }
-        guard let task = lock.withLock({ socket }),
-              let json = try? JSONSerialization.data(withJSONObject: frame),
-              let s = String(data: json, encoding: .utf8) else { return false }
-        do { try await task.send(.string(s)); return true } catch { return false }
+        return await handOver(frame, op: id)
     }
 
-    func decide(approval id: String, approve: Bool) async {
-        await write(["type": "approval", "id": id, "decision": approve ? "approve" : "decline"])
+    /// A tap is kept in the thread like a message (its bubble is the label), under its own id.
+    func tap(_ button: ActionButton, id: String) async -> Bool {
+        await handOver(["type": "tap", "op": id, "data": button.data ?? "", "label": button.label], op: id)
     }
 
-    func tap(_ button: ActionButton) async {
-        await write(["type": "tap", "data": button.data ?? "", "label": button.label])
+    /// A Wallet payment that couldn't go up over HTTP when it happened, kept in the thread until acked.
+    func wallet(_ fields: [String: String], id: String) async -> Bool {
+        await handOver(fields.merging(["type": "wallet", "op": id]) { a, _ in a }, op: id)
+    }
+
+    /// Straight to the socket and waited on, not the outbox: see OttoStore.decide. One op per
+    /// approval, so "Try again" after a lost ack is recognised as the same decision.
+    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome {
+        let op = "approval-\(id)"
+        guard await handOver(["type": "approval", "op": op, "id": id, "decision": approve ? "approve" : "decline"], op: op) else { return .unknown }
+        return lock.withLock { gone.remove(op) != nil } ? .gone : .done
     }
 
     func react(to id: String, emoji: String) async {
         await write(["type": "react", "id": id, "emoji": emoji])
     }
 
+    /// True once the server has it: a write into a socket iOS froze also "succeeds", so a
+    /// server that acks is waited on, and one that doesn't answer in time is a failure to retry.
+    private func handOver(_ frame: [String: Any], op: String) async -> Bool {
+        guard let task = lock.withLock({ socket }),
+              let json = try? JSONSerialization.data(withJSONObject: frame),
+              let s = String(data: json, encoding: .utf8) else { return false }
+        do { try await task.send(.string(s)) } catch { return false }
+        return await confirmed(op, on: task)
+    }
+
+    /// The server's ack for `op`, or true at once for a server too old to send one.
+    /// ponytail: polls every 50ms rather than keeping continuations; there are only ever a few waiting.
+    private func confirmed(_ op: String, on task: URLSessionWebSocketTask) async -> Bool {
+        let end = Date.now.addingTimeInterval(3)
+        while lock.withLock({ acksOn == nil && socket === task }), Date.now < end { try? await Task.sleep(for: .milliseconds(50)) }
+        let acks = lock.withLock { () -> Bool in
+            if acksOn == nil && socket === task { acksOn = false }   // no hello: a server from before acks
+            return acksOn == true
+        }
+        guard acks else { return lock.withLock { socket === task } }
+        let deadline = Date.now.addingTimeInterval(10)
+        while Date.now < deadline {
+            let (got, alive) = lock.withLock { (acked.remove(op) != nil, socket === task) }
+            if got { return true }
+            if !alive { return false }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return false
+    }
+
+    /// True once the server has it (a 2xx), which it sends only after writing it down.
     // ponytail: the server's /app/photo and /app/voice don't read reply_to yet; it's sent so they can.
-    func sendPhoto(_ jpeg: Data, caption: String, id: String, replyTo: String?, shared: Bool) async {
-        _ = await post("app/photo", jpeg, query: [URLQueryItem(name: "id", value: id)]
-                       + (replyTo.map { [URLQueryItem(name: "reply_to", value: $0)] } ?? [])
-                       + (caption.isEmpty ? [] : [URLQueryItem(name: "text", value: caption)])
-                       + (shared ? [URLQueryItem(name: "shared", value: "1")] : []))
+    func sendPhoto(_ jpeg: Data, caption: String, id: String, replyTo: String?, shared: Bool) async -> Bool {
+        await post("app/photo", jpeg, query: [URLQueryItem(name: "id", value: id)]
+                   + (replyTo.map { [URLQueryItem(name: "reply_to", value: $0)] } ?? [])
+                   + (caption.isEmpty ? [] : [URLQueryItem(name: "text", value: caption)])
+                   + (shared ? [URLQueryItem(name: "shared", value: "1")] : [])) != nil
     }
 
     func file(_ id: String) async -> Data? {
@@ -238,9 +294,10 @@ final class LiveBackend: OttoBackend {
             }
             do {
                 try await ping(task)                    // handshake done, token accepted
-                lock.withLock { socket = task; live = true; connects += 1 }
+                lock.withLock { socket = task; live = true; connects += 1; acksOn = nil; acked = [] }
                 delay = 1
-                await flush(task)
+                // Not awaited: the flush waits on acks, which only the loop below reads.
+                Task { [weak self] in await self?.flush(task) }
                 // Proxies (Funnel) cut idle sockets; a ping every 20s keeps it open
                 // and turns a dead one into a receive error, i.e. a prompt reconnect.
                 let keepalive = Task { [weak self] in
@@ -294,10 +351,12 @@ final class LiveBackend: OttoBackend {
         @unknown default: return
         }
         // Before WireMessage: an approval's `files` aren't RemoteFiles, so it would fail that decode whole.
-        struct Kind: Decodable { let type: String; let id: String? }
+        struct Kind: Decodable { let type: String; let id: String?; let gone: Bool? }
         if let k = try? JSONDecoder().decode(Kind.self, from: data) {
             if k.type == "approval" { if let a = try? JSONDecoder().decode(ApprovalRequest.self, from: data) { approvalOut.yield(.show(a)) }; return }
             if k.type == "approval_done", let id = k.id { approvalOut.yield(.done(id)); return }
+            if k.type == "hello" { lock.withLock { acksOn = true }; return }
+            if k.type == "ack", let id = k.id { lock.withLock { acked.insert(id); if k.gone == true { gone.insert(id) } }; return }
         }
         guard let f = try? JSONDecoder().decode(WireMessage.self, from: data) else { return }
         if f.type == "react", let id = f.id, let emoji = f.emoji { reacted.yield((id, emoji)); return }
@@ -321,16 +380,25 @@ final class LiveBackend: OttoBackend {
     }
 
     private func write(_ frame: [String: String]) async {
+        var frame = frame
+        frame["op"] = UUID().uuidString
         guard let json = try? JSONSerialization.data(withJSONObject: frame),
               let s = String(data: json, encoding: .utf8) else { return }
         lock.withLock { outbox.append(s) }
         if let task = lock.withLock({ socket }) { await flush(task) }
     }
 
-    /// Sends queued frames in order; anything that fails stays for the next connect.
+    /// Sends queued frames in order, each kept until the server has it; the rest wait for the next connect.
+    /// Two flushes at once can send a frame twice, which the server's op ids make harmless.
     private func flush(_ task: URLSessionWebSocketTask) async {
         while let next = lock.withLock({ outbox.first }) {
+            guard let data = next.data(using: .utf8),
+                  let op = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["op"] as? String else {
+                lock.withLock { if outbox.first == next { outbox.removeFirst() } }   // unreadable: drop it
+                continue
+            }
             do { try await task.send(.string(next)) } catch { return }
+            guard await confirmed(op, on: task) else { return }
             lock.withLock { if outbox.first == next { outbox.removeFirst() } }
         }
     }
@@ -413,7 +481,6 @@ final class LiveBackend: OttoBackend {
     }
 
     /// Uploads go over plain HTTP, not the socket: its frames are capped at 64 KB.
-    /// ponytail: no retry — a failed upload is lost; queue them like `outbox` if that bites.
     private func post(_ path: String, _ body: Data, query: [URLQueryItem] = []) async -> Data? {
         var c = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { c.queryItems = query }
@@ -449,7 +516,7 @@ final class LiveBackend: OttoBackend {
         let dir: String; let text: String; let ts: String; let id: String?; let kind: String?
         let files: [RemoteFile]?; let voice: RemoteFile?; let voicePending: Bool?; let reply_to: String?; let buttons: [WireButton]?
         let thread: String?; let level: String?; let src: String?; let why: String?; let scheduled: [DashTrigger]?; let recorded: [RecordedCard]?
-        let shared: Bool?; let reaction: String?
+        let shared: Bool?; let reaction: String?; let read: Bool?
     }
     private struct WireBrief: Decodable {
         struct Event: Decodable { let title: String; let start: String; let minutes: Int }

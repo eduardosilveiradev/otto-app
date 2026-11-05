@@ -31,7 +31,9 @@ struct Message: Identifiable, Codable {
     var date = Date()
     var buttons: [ActionButton] = []
     var isVoice = false
-    /// A photo you sent, as the JPEG that went up. Kept small (see `OttoStore.sendPhoto`).
+    /// A photo you sent, as the JPEG that went up. Kept small (see `OttoStore.sendPhoto`). Only in
+    /// memory once saved: the thread file keeps `photo` and the JPEG lives in ImageStore, so the
+    /// file (decoded whole at every launch) doesn't grow with every photo ever sent.
     var image: Data? = nil
     /// Yours, written but not yet handed to the server. Saved with the thread, so a
     /// restart resends it. Optional so threads saved before it existed still decode.
@@ -65,6 +67,20 @@ struct Message: Identifiable, Codable {
     var recorded: [RecordedCard]? = nil
     /// A verification code to show in the drawer (OTP.swift). Cleared when the server edits the message after it expires.
     var otp: OTPCode? = nil
+    /// Yours, a button tap: the data that goes up (the bubble shows the label). Pending until the server has it.
+    var tap: String? = nil
+    /// Yours, a Wallet payment (amount, merchant, card) for money tracking, when it couldn't go up at once.
+    var wallet: [String: String]? = nil
+    /// Yours, a photo from Snap to Otto: filed, not discussed, so a retry goes up as a snap too.
+    var snap: Bool? = nil
+    /// Its photo is in ImageStore under `id` (see `image`).
+    var photo: Bool? = nil
+    var isPhoto: Bool { image != nil || photo == true }
+    /// The JPEG, from memory or from disk.
+    var imageData: Data? { image ?? (photo == true ? ImageStore.data(id) : nil) }
+    /// Only from history: not a message but an "edit" or "reaction" for one older than the page,
+    /// applied to the message it names and never shown on its own.
+    var patch: String? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }
@@ -121,6 +137,10 @@ struct Brief {
     var triggers: [Trigger]
 }
 
+/// What became of an approval decision: the Mac has it; there was nothing left to decide (it
+/// expired, or a restart dropped it), so nothing was done; or no answer came, so either may be true.
+enum ApprovalOutcome { case done, gone, unknown }
+
 // MARK: - The backend seam
 
 /// Everything the app knows about the server goes through here.
@@ -149,13 +169,18 @@ protocol OttoBackend: AnyObject {
     var voices: AsyncStream<(String, RemoteFile?)> { get }
     /// Otto rewriting a message it already sent: (wireID, new text).
     var edits: AsyncStream<(String, String)> { get }
-    func decide(approval id: String, approve: Bool) async
-    func history(background: Bool) async -> [Message]
+    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome
+    /// The newest `limit` messages of the thread on the server, or with `since`, every one after it.
+    func history(background: Bool, limit: Int, since: Date?) async -> [Message]
     /// True once the server has the message; false means try again later.
     func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool
-    func tap(_ button: ActionButton) async
+    /// Same contract as `send`, for a button tap under its bubble's id.
+    func tap(_ button: ActionButton, id: String) async -> Bool
     func react(to id: String, emoji: String) async
-    func sendPhoto(_ jpeg: Data, caption: String, id: String, replyTo: String?, shared: Bool) async
+    /// Same contract as `send`.
+    func sendPhoto(_ jpeg: Data, caption: String, id: String, replyTo: String?, shared: Bool) async -> Bool
+    /// Same contract as `send`: a Wallet payment (amount, merchant, card) for money tracking.
+    func wallet(_ fields: [String: String], id: String) async -> Bool
     /// Uploads an m4a voice note and returns its transcript ("" when there is none),
     /// or nil when the upload didn't make it, so the note stays pending and is retried.
     func sendVoice(_ m4a: Data, id: String, replyTo: String?) async -> String?
@@ -192,7 +217,8 @@ extension OttoBackend {
     func stamps() async -> StampsReply? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
-    func decide(approval id: String, approve: Bool) async {}
+    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome { .done }
+    func wallet(_ fields: [String: String], id: String) async -> Bool { true }
 }
 
 /// One switch on the Mac's settings page; `section` is otto, recurring or connectors.
@@ -251,7 +277,7 @@ final class MockBackend: OttoBackend {
         return try? JSONSerialization.data(withJSONObject: o)
     }
 
-    func history(background: Bool) async -> [Message] {
+    func history(background: Bool, limit: Int, since: Date?) async -> [Message] {
         return []
     }
 
@@ -263,13 +289,17 @@ final class MockBackend: OttoBackend {
         return true
     }
 
-    func tap(_ button: ActionButton) async {
-        try? await Task.sleep(for: .milliseconds(600))
-        out.yield(Message(from: .otto, text: "(mock) \(button.data ?? button.url ?? "") ✓"))
+    func tap(_ button: ActionButton, id: String) async -> Bool {
+        Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            out.yield(Message(from: .otto, text: "(mock) \(button.data ?? button.url ?? "") ✓"))
+        }
+        return true
     }
 
-    func sendPhoto(_ jpeg: Data, caption: String, id: String, replyTo: String?, shared: Bool) async {
+    func sendPhoto(_ jpeg: Data, caption: String, id: String, replyTo: String?, shared: Bool) async -> Bool {
         out.yield(Message(from: .otto, text: "(mock) nice photo"))
+        return true
     }
 
     func sendVoice(_ m4a: Data, id: String, replyTo: String?) async -> String? {

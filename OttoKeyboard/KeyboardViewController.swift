@@ -570,6 +570,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         if isOttoAfterglow { model.otto = .closed; ottoUndo = nil }
     }
 
+    /// The ask whose answer is still wanted; a newer ask replaces it, so an older answer is dropped.
+    private var askGen = UUID()
+
     private func askOtto(_ instruction: String) {
         guard hasFullAccess else {
             model.otto = .failed("Turn on Allow Full Access: Settings › General › Keyboard › Keyboards › Otto.")
@@ -589,16 +592,29 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         req.httpBody = try? JSONSerialization.data(withJSONObject: [
             "id": UUID().uuidString, "text": instruction, "via": "keyboard", "field": field,
         ])
+        let gen = UUID(), doc = textDocumentProxy.documentIdentifier
+        askGen = gen
+        // Still this ask and still open: otherwise the answer is someone else's business, drop it.
+        let mine = { [weak self] in self.map { $0.askGen == gen && $0.model.otto == .thinking } ?? false }
+        // Still the same field (not another one that happens to read the same)? Asked only once the
+        // Mac is known to have the ask, so "the answer is in the app" is never said for one that didn't land.
+        let here = { [weak self] in self?.textDocumentProxy.documentIdentifier == doc }
         Task { @MainActor in
             do {
                 let (data, resp) = try await URLSession.shared.data(for: req)
-                guard (resp as? HTTPURLResponse)?.statusCode == 200,
-                      let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                guard mine() else { return }
+                // Only a 200 means the Mac has the ask; anything else (a 503 "send again", Funnel's 502
+                // with the Mac away) means it never landed, and the keyboard keeps no copy to retry.
+                guard (resp as? HTTPURLResponse)?.statusCode == 200 else { model.otto = .failed("Couldn't reach Otto. Try again."); return }
+                guard here() else { model.otto = .failed("You moved to another field. The answer is in the app."); return }
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let reply = json["reply"] as? [String: Any], let text = reply["text"] as? String, !text.isEmpty
                 else { model.otto = .failed("Otto didn't answer in time. It'll be in the app."); return }
+                // Typed into while it worked: pasting the answer whole would land text where it wasn't asked for.
+                guard before == field else { model.otto = .failed("The text changed while Otto was writing. It's in the app."); return }
                 apply(text, replacing: rewrite ? field : nil)
             } catch {
-                model.otto = .failed("Couldn't reach Otto.")
+                if mine() { model.otto = .failed("Couldn't reach Otto. Try again.") }
             }
         }
     }

@@ -47,11 +47,13 @@ struct LogPayment: AppIntent {
         let title = merchant.isEmpty ? amount : "\(amount) · \(merchant)"
         let day = Date().formatted(.iso8601.year().month().day())
         let mine = Message(from: .me, text: card.isEmpty ? "Payment" : card,
-                           recorded: [RecordedCard(kind: "money", id: UUID().uuidString, title: title, detail: day, body: nil, action: nil)])
-        _ = await OttoStore.shared.siri(mine) { live in
-            _ = await live.logPayment(id: mine.wireID, amount: amount, merchant: merchant, card: card)
-            return nil
+                           recorded: [RecordedCard(kind: "money", id: UUID().uuidString, title: title, detail: day, body: nil, action: nil)],
+                           wallet: ["amount": amount, "merchant": merchant, "card": card])
+        let posted = await OttoStore.shared.siri(mine) { live in
+            await live.logPayment(id: mine.wireID, amount: amount, merchant: merchant, card: card) ? LiveBackend.Answer(reply: nil) : nil
         }
+        // Offline (a basement shop, the metro): kept pending and sent when the app next connects, never dropped.
+        if posted == nil { _ = await OttoStore.shared.sendAndConfirm(mine.id) }
         return .result()
     }
 }
@@ -77,10 +79,12 @@ struct SnapToOtto: AppIntent {
             return .result(dialog: "That isn't a photo I can read.")
         }
         let words = note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let mine = Message(from: .me, text: words, image: jpeg)
-        // ponytail: an offline snap only stays in the thread; queue the upload like voice notes if that bites.
+        var mine = Message(from: .me, text: words, image: jpeg)
+        mine.snap = true
         guard let a = await OttoStore.shared.siri(mine, send: { await $0.snap(jpeg, note: words, id: mine.wireID) }) else {
-            return .result(dialog: "Otto's offline. The photo's in the chat; send it again when it's back.")
+            // Unreachable: it goes up as a plain photo when the app next connects, pending until then.
+            let sent = await OttoStore.shared.sendAndConfirm(mine.id)
+            return .result(dialog: sent ? "Sent." : "Otto's offline. The photo goes out next time the app connects.")
         }
         return .result(dialog: try await spoken(a))
     }
@@ -108,8 +112,10 @@ struct SaveThisPlace: AppIntent {
         guard let fix else { return .result(dialog: "Couldn't get your location.") }
         let place = await Here.describe(fix)
         let mine = Message(from: .me, text: "📍 " + (words.isEmpty ? (place["name"] as? String ?? "here") : words))
-        guard let a = await OttoStore.shared.siri(mine, send: { await $0.ask(id: mine.wireID, text: words, via: "here", place: place) })
-        else { return .result(dialog: "Otto's offline, so that place isn't saved.") }
+        guard let a = await OttoStore.shared.siri(mine, send: { await $0.ask(id: mine.wireID, text: words, via: "here", place: place) }) else {
+            OttoStore.shared.giveUp(mine.id)   // the place can't ride a later retry: say it didn't go
+            return .result(dialog: "Otto's offline, so that place isn't saved.")
+        }
         return .result(dialog: try await spoken(a))
     }
 }

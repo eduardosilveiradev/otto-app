@@ -27,6 +27,8 @@ import VoiceGlowKit
     func send(_ text: String)
     func react(_ emoji: String, on id: Message.ID)
     func tap(_ button: ActionButton, on id: Message.ID)
+    /// One of yours marked "Not delivered", sent again now.
+    func retry(_ id: Message.ID)
 }
 
 extension OttoStore: ChatThread {
@@ -110,10 +112,11 @@ struct ChatView: View {
     }
     @Environment(\.accessibilityReduceMotion) private var still
 
-    /// "Read" once Otto has taken the message in (or answered after it); until then it
-    /// may be sitting in his queue, which is "Delivered".
+    /// "Read" once the server says Otto has taken the message in; until then it may be sitting
+    /// in the queue behind a long turn, which is "Delivered". Not guessed from a later message of
+    /// Otto's: that can be a proactive one, or an answer to something else.
     private func receipt(for i: Int, in messages: [Message]) -> Bool {
-        messages[i].read == true || messages[(i + 1)...].contains { $0.from == .otto }
+        messages[i].read == true
     }
 
     var body: some View {
@@ -882,7 +885,7 @@ private struct Row: View {
     }
     /// The first link worth a card: not for photos, voice notes, audio or drafts.
     static func previewURL(_ m: Message) -> URL? {
-        if m.image != nil || m.isVoice || m.audio != nil || draft(m) != nil { return nil }
+        if m.isPhoto || m.isVoice || m.audio != nil || draft(m) != nil { return nil }
         return linked(m.text).runs.lazy.compactMap(\.link).first
     }
     /// A message that is nothing but the link: the bubble gives way to the card once metadata lands (Messages behaviour).
@@ -892,7 +895,7 @@ private struct Row: View {
     }
     /// A photo or file with no words is only itself: no empty bubble under it. A voice note is its bubble.
     private var textShown: Bool {
-        let attached = message.image != nil || !(message.files ?? []).isEmpty
+        let attached = message.isPhoto || !(message.files ?? []).isEmpty
         return (!attached || !message.text.isEmpty || message.isVoice || message.audio != nil) && !hidesText
     }
     private var hidesText: Bool { preview != nil && Self.previewURL(message).map { Self.isOnlyLink(message, $0) } == true }
@@ -934,7 +937,7 @@ private struct Row: View {
     static func summary(_ m: Message) -> String {
         if !m.text.isEmpty { return draft(m)?.body ?? m.text }
         if m.isVoice || m.audio != nil { return "Voice message" }
-        if m.image != nil { return "Photo" }
+        if m.isPhoto { return "Photo" }
         switch m.files?.first?.kind {
         case "image": return "Photo"
         case "video": return "Video"
@@ -1146,7 +1149,15 @@ private struct Row: View {
                 .padding(.leading, 12)
             }
 
-            if message.failed == true {
+            if message.failed == true && message.pending == true {
+                // Still retried on its own at the next connection; the tap just doesn't wait for one.
+                Button { thread.retry(message.id) } label: {
+                    Text("Not delivered · ").foregroundStyle(.red) + Text("Try again").foregroundStyle(.blue)
+                }
+                .font(.system(size: 11)).buttonStyle(.plain)
+                .padding(.trailing, 4)
+            } else if message.failed == true {
+                // Nothing left to send (a voice note whose audio is gone).
                 Text("Not delivered").font(.system(size: 11)).foregroundStyle(.red)
                     .padding(.trailing, 4)
             } else if message.pending == true {
@@ -1327,9 +1338,32 @@ private struct RemoteFileView: View {
 }
 
 /// Your voice notes, kept on the phone so they play back. Otto's live on the server.
-enum VoiceStore {
-    static func url(_ id: UUID) -> URL { .cachesDirectory.appending(path: "voice-\(id.uuidString).m4a") }
+/// Your voice notes, kept in Application Support: iOS empties Caches when space runs low, and an
+/// unsent note's audio is the only copy. Notes saved by older builds are still read from Caches.
+/// Photos you sent, one JPEG per message in Application Support, out of the thread file.
+enum ImageStore {
+    static func url(_ id: UUID) -> URL {
+        let dir = URL.applicationSupportDirectory.appending(path: "images", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appending(path: "\(id.uuidString).jpg")
+    }
     static func data(_ id: UUID) -> Data? { try? Data(contentsOf: url(id)) }
+    /// True once it's on disk (already, or now).
+    static func save(_ data: Data, for id: UUID) -> Bool {
+        let u = url(id)
+        return FileManager.default.fileExists(atPath: u.path) || (try? data.write(to: u, options: .atomic)) != nil
+    }
+}
+
+enum VoiceStore {
+    static func url(_ id: UUID) -> URL {
+        let dir = URL.applicationSupportDirectory.appending(path: "voice", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appending(path: "\(id.uuidString).m4a")
+    }
+    static func data(_ id: UUID) -> Data? {
+        (try? Data(contentsOf: url(id))) ?? (try? Data(contentsOf: .cachesDirectory.appending(path: "voice-\(id.uuidString).m4a")))
+    }
 }
 
 /// A voice note: play, a waveform that fills as it plays, the length.
@@ -1914,9 +1948,9 @@ final class VoiceRecorder {
 private enum Thumbs {
     static let cache = NSCache<NSUUID, UIImage>()
     static func image(for m: Message) -> UIImage? {
-        guard let data = m.image else { return nil }
+        guard m.isPhoto else { return nil }
         if let hit = cache.object(forKey: m.id as NSUUID) { return hit }
-        guard let img = UIImage(data: data) else { return nil }
+        guard let data = m.imageData, let img = UIImage(data: data) else { return nil }
         cache.setObject(img, forKey: m.id as NSUUID)
         return img
     }

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 import UniformTypeIdentifiers
 
 /// "Otto" in the share sheet: what you shared, a line to add, Send. It goes to the app
@@ -29,14 +30,33 @@ final class ShareModel {
     var finish: () -> Void = {}
 
     enum State { case editing, sending, queued, failed }
+    /// True until every attachment has been read: Send waits, so a photo still loading isn't left out.
+    var loading = true
+    /// Photos that couldn't be read, said under the preview rather than dropped without a word.
+    var unreadable = 0
+
+    /// At most 1600 px on the long side, decoded straight to that size: a full-size 24 MP photo
+    /// decodes to ~96 MB, and two of them get the extension killed for memory mid-share. The app
+    /// scales to 1600 px anyway (OttoStore.jpeg).
+    static func downsampled(_ data: Data) -> UIImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 1600, kCGImageSourceShouldCacheImmediately: true,
+              ] as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
+    }
 
     /// Pulls out the link, text and images. Safari hands over the page URL, plus its title
     /// as the item's text, which is noise next to the link.
     func load(_ items: [NSExtensionItem]) async {
+        loading = true
+        defer { loading = false }
         var parts: [String] = []
         for p in items.flatMap({ $0.attachments ?? [] }) {
             if p.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-                if let data = try? await p.loadData(UTType.image), let img = UIImage(data: data) { images.append(img) }
+                if let data = try? await p.loadData(UTType.image), let img = Self.downsampled(data) { images.append(img) }
+                else { unreadable += 1 }
             } else if p.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
                 if let url = try? await p.loadItem(forTypeIdentifier: UTType.url.identifier) as? URL { parts.append(url.absoluteString) }
             } else if p.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
@@ -46,22 +66,28 @@ final class ShareModel {
         text = parts.joined(separator: "\n")
     }
 
+    /// One id per item (the text, or each photo), made once and used by both the outbox and the
+    /// direct path, so a retry or a fallback after a partial queue is deduped, not doubled.
+    @ObservationIgnored private var itemIDs: [UUID] = []
+
+
     func send() {
         state = .sending
         let message = [note, text].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: "\n")
+        if itemIDs.isEmpty { itemIDs = (0..<max(1, images.count)).map { _ in UUID() } }
         var ok = true
         if images.isEmpty {
-            ok = ShareOutbox.put(text: message, jpeg: nil)
+            ok = ShareOutbox.put(text: message, jpeg: nil, id: itemIDs[0])
         } else {
             // The words ride along with the first photo, as a caption.
             for (i, img) in images.enumerated() {
-                ok = ok && ShareOutbox.put(text: i == 0 ? message : "", jpeg: img.jpegData(compressionQuality: 0.85))
+                ok = ok && ShareOutbox.put(text: i == 0 ? message : "", jpeg: img.jpegData(compressionQuality: 0.85), id: itemIDs[i])
             }
         }
         guard ok else {
             // No app group on this build: hand it to the server directly instead.
             Task {
-                let direct = await ShareDirect.send(text: message, jpegs: images.compactMap { $0.jpegData(compressionQuality: 0.85) })
+                let direct = await ShareDirect.send(text: message, jpegs: images.compactMap { $0.jpegData(compressionQuality: 0.85) }, ids: itemIDs)
                 if direct { finish() } else { state = .failed }
             }
             return
@@ -107,6 +133,10 @@ struct ShareView: View {
                         }
                     }
                 }
+                if model.unreadable > 0 {
+                    Text(model.unreadable == 1 ? "One photo couldn't be read and won't be sent." : "\(model.unreadable) photos couldn't be read and won't be sent.")
+                        .font(.footnote).foregroundStyle(.red)
+                }
                 if !model.text.isEmpty {
                     Text(model.text).font(.callout).foregroundStyle(.secondary).lineLimit(6)
                 }
@@ -124,7 +154,7 @@ struct ShareView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { model.finish() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Send") { model.send() }
-                        .disabled(model.state != .editing || (model.text.isEmpty && model.images.isEmpty && model.note.isEmpty))
+                        .disabled(model.loading || model.state != .editing || (model.text.isEmpty && model.images.isEmpty && model.note.isEmpty))
                 }
             }
         }

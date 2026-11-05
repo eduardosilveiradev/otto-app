@@ -115,7 +115,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         if response.actionIdentifier == Self.replyAction,
            let text = (response as? UNTextInputNotificationResponse)?.userText.trimmingCharacters(in: .whitespacesAndNewlines),
            !text.isEmpty {
-            Task { @MainActor in OttoStore.shared.send(text); done() }
+            // On disk before iOS is told we're done: it may suspend the app the moment it hears that.
+            Task { @MainActor in OttoStore.shared.send(text); OttoStore.shared.saveNow(); done() }
             return
         }
         done()

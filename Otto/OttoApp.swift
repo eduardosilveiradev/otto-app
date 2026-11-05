@@ -165,28 +165,11 @@ final class OttoStore {
         let dir = URL.applicationSupportDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         file = dir.appending(path: "chat-\(backend.name.lowercased().replacing(" ", with: "-")).json")
-        messages = Self.dedupe((try? JSONDecoder().decode([Message].self, from: Data(contentsOf: file))) ?? [])
-    }
-
-    /// Threads saved before history carried ids picked up a second copy of some of your
-    /// messages (the server's, stamped a moment later). Drops a text-only copy of the
-    /// message just before it.
-    private static func dedupe(_ ms: [Message]) -> [Message] {
-        var out: [Message] = []
-        for m in ms {
-            if m.from == .me, m.image == nil, !m.text.isEmpty,
-               let prev = out.last(where: { $0.from == .me }), prev.text == m.text,
-               m.date.timeIntervalSince(prev.date) < 15 { continue }
-            out.append(m)
+        if let data = try? Data(contentsOf: file) {
+            if let saved = try? JSONDecoder().decode([Message].self, from: data) { messages = saved }
+            // Unreadable (a bad row, a schema it doesn't know): kept aside, not overwritten by the next save.
+            else { try? FileManager.default.moveItem(at: file, to: file.appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970))")) }
         }
-        return out
-    }
-
-    /// What the server has that this phone doesn't. Matched by id; the time rule is for
-    /// history written before messages carried one.
-    private func unseen(_ history: [Message], after last: Date) -> [Message] {
-        let known = Set(messages.map(\.wireID))
-        return history.filter { !known.contains($0.wireID) && $0.date > last.addingTimeInterval(1) }
     }
 
     private func checkForUpdate() async {
@@ -205,21 +188,54 @@ final class OttoStore {
     /// thread, and once per burst of changes (a send flips pending, read and typing in a row).
     private func save() {
         saving?.cancel()
-        let snapshot = messages, file = file
+        generation += 1
+        let snapshot = messages, file = file, gen = generation, cursor = syncCursor
         saving = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
-            try? JSONEncoder().encode(snapshot).write(to: file, options: .atomic)
+            Self.write(snapshot, gen: gen, to: file, cursor: cursor)
         }
     }
     @ObservationIgnored private var saving: Task<Void, Never>?
+    /// Bumped per change; a write only lands if nothing newer is already on disk.
+    @ObservationIgnored private var generation = 0
+    /// How far catch-up has merged the server's history into `messages`. It is stored only by the
+    /// write that puts those messages on disk, so a crash can't leave it ahead of the thread.
+    @ObservationIgnored private var syncCursor: Date?
+
+    nonisolated private static let disk = DispatchQueue(label: "otto.thread")
+    nonisolated(unsafe) private static var committed = 0   // the generation on disk; only touched on `disk`
+
+    /// One write at a time, and never an older snapshot over a newer one: a slow encode that started
+    /// before a `saveNow` must not land after it. True when this snapshot (or a newer one) is on disk.
+    @discardableResult
+    nonisolated private static func write(_ snapshot: [Message], gen: Int, to file: URL, cursor: Date?) -> Bool {
+        disk.sync {
+            guard gen > committed else { return true }
+            // Photos go to their own files; the thread keeps a flag. One whose file can't be written stays inline.
+            let lean = snapshot.map { m -> Message in
+                guard let jpeg = m.image, ImageStore.save(jpeg, for: m.id) else { return m }
+                var c = m; c.image = nil; c.photo = true; return c
+            }
+            guard let data = try? JSONEncoder().encode(lean), (try? data.write(to: file, options: .atomic)) != nil else { return false }
+            committed = gen
+            if let cursor { UserDefaults.standard.set(cursor, forKey: "otto.syncedThrough") }
+            return true
+        }
+    }
 
     /// Writes now, for when the app is about to be suspended and a pending save could be lost.
     func flush() {
-        guard let s = saving, !s.isCancelled else { return }
-        s.cancel()
+        guard Self.disk.sync(execute: { Self.committed }) < generation else { return }   // nothing newer than disk
+        saveNow()
+    }
+
+    /// Writes the thread now, whatever is pending. False when it didn't make it to disk.
+    @discardableResult func saveNow() -> Bool {
+        saving?.cancel()
         saving = nil
-        try? JSONEncoder().encode(messages).write(to: file, options: .atomic)
+        generation += 1
+        return Self.write(messages, gen: generation, to: file, cursor: syncCursor)
     }
 
     /// A reply whose voice never came (the server restarted mid-synthesis, so neither the frame nor
@@ -235,7 +251,9 @@ final class OttoStore {
     /// isLive isn't observable, so re-read it every second.
     private func tick() async {
         var seen = backend.connections
+        var n = 0
         while !Task.isCancelled {
+            n += 1
             var live = backend is MockBackend || backend.isLive
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-offline") { live = false }   // the disconnected UI, in the simulator
@@ -249,6 +267,12 @@ final class OttoStore {
                 Task { await reportHealth("connect") }
             }
             expireVoiceWaits()
+            markUndelivered()
+            // An approval past its time is gone on the Mac too: off the screen, unless it's showing its receipt.
+            let lapsed = { (a: ApprovalRequest) in !self.keptApprovals.contains(a.id) && (LiveBackend.date(a.expires).map { $0 < .now } ?? false) }
+            if approvals.contains(where: lapsed) { approvals.removeAll(where: lapsed) }
+            // An ack that never came on a socket that still looks fine: try again every 15s.
+            if live && n % 15 == 0 { Task { await resendPending() } }
             if live != connected { connected = live }
             if !live != asleep { asleep = !live }
             try? await Task.sleep(for: .seconds(1))
@@ -372,6 +396,56 @@ final class OttoStore {
             // to record and look for jumps. Each step prints "LAB <seconds> <what>".
             if ProcessInfo.processInfo.arguments.contains("-shiftLab") { Task { await shiftLab() } }
         }
+        // `-e2eSend <text>` / `-e2eTapLast`: once connected, send a message or tap the newest button,
+        // through the real paths, for the delivery tests against a throwaway server.
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-e2eSend"), i + 1 < ProcessInfo.processInfo.arguments.count {
+            let text = ProcessInfo.processInfo.arguments[i + 1]
+            Task { try? await Task.sleep(for: .seconds(2)); send(text) }
+        }
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-e2eWallet"), i + 1 < ProcessInfo.processInfo.arguments.count {
+            let amount = ProcessInfo.processInfo.arguments[i + 1]
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                var intent = LogPayment(); intent.amount = amount; intent.merchant = "E2E Shop"; intent.card = ""
+                _ = try? await intent.perform()
+            }
+        }
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-e2eShare"), i + 1 < ProcessInfo.processInfo.arguments.count {
+            let text = ProcessInfo.processInfo.arguments[i + 1]
+            Task { try? await Task.sleep(for: .seconds(2)); _ = ShareOutbox.put(text: text, jpeg: nil); sendShared() }
+        }
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-e2eDecide"), i + 1 < ProcessInfo.processInfo.arguments.count {
+            let id = ProcessInfo.processInfo.arguments[i + 1]
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                let outcome = await decide(id, approve: true, keep: true)
+                try? "\(outcome)".write(to: .applicationSupportDirectory.appending(path: "e2e-decided"), atomically: true, encoding: .utf8)   // read back by Scripts/delivery-e2e.ts
+            }
+        }
+        if ProcessInfo.processInfo.arguments.contains("-e2eShareLostPhoto") {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                _ = ShareOutbox.put(text: "lost photo caption", jpeg: Data([0xFF, 0xD8]))
+                // Its JPEG gone before the app drains it.
+                if let dir = ShareOutbox.dir, let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+                    for f in files where f.pathExtension == "jpg" { try? FileManager.default.removeItem(at: f) }
+                }
+                sendShared()
+            }
+        }
+        if ProcessInfo.processInfo.arguments.contains("-e2ePhoto") {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                let img = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).image { ctx in UIColor.systemTeal.setFill(); ctx.fill(ctx.format.bounds) }
+                sendPhoto(img, caption: "e2e photo")
+            }
+        }
+        if ProcessInfo.processInfo.arguments.contains("-e2eTapLast") {
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                if let m = messages.last(where: { !$0.buttons.isEmpty }), let b = m.buttons.first { tap(b, on: m.id) }
+            }
+        }
         // `-scriptDemo`: a scripted session for the launch film; see scriptDemo().
         if ProcessInfo.processInfo.arguments.contains("-scriptDemo") { Task { await scriptDemo() } }
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
@@ -385,10 +459,7 @@ final class OttoStore {
         // Anything the server has that's newer than what's saved here, e.g. replies
         // that landed while the app was closed.
         // The mock's canned thread is only a seed for an empty chat.
-        let last = messages.last?.date ?? .distantPast
-        let fresh = backend is MockBackend && !messages.isEmpty ? []
-            : unseen(await backend.history(background: false), after: last)
-        if !fresh.isEmpty { messages += fresh }
+        await catchUp(notify: false)
         animated = true
         #if PERFDEMO
         if ProcessInfo.processInfo.arguments.contains("-perfDemo") { Task { await perfDemo() } }
@@ -596,46 +667,59 @@ final class OttoStore {
         await live.postHealth(await Notifier.health(reason: reason))
     }
 
-    /// Otto's replies (and terminal lines) from the server's history that this phone doesn't
-    /// have yet. Not yours: they're already here, and the server's copy of them is
-    /// stamped a moment later, so merging those would show every message twice. The
-    /// exception is what you sent from the share sheet, which went straight to the Mac:
-    /// those come in by id, each in its place by time.
+    /// The server's history against this thread, matched by id. What isn't here goes in, in its
+    /// place by time: Otto's replies that went into a socket iOS had frozen, and yours from
+    /// elsewhere (the share sheet, the dashboard). What is here gets what a lost frame carried:
+    /// its edit, Otto's tapback, a voice clip, a read receipt, and for one still marked sending,
+    /// the fact that the server has it after all.
     private func catchUp(notify: Bool, background: Bool = false) async {
         guard !(backend is MockBackend) else { return }
-        let last = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
-        let all = await backend.history(background: background)
-        let have = Set(messages.map(\.id))
-        for s in all where s.from == .me && s.shared == true && !have.contains(s.id) {
-            messages.insert(s, at: messages.firstIndex { $0.date > s.date } ?? messages.endIndex)
+        var all = await backend.history(background: background, limit: 50, since: nil)
+        // Continuous with the last sync only if the page reaches back to it. If even the oldest of the 50
+        // is newer, more came in than the page holds (a long time offline): go further back. Anything
+        // local in the page (a message just sent) says nothing about what's missing before it.
+        let synced = syncCursor ?? UserDefaults.standard.object(forKey: "otto.syncedThrough") as? Date ?? .distantPast
+        if let oldest = all.first(where: { $0.patch == nil }), oldest.date > synced, !messages.isEmpty {
+            // Everything since the last sync, as far back as the server's history goes; the first sync ever takes 500.
+            all = await backend.history(background: background, limit: 500, since: synced == .distantPast ? nil : synced)
         }
-        // Otto's tapbacks: the frame can land before the message it's on (a share-sheet one comes in just above).
-        // Only on yours: the one on Otto's is your own, already here, and one you took off stays off.
-        for h in all where h.reaction != nil {
-            if let i = messages.firstIndex(where: { $0.wireID == h.wireID && $0.from == .me }) { messages[i].reaction = h.reaction }
-        }
-        let history = all.filter { $0.from != .me }
-        // A reply that came as text with its voice to follow: the "voice" frame may have gone into a
-        // socket iOS had frozen, and history carries the clip, so fill the waiting bar from it.
-        for h in history where h.audio != nil {
-            if let i = messages.firstIndex(where: { $0.wireID == h.wireID && $0.isVoice && $0.audio == nil }) {
-                messages[i].audio = h.audio
+        // Stored with the save that writes these messages (see write), never ahead of them.
+        if let newest = all.map(\.date).max() { syncCursor = max(newest, synced); save() }
+        let lastOtto = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
+        let index = Dictionary(messages.indices.map { (messages[$0].wireID, $0) }, uniquingKeysWith: { a, _ in a })
+        var fresh: [Message] = []
+        for h in all {
+            if let kind = h.patch {   // an edit or tapback for a message older than the page
+                guard let i = index[h.wireID] else { continue }
+                // Otto's tapback, only ever on yours: the one on Otto's is your own, and one you took off stays off.
+                if kind == "reaction" { if messages[i].from == .me { messages[i].reaction = h.reaction } } else if messages[i].text != h.text { messages[i].text = h.text; messages[i].otp = nil }
+                continue
+            }
+            guard let i = index[h.wireID] else {
+                // Otto's rows from before history carried ids can only be matched by time.
+                if h.from == .otto && h.serverID == nil && h.date <= lastOtto.addingTimeInterval(1) { continue }
+                fresh.append(h)
+                continue
+            }
+            // Otto's tapbacks, only on yours: the one on Otto's is your own, already here, and one you took off stays off.
+            if let r = h.reaction, messages[i].from == .me { messages[i].reaction = r }
+            if h.from == .me {
+                if messages[i].pending == true || messages[i].failed == true { messages[i].pending = nil; messages[i].failed = nil }
+                if h.read == true { messages[i].read = true }
+            } else if h.from == .otto {
+                if messages[i].isVoice && messages[i].audio == nil && h.audio != nil { messages[i].audio = h.audio }
+                // History is the latest text; only one cut at its 8000-character cap keeps the longer local copy.
+                if messages[i].text != h.text && !(h.text.count >= 8000 && messages[i].text.hasPrefix(h.text)) { messages[i].text = h.text }
             }
         }
-        // History carries the edited text, for an edit frame that never reached a frozen socket.
-        // ponytail: history cuts text at 1500 chars, so a prefix is a cut, not an edit; an edit that only trims is missed.
-        for h in history where h.from == .otto {
-            if let i = messages.firstIndex(where: { $0.wireID == h.wireID && !$0.text.hasPrefix(h.text) }) { messages[i].text = h.text }
-        }
-        let fresh = unseen(history, after: last)
         guard !fresh.isEmpty else { return }
         if !serverTyping && fresh.contains(where: { $0.from == .otto }) { ottoTyping = false }
-        messages += fresh
+        for m in fresh { messages.insert(m, at: messages.lastIndex { $0.date <= m.date }.map { $0 + 1 } ?? 0) }
         if notify { for m in fresh where m.from == .otto { Notifier.shared.post(m) } }
     }
 
-    func send(_ text: String, shared: Bool = false) {
-        var m = Message(from: .me, text: text, pending: true)
+    func send(_ text: String, shared: Bool = false, id: UUID = UUID()) {
+        var m = Message(id: id, from: .me, text: text, pending: true)
         if shared { m.shared = true }
         m.replyTo = takeReply()
         messages.append(m)
@@ -655,7 +739,7 @@ final class OttoStore {
         guard let i = messages.firstIndex(where: { $0.id == id }) else { return false }
         messages[i].pending = true
         let end = ContinuousClock.now + timeout
-        while ContinuousClock.now < end {
+        while ContinuousClock.now < end, !Task.isCancelled {   // cancelled, the sleep returns at once: no spinning
             await deliver(id)
             if messages.first(where: { $0.id == id })?.pending == nil { return true }
             try? await Task.sleep(for: .milliseconds(300))
@@ -668,9 +752,17 @@ final class OttoStore {
     /// opening the app shows both. The socket's copy is deduped by id. Nil when there's no live
     /// server or it can't be reached; `mine` stays either way.
     func siri(_ mine: Message, send: (LiveBackend) async -> LiveBackend.Answer?) async -> LiveBackend.Answer? {
+        // Pending until the server has it: iOS can end a background intent mid-request, and the
+        // saved thread must then say unsent (and send it later), not look delivered.
+        var mine = mine
+        mine.pending = true
         messages.append(mine)
+        flush()
         defer { flush() }   // a background launch can be suspended before the debounced save
+        sending.insert(mine.id)   // the socket's retry waits for this request
+        defer { sending.remove(mine.id) }
         guard let live = backend as? LiveBackend, let a = await send(live) else { return nil }
+        if let i = messages.firstIndex(where: { $0.id == mine.id }) { messages[i].pending = nil }
         if let r = a.reply, !messages.contains(where: { $0.wireID == r.id }) {
             messages.append(Message(from: .otto, text: r.text, buttons: r.buttons, serverID: r.id))
         }
@@ -680,16 +772,41 @@ final class OttoStore {
     /// Message ids being sent right now, so a reconnect retry can't double-send one.
     private var sending: Set<UUID> = []
 
+    /// Hands one of yours to the server; it stays pending (and is retried) until the server has
+    /// it. A resend of one that did get through is harmless: the server dedupes on its id.
     private func deliver(_ id: UUID) async {
         guard !sending.contains(id), let m = messages.first(where: { $0.id == id }), m.pending == true else { return }
         sending.insert(id)
         defer { sending.remove(id) }
         if m.isVoice { return await deliverVoice(m) }
-        // ponytail: sent-then-killed before this save resends once; dedupe server-side if it shows up.
-        if await backend.send(m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true), let i = messages.firstIndex(where: { $0.id == id }) {
-            messages[i].pending = nil
-            ottoTyping = true
-            ottoStatus = nil   // a new message starts a new reply; the last one's step is stale
+        // A photo whose JPEG is gone has nothing to send: said, rather than sent as its caption alone.
+        if m.photo == true && m.imageData == nil { if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].pending = nil; messages[i].failed = true }; return }
+        let ok = if let jpeg = m.imageData, m.snap == true, let live = backend as? LiveBackend { await live.snap(jpeg, note: m.text, id: m.wireID) != nil }
+            else if let jpeg = m.imageData { await backend.sendPhoto(jpeg, caption: m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true) }
+            else if let data = m.tap { await backend.tap(ActionButton(label: m.text, data: data), id: m.wireID) }
+            else if let w = m.wallet { await backend.wallet(w, id: m.wireID) }
+            else { await backend.send(m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true) }
+        guard ok, let i = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[i].pending = nil
+        messages[i].failed = nil
+        ottoTyping = true
+        ottoStatus = nil   // a new message starts a new reply; the last one's step is stale
+    }
+
+    /// "Not delivered", tapped: try now rather than at the next connection.
+    func retry(_ id: Message.ID) {
+        guard let i = messages.firstIndex(where: { $0.id == id }), messages[i].pending == true else { return }
+        messages[i].failed = nil
+        Task { await deliver(id) }
+    }
+
+    /// Yours that the server still doesn't have a minute on: "Not delivered", with a retry. They
+    /// stay pending, so the next connection still sends them, and the server's ack clears it.
+    private func markUndelivered() {
+        let cutoff = Date().addingTimeInterval(-60)
+        for i in messages.indices where messages[i].pending == true && messages[i].failed != true
+            && messages[i].date < cutoff && !sending.contains(messages[i].id) {
+            messages[i].failed = true
         }
     }
 
@@ -698,26 +815,49 @@ final class OttoStore {
     func sendShared() {
         let draft = replyingTo
         replyingTo = nil   // a share is its own message, not an answer to the one being replied to
-        let n = ShareOutbox.drain { text, jpeg in
-            if let jpeg, let image = UIImage(data: jpeg) { sendPhoto(image, caption: text, shared: true) }
-            else if !text.isEmpty { send(text, shared: true) }
-        }
+        // Each share keeps the id its outbox file was named with, so one handed over twice (the
+        // thread didn't save, the files stayed) goes in once; the files go only once the thread is saved.
+        let n = ShareOutbox.drain({ id, text, jpeg, photoLost in
+            guard !messages.contains(where: { $0.id == id }) else { return }
+            if let jpeg, let image = UIImage(data: jpeg) { sendPhoto(image, caption: text, shared: true, id: id) }
+            else if photoLost || jpeg != nil {
+                // The photo it carried can't be read: shown as yours, not delivered, never sent as its caption alone.
+                var m = Message(id: id, from: .me, text: text.isEmpty ? "Photo" : text, shared: true)
+                m.failed = true
+                messages.append(m)
+            }
+            else if !text.isEmpty { send(text, shared: true, id: id) }
+        }, saved: { saveNow() })
         replyingTo = draft
         if n > 0 { ShareOutbox.post(ShareOutbox.ack) }
     }
 
-    /// Everything still unsent, oldest first. Runs at launch and on every reconnect.
+    /// Everything still unsent, oldest first. Runs at launch and on every reconnect. A tap older than
+    /// ten minutes waits for "Try again": a "send ✓" firing hours later, on a stale draft, is worse than none.
     private func resendPending() async {
-        for m in messages where m.pending == true { await deliver(m.id) }
+        let stale = Date().addingTimeInterval(-600)
+        for m in messages where m.pending == true && !(m.tap != nil && m.date < stale) { await deliver(m.id) }
     }
 
     func hideApproval(_ id: String) { hiddenApprovals.insert(id) }
 
     /// `keep`: the decision goes out, but the sheet stays up (a payment's receipt) until `closeApproval`.
-    func decide(_ id: String, approve: Bool, keep: Bool = false) async {
+    /// True once the Mac has the decision. False leaves the approval up: it isn't queued for later,
+    /// since a payment approved now shouldn't go through half an hour on, and the Mac shows it again
+    /// on the next connect while it's still live.
+    func decide(_ id: String, approve: Bool, keep: Bool = false) async -> ApprovalOutcome {
         if keep { keptApprovals.insert(id) }   // before the send: the Mac's "done" can beat its reply
-        await backend.decide(approval: id, approve: approve)
-        if !keep { approvals.removeAll { $0.id == id } }
+        let outcome = await backend.decide(approval: id, approve: approve)
+        if outcome != .done { keptApprovals.remove(id) }
+        if outcome == .gone || (outcome == .done && !keep) { approvals.removeAll { $0.id == id } }
+        return outcome
+    }
+
+    /// A message that can't be sent after all (Siri's saved place, with the Mac out of reach).
+    func giveUp(_ id: Message.ID) {
+        guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[i].pending = nil
+        messages[i].failed = true
     }
 
     func closeApproval(_ id: String) { keptApprovals.remove(id); approvals.removeAll { $0.id == id } }
@@ -734,14 +874,15 @@ final class OttoStore {
         return small.jpegData(compressionQuality: 0.7)
     }
 
-    func sendPhoto(_ image: UIImage, caption: String = "", shared: Bool = false, replyTo: String? = nil) {
+    func sendPhoto(_ image: UIImage, caption: String = "", shared: Bool = false, replyTo: String? = nil, id: UUID = UUID()) {
         guard let jpeg = Self.jpeg(image) else { return }
-        let m = Message(from: .me, text: caption, image: jpeg, replyTo: replyTo)
+        // Pending like a text: an upload that fails on a weak network is retried, not lost.
+        let m = Message(id: id, from: .me, text: caption, image: jpeg, pending: true, shared: shared ? true : nil, replyTo: replyTo)
         messages.append(m)
         ottoTyping = true
         // One after another, so a burst arrives in order with the caption on the last photo.
         let previous = photoUpload
-        photoUpload = Task { await previous?.value; await backend.sendPhoto(jpeg, caption: caption, id: m.wireID, replyTo: replyTo, shared: shared) }
+        photoUpload = Task { await previous?.value; await deliver(m.id) }
     }
     @ObservationIgnored private var photoUpload: Task<Void, Never>?
 
@@ -758,23 +899,28 @@ final class OttoStore {
         Task { await deliver(m.id) }
     }
 
-    // ponytail: a note the server took but whose answer was lost is sent twice; dedupe by id server-side if it shows up.
     private func deliverVoice(_ m: Message) async {
-        guard let audio = try? Data(contentsOf: VoiceStore.url(m.id)) else {
-            if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i].pending = nil }   // the audio is gone; nothing to retry
+        guard let audio = VoiceStore.data(m.id) else {
+            // The audio is gone, so there's nothing to retry: say so rather than look delivered.
+            if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i].pending = nil; messages[i].failed = true }
             return
         }
         guard let text = await backend.sendVoice(audio, id: m.wireID, replyTo: m.replyTo),
               let i = messages.firstIndex(where: { $0.id == m.id }) else { return }
-        messages[i] = Message(id: m.id, from: .me, text: text, date: m.date, isVoice: true, replyTo: m.replyTo)
+        // In place: a read receipt or a tapback that landed while the upload was out stays.
+        messages[i].text = text
+        messages[i].pending = nil
+        messages[i].failed = nil
     }
 
     func tap(_ button: ActionButton, on id: Message.ID) {
         // Buttons are one-shot, same as Telegram: strip them once tapped.
         if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].buttons = [] }
-        messages.append(Message(from: .me, text: button.label))
+        // Kept and retried like a message: a "send ✓" lost in a frozen socket would otherwise look sent.
+        let m = Message(from: .me, text: button.label, pending: true, tap: button.data ?? "")
+        messages.append(m)
         ottoTyping = true
-        Task { await backend.tap(button) }
+        Task { await deliver(m.id) }
     }
 
     /// A tapback, iMessage-style: the same emoji again takes it off.
@@ -783,6 +929,7 @@ final class OttoStore {
         let same = messages[i].reaction == emoji
         messages[i].reaction = same ? nil : emoji
         // ponytail: removal is local only; the server has no "unreact" to pass on (catchUp leaves it off).
+        // The id now, not inside the task: a catch-up insert before it runs would shift the index.
         let wire = messages[i].wireID
         if !same { Task { await backend.react(to: wire, emoji: emoji) } }
     }
