@@ -3,7 +3,7 @@
 # Usage: design/shots.sh <out-dir> [device-id]
 set -euo pipefail
 OUT="$1"; DEV="${2:-1A22C70F-011C-4D46-8DD0-E6F23E432780}"
-APP="${APP:-$HOME/Library/Caches/otto-design/dd/Build/Products/Debug-iphonesimulator/Otto.app}"
+APP="${APP:-${W:-$HOME/Library/Caches/otto-design}/dd/Build/Products/Debug-iphonesimulator/Otto.app}"
 ID=dev.otto.app
 mkdir -p "$OUT"
 xcrun simctl install "$DEV" "$APP"
