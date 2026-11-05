@@ -838,7 +838,10 @@ final class OttoStore {
         }
         guard let text = await backend.sendVoice(audio, id: m.wireID),
               let i = messages.firstIndex(where: { $0.id == m.id }) else { return }
-        messages[i] = Message(id: m.id, from: .me, text: text, date: m.date, isVoice: true)
+        // In place: a read receipt or a tapback that landed while the upload was out stays.
+        messages[i].text = text
+        messages[i].pending = nil
+        messages[i].failed = nil
     }
 
     func tap(_ button: ActionButton, on id: Message.ID) {

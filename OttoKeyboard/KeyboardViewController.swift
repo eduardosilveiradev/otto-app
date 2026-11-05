@@ -594,12 +594,18 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         ])
         let gen = UUID(), doc = textDocumentProxy.documentIdentifier
         askGen = gen
-        // Still this ask, still open, still the same field (not another one that happens to read the same).
-        let current = { [weak self] in self.map { $0.askGen == gen && $0.model.otto == .thinking && $0.textDocumentProxy.documentIdentifier == doc } ?? false }
+        // Still this ask and still open: otherwise the answer is someone else's business, drop it.
+        let mine = { [weak self] in self.map { $0.askGen == gen && $0.model.otto == .thinking } ?? false }
+        // Still the same field (not another one that happens to read the same). If not, say where the
+        // answer went rather than leave the panel thinking forever.
+        let here = { [weak self] () -> Bool in
+            guard let self, self.textDocumentProxy.documentIdentifier == doc else { self?.model.otto = .failed("You moved to another field. The answer is in the app."); return false }
+            return true
+        }
         Task { @MainActor in
             do {
                 let (data, resp) = try await URLSession.shared.data(for: req)
-                guard current() else { return }
+                guard mine(), here() else { return }
                 guard (resp as? HTTPURLResponse)?.statusCode == 200,
                       let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let reply = json["reply"] as? [String: Any], let text = reply["text"] as? String, !text.isEmpty
@@ -608,7 +614,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
                 guard before == field else { model.otto = .failed("The text changed while Otto was writing. It's in the app."); return }
                 apply(text, replacing: rewrite ? field : nil)
             } catch {
-                if current() { model.otto = .failed("Couldn't reach Otto.") }
+                if mine(), here() { model.otto = .failed("Couldn't reach Otto.") }
             }
         }
     }

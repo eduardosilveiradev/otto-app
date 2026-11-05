@@ -13,8 +13,10 @@ private struct MemoryList: View {
     let reload: () async -> Void
     @Environment(OttoStore.self) private var store
     @State private var query = ""
-    /// Indexes the Mac ranked for `query`, best first; nil while just filtering by text.
-    @State private var ranked: [Int]?
+    /// Indexes the Mac ranked for `query`, best first, and the snapshot they index into; nil while
+    /// just filtering by text. A refresh brings a new snapshot, and old indexes would point anywhere.
+    @State private var rankedIn: (snapshot: String, order: [Int])?
+    private var ranked: [Int]? { rankedIn.flatMap { $0.snapshot == m.generatedAt ? $0.order.filter(m.items.indices.contains) : nil } }
     @State private var source = "all"
     @State private var cluster: Int?
     @State private var needsLook = false
@@ -57,7 +59,7 @@ private struct MemoryList: View {
         }
         .searchable(text: $query, prompt: "Search memory")
         .onSubmit(of: .search) { Task { await search() } }
-        .onChange(of: query) { if query.isEmpty { ranked = nil } }
+        .onChange(of: query) { if query.isEmpty { rankedIn = nil } }
         .refreshable { await reload() }
         .toolbar {
             Menu {
@@ -85,9 +87,10 @@ private struct MemoryList: View {
     private func search() async {
         struct Hits: Decodable { let results: [[Double]] }
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { ranked = nil; return }
+        guard !q.isEmpty else { rankedIn = nil; return }
+        let snapshot = m.generatedAt
         if let r: Hits = await store.backend.dash("memory/search", query: ["q": q]) {
-            ranked = r.results.compactMap { $0.first.map(Int.init) }.filter { m.items.indices.contains($0) }
+            rankedIn = (snapshot, r.results.compactMap { $0.first.map(Int.init) })
         }
     }
 
