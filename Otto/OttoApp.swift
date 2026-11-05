@@ -196,9 +196,14 @@ final class OttoStore {
     /// Writes now, for when the app is about to be suspended and a pending save could be lost.
     func flush() {
         guard let s = saving, !s.isCancelled else { return }
-        s.cancel()
+        _ = saveNow()
+    }
+
+    /// Writes the thread now, whatever is pending. False when it didn't make it to disk.
+    @discardableResult func saveNow() -> Bool {
+        saving?.cancel()
         saving = nil
-        try? JSONEncoder().encode(messages).write(to: file, options: .atomic)
+        return (try? JSONEncoder().encode(messages).write(to: file, options: .atomic)) != nil
     }
 
     /// A reply whose voice never came (the server restarted mid-synthesis, so neither the frame nor
@@ -330,6 +335,18 @@ final class OttoStore {
         if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-e2eSend"), i + 1 < ProcessInfo.processInfo.arguments.count {
             let text = ProcessInfo.processInfo.arguments[i + 1]
             Task { try? await Task.sleep(for: .seconds(2)); send(text) }
+        }
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-e2eWallet"), i + 1 < ProcessInfo.processInfo.arguments.count {
+            let amount = ProcessInfo.processInfo.arguments[i + 1]
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                var intent = LogPayment(); intent.amount = amount; intent.merchant = "E2E Shop"; intent.card = ""
+                _ = try? await intent.perform()
+            }
+        }
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-e2eShare"), i + 1 < ProcessInfo.processInfo.arguments.count {
+            let text = ProcessInfo.processInfo.arguments[i + 1]
+            Task { try? await Task.sleep(for: .seconds(2)); _ = ShareOutbox.put(text: text, jpeg: nil); sendShared() }
         }
         if ProcessInfo.processInfo.arguments.contains("-e2eTapLast") {
             Task {
@@ -567,7 +584,8 @@ final class OttoStore {
         guard !(backend is MockBackend) else { return }
         var all = await backend.history(background: background, limit: 50)
         // None of the last 50 is here: a long time offline. Go further back rather than leave a hole.
-        if all.count == 50, let oldest = all.first, !messages.isEmpty, !messages.contains(where: { $0.wireID == oldest.wireID }) {
+        let have = Set(messages.map(\.wireID))
+        if !all.isEmpty, !messages.isEmpty, !all.contains(where: { have.contains($0.wireID) }) {
             all = await backend.history(background: background, limit: 500)
         }
         let lastOtto = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
@@ -586,8 +604,8 @@ final class OttoStore {
                 if h.read == true { messages[i].read = true }
             } else if h.from == .otto {
                 if messages[i].isVoice && messages[i].audio == nil && h.audio != nil { messages[i].audio = h.audio }
-                // ponytail: an edit that only trims the end reads as a prefix and is missed.
-                if !messages[i].text.hasPrefix(h.text) { messages[i].text = h.text }
+                // History is the latest text; only one cut at its 8000-character cap keeps the longer local copy.
+                if messages[i].text != h.text && !(h.text.count >= 8000 && messages[i].text.hasPrefix(h.text)) { messages[i].text = h.text }
             }
         }
         guard !fresh.isEmpty else { return }
@@ -596,8 +614,8 @@ final class OttoStore {
         if notify { for m in fresh where m.from == .otto { Notifier.shared.post(m) } }
     }
 
-    func send(_ text: String, shared: Bool = false) {
-        var m = Message(from: .me, text: text, pending: true)
+    func send(_ text: String, shared: Bool = false, id: UUID = UUID()) {
+        var m = Message(id: id, from: .me, text: text, pending: true)
         if shared { m.shared = true }
         m.replyTo = replyingTo.flatMap { id in messages.first { $0.id == id }?.wireID }
         replyingTo = nil
@@ -646,6 +664,7 @@ final class OttoStore {
         if m.isVoice { return await deliverVoice(m) }
         let ok = if let jpeg = m.image { await backend.sendPhoto(jpeg, caption: m.text, id: m.wireID, shared: m.shared == true) }
             else if let data = m.tap { await backend.tap(ActionButton(label: m.text, data: data), id: m.wireID) }
+            else if let w = m.wallet { await backend.wallet(w, id: m.wireID) }
             else { await backend.send(m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true) }
         guard ok, let i = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[i].pending = nil
@@ -676,17 +695,22 @@ final class OttoStore {
     func sendShared() {
         let draft = replyingTo
         replyingTo = nil   // a share is its own message, not an answer to the one being replied to
-        let n = ShareOutbox.drain { text, jpeg in
-            if let jpeg, let image = UIImage(data: jpeg) { sendPhoto(image, caption: text, shared: true) }
-            else if !text.isEmpty { send(text, shared: true) }
-        }
+        // Each share keeps the id its outbox file was named with, so one handed over twice (the
+        // thread didn't save, the files stayed) goes in once; the files go only once the thread is saved.
+        let n = ShareOutbox.drain({ id, text, jpeg in
+            guard !messages.contains(where: { $0.id == id }) else { return }
+            if let jpeg, let image = UIImage(data: jpeg) { sendPhoto(image, caption: text, shared: true, id: id) }
+            else if !text.isEmpty { send(text, shared: true, id: id) }
+        }, saved: { saveNow() })
         replyingTo = draft
-        if n > 0 { flush(); ShareOutbox.post(ShareOutbox.ack) }   // on disk now: the outbox copies are already deleted
+        if n > 0 { ShareOutbox.post(ShareOutbox.ack) }
     }
 
-    /// Everything still unsent, oldest first. Runs at launch and on every reconnect.
+    /// Everything still unsent, oldest first. Runs at launch and on every reconnect. A tap older than
+    /// ten minutes waits for "Try again": a "send ✓" firing hours later, on a stale draft, is worse than none.
     private func resendPending() async {
-        for m in messages where m.pending == true { await deliver(m.id) }
+        let stale = Date().addingTimeInterval(-600)
+        for m in messages where m.pending == true && !(m.tap != nil && m.date < stale) { await deliver(m.id) }
     }
 
     func hideApproval(_ id: String) { hiddenApprovals.insert(id) }
@@ -712,10 +736,10 @@ final class OttoStore {
         return small.jpegData(compressionQuality: 0.7)
     }
 
-    func sendPhoto(_ image: UIImage, caption: String = "", shared: Bool = false) {
+    func sendPhoto(_ image: UIImage, caption: String = "", shared: Bool = false, id: UUID = UUID()) {
         guard let jpeg = Self.jpeg(image) else { return }
         // Pending like a text: an upload that fails on a weak network is retried, not lost.
-        let m = Message(from: .me, text: caption, image: jpeg, pending: true, shared: shared ? true : nil)
+        let m = Message(id: id, from: .me, text: caption, image: jpeg, pending: true, shared: shared ? true : nil)
         messages.append(m)
         ottoTyping = true
         // One after another, so a burst arrives in order with the caption on the last photo.
@@ -739,8 +763,9 @@ final class OttoStore {
 
     // ponytail: a note the server took but whose answer was lost is sent twice; dedupe by id server-side if it shows up.
     private func deliverVoice(_ m: Message) async {
-        guard let audio = try? Data(contentsOf: VoiceStore.url(m.id)) else {
-            if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i].pending = nil }   // the audio is gone; nothing to retry
+        guard let audio = VoiceStore.data(m.id) else {
+            // The audio is gone, so there's nothing to retry: say so rather than look delivered.
+            if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i].pending = nil; messages[i].failed = true }
             return
         }
         guard let text = await backend.sendVoice(audio, id: m.wireID),

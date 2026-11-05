@@ -3,7 +3,7 @@
  * against a throwaway Otto server (otto-core's otto/tests/apptwin.ts) that can be stopped,
  * restarted and asked to reply. Each scenario prints PASS or FAIL.
  *
- *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|all]
+ *   OTTO_CORE=<otto-core checkout> SIM=<simulator udid> APP=<path to Otto.app> bun Scripts/delivery-e2e.ts [offline|killed|tap|missed|read|wallet|share|edit|gap|all]
  *
  * Use a simulator made for it (`xcrun simctl create`): the app is reinstalled, so its thread is wiped.
  */
@@ -104,6 +104,51 @@ if (scenario === 'all' || scenario === 'read') {
   await twin.hook({ hook_event_name: 'PreToolUse', tool_name: 'reply', transcript_path: join(dir, 'r.jsonl') })
   await waitFor(() => mine('read me')?.read, 10000)
   check('read: Read once the session has it', mine('read me')?.read === true)
+}
+
+if (scenario === 'all' || scenario === 'wallet') {
+  await twin.stop()
+  launch('-e2eWallet', '€4.20')
+  await waitFor(() => thread().find(m => m.wallet), 30000)
+  await Bun.sleep(12000)   // past sendAndConfirm's 10s
+  const w = () => thread().find(m => m.wallet)
+  check('wallet: an offline payment is kept pending', w()?.pending === true, JSON.stringify(w() ?? null))
+  twin = await twin.restart()
+  launch()
+  await waitFor(() => twin.delivered.some((d: any) => d.meta.wallet_amount === '€4.20'), 20000)
+  await Bun.sleep(2000)
+  check('wallet: filed once on reconnect', twin.delivered.filter((d: any) => d.meta.wallet_amount === '€4.20').length === 1)
+  check('wallet: status cleared', !w()?.pending)
+}
+
+if (scenario === 'all' || scenario === 'share') {
+  launch('-e2eShare', 'shared line')
+  await waitFor(() => count('shared line') > 0, 20000)
+  await Bun.sleep(2000)
+  launch()
+  await Bun.sleep(5000)
+  check('share: handed over once, kept once', count('shared line') === 1 && thread().filter(m => m.text === 'shared line').length === 1,
+    `${count('shared line')} ${thread().filter(m => m.text === 'shared line').length}`)
+}
+
+if (scenario === 'all' || scenario === 'edit') {
+  await twin.call('reply', { chat_id: 'app', text: 'meet at 6pm, bring the keys' })
+  launch()
+  const m = await waitFor(() => thread().find(x => x.text === 'meet at 6pm, bring the keys'), 15000)
+  kill()
+  await twin.call('edit_message', { chat_id: 'app', message_id: m?.serverID, text: 'meet at 6pm' })
+  launch()
+  await waitFor(() => thread().find(x => x.serverID === m?.serverID)?.text === 'meet at 6pm', 15000)
+  check('edit: a missed edit that shortens a reply lands', thread().find(x => x.serverID === m?.serverID)?.text === 'meet at 6pm')
+}
+
+if (scenario === 'all' || scenario === 'gap') {
+  kill()
+  for (let i = 0; i < 60; i++) await twin.call('reply', { chat_id: 'app', text: `backlog ${i}` })
+  launch()
+  await waitFor(() => thread().filter(m => m.text?.startsWith('backlog ')).length === 60, 30000)
+  check('gap: more than 50 missed replies all arrive', thread().filter(m => m.text?.startsWith('backlog ')).length === 60,
+    String(thread().filter(m => m.text?.startsWith('backlog ')).length))
 }
 
 kill()

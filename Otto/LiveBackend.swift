@@ -150,6 +150,11 @@ final class LiveBackend: OttoBackend {
         await handOver(["type": "tap", "op": id, "data": button.data ?? "", "label": button.label], op: id)
     }
 
+    /// A Wallet payment that couldn't go up over HTTP when it happened, kept in the thread until acked.
+    func wallet(_ fields: [String: String], id: String) async -> Bool {
+        await handOver(fields.merging(["type": "wallet", "op": id]) { a, _ in a }, op: id)
+    }
+
     func decide(approval id: String, approve: Bool) async {
         await write(["type": "approval", "id": id, "decision": approve ? "approve" : "decline"])
     }

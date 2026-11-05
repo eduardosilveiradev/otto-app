@@ -67,6 +67,8 @@ struct Message: Identifiable, Codable {
     var otp: OTPCode? = nil
     /// Yours, a button tap: the data that goes up (the bubble shows the label). Pending until the server has it.
     var tap: String? = nil
+    /// Yours, a Wallet payment (amount, merchant, card) for money tracking, when it couldn't go up at once.
+    var wallet: [String: String]? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }
@@ -161,6 +163,8 @@ protocol OttoBackend: AnyObject {
     func react(to id: String, emoji: String) async
     /// Same contract as `send`.
     func sendPhoto(_ jpeg: Data, caption: String, id: String, shared: Bool) async -> Bool
+    /// Same contract as `send`: a Wallet payment (amount, merchant, card) for money tracking.
+    func wallet(_ fields: [String: String], id: String) async -> Bool
     /// Uploads an m4a voice note and returns its transcript ("" when there is none),
     /// or nil when the upload didn't make it, so the note stays pending and is retried.
     func sendVoice(_ m4a: Data, id: String) async -> String?
@@ -198,6 +202,7 @@ extension OttoBackend {
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
     func decide(approval id: String, approve: Bool) async {}
+    func wallet(_ fields: [String: String], id: String) async -> Bool { true }
 }
 
 /// One switch on the Mac's settings page; `section` is otto, recurring or connectors.

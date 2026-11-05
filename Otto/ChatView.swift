@@ -981,13 +981,17 @@ private struct Row: View {
                 .padding(.leading, 12)
             }
 
-            if message.failed == true {
+            if message.failed == true && message.pending == true {
                 // Still retried on its own at the next connection; the tap just doesn't wait for one.
                 Button { thread.retry(message.id) } label: {
                     Text("Not delivered · ").foregroundStyle(.red) + Text("Try again").foregroundStyle(.blue)
                 }
                 .font(.system(size: 11)).buttonStyle(.plain)
                 .padding(.trailing, 4)
+            } else if message.failed == true {
+                // Nothing left to send (a voice note whose audio is gone).
+                Text("Not delivered").font(.system(size: 11)).foregroundStyle(.red)
+                    .padding(.trailing, 4)
             } else if message.pending == true {
                 Text("Sending…").font(.system(size: 11)).foregroundStyle(.secondary)
                     .padding(.trailing, 4)
@@ -1126,9 +1130,17 @@ private struct RemoteFileView: View {
 }
 
 /// Your voice notes, kept on the phone so they play back. Otto's live on the server.
+/// Your voice notes, kept in Application Support: iOS empties Caches when space runs low, and an
+/// unsent note's audio is the only copy. Notes saved by older builds are still read from Caches.
 enum VoiceStore {
-    static func url(_ id: UUID) -> URL { .cachesDirectory.appending(path: "voice-\(id.uuidString).m4a") }
-    static func data(_ id: UUID) -> Data? { try? Data(contentsOf: url(id)) }
+    static func url(_ id: UUID) -> URL {
+        let dir = URL.applicationSupportDirectory.appending(path: "voice", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appending(path: "\(id.uuidString).m4a")
+    }
+    static func data(_ id: UUID) -> Data? {
+        (try? Data(contentsOf: url(id))) ?? (try? Data(contentsOf: .cachesDirectory.appending(path: "voice-\(id.uuidString).m4a")))
+    }
 }
 
 /// A voice note: play, a waveform that fills as it plays, the length.

@@ -47,11 +47,13 @@ struct LogPayment: AppIntent {
         let title = merchant.isEmpty ? amount : "\(amount) · \(merchant)"
         let day = Date().formatted(.iso8601.year().month().day())
         let mine = Message(from: .me, text: card.isEmpty ? "Payment" : card,
-                           recorded: [RecordedCard(kind: "money", id: UUID().uuidString, title: title, detail: day, body: nil, action: nil)])
-        _ = await OttoStore.shared.siri(mine) { live in
-            _ = await live.logPayment(id: mine.wireID, amount: amount, merchant: merchant, card: card)
-            return nil
+                           recorded: [RecordedCard(kind: "money", id: UUID().uuidString, title: title, detail: day, body: nil, action: nil)],
+                           wallet: ["amount": amount, "merchant": merchant, "card": card])
+        let posted = await OttoStore.shared.siri(mine) { live in
+            await live.logPayment(id: mine.wireID, amount: amount, merchant: merchant, card: card) ? LiveBackend.Answer(reply: nil) : nil
         }
+        // Offline (a basement shop, the metro): kept pending and sent when the app next connects, never dropped.
+        if posted == nil { _ = await OttoStore.shared.sendAndConfirm(mine.id) }
         return .result()
     }
 }
