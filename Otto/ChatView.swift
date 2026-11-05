@@ -80,6 +80,11 @@ struct ChatView: View {
     @State private var flashed: Message.ID?
     /// A row is being swiped to reply: the thread holds still under it, like Messages.
     @State private var swiping = false
+    /// At the very bottom (within 4pt), and whether the reader was when the swipe began.
+    @State private var atBottom = true
+    @State private var pinnedAtSwipe = false
+    /// The quote jump in flight; a second tap replaces it, so an old one can't end the new flash early.
+    @State private var jumping: Task<Void, Never>?
 
     /// A tapped quote: scroll its original into the middle (laying out older pages if it's up
     /// there) and light it up, so the eye lands on it.
@@ -88,15 +93,19 @@ struct ChatView: View {
         guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
         let grew = messages.count - i + 4 > shown
         if grew { shown = messages.count - i + 4 }
-        Task {
-            // Rows just paged in aren't built yet; give them a frame before scrolling to one.
-            if grew { try? await Task.sleep(for: .milliseconds(32)) }
-            withAnimation(still ? nil : .snappy) { scroll.scrollTo(id: id, anchor: .center) }
-            // On the bubble once it has stopped moving, not while it flies past.
-            if !still { try? await Task.sleep(for: .seconds(0.3)) }
-            withAnimation(.easeOut(duration: 0.2)) { flashed = id }
-            try? await Task.sleep(for: .seconds(0.9))
-            withAnimation(.easeInOut(duration: 0.4)) { if flashed == id { flashed = nil } }
+        jumping?.cancel()
+        jumping = Task {
+            do {
+                // Rows just paged in aren't built yet; give them a frame before scrolling to one.
+                // ponytail: two frames at 60Hz, verified 70 rows up; a slow device may want more.
+                if grew { try await Task.sleep(for: .milliseconds(32)) }
+                withAnimation(still ? nil : .snappy) { scroll.scrollTo(id: id, anchor: .center) }
+                // On the bubble once it has stopped moving, not while it flies past.
+                if !still { try await Task.sleep(for: .seconds(0.3)) }
+                withAnimation(.easeOut(duration: 0.2)) { flashed = id }
+                try await Task.sleep(for: .seconds(0.9))
+                withAnimation(.easeInOut(duration: 0.4)) { flashed = nil }
+            } catch {}   // replaced by a newer jump, which owns the flash now
         }
     }
     @Environment(\.accessibilityReduceMotion) private var still
@@ -132,9 +141,11 @@ struct ChatView: View {
                                 highlighted: flashed == m.id, still: still,
                                 onQuote: { if let quote { jump(to: quote.id) } },
                                 onSwiping: { on in
+                                    if on { pinnedAtSwipe = atBottom }
                                     swiping = on
-                                    // Something grew while the anchor was off: back down, if that's where the reader was.
-                                    if !on, !scrolledUp { withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) } }
+                                    // Something may have grown while the anchor was off: back down, but only
+                                    // for a reader who was at the bottom; anyone reading higher stays put.
+                                    if !on, pinnedAtSwipe, !atBottom { withAnimation(still ? nil : .snappy) { scroll.scrollTo(edge: .bottom) } }
                                 },
                                 onTap: { thread.tap($0, on: m.id) })
                                 .padding(.top, newBlock || prev?.from == .terminal ? 0 : (prev?.from == m.from ? 4 : 10))
@@ -200,6 +211,9 @@ struct ChatView: View {
         // keyboard's curve.
         .contentMargins(.bottom, margin, for: .scrollContent)
         .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y + $0.contentInsets.top }) { offset.y = $1 }
+        .onScrollGeometryChange(for: Bool.self, of: { g in
+            g.contentSize.height + g.contentInsets.bottom - g.visibleRect.maxY < 4
+        }) { _, at in atBottom = at }
         .onScrollGeometryChange(for: Bool.self, of: { g in
             g.contentSize.height + g.contentInsets.bottom - g.visibleRect.maxY > 400
         }) { _, up in
@@ -1103,7 +1117,12 @@ private struct Row: View {
                 // LinkPreview already caps itself at 280 and hugs its content.
                 LinkPreview(metadata: md)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
-                    .contentShape(.contextMenuPreview, .rect(cornerRadius: 18, style: .continuous))
+                    // Before the menu, so a bare link's card lifts with its tapback.
+                    .overlay(alignment: mine ? .topLeading : .topTrailing) {
+                        if !textShown, let r = message.reaction { Tapback(emoji: r, mine: mine) }
+                    }
+                    .padding(.top, !textShown && message.reaction != nil ? 14 : 0)
+                    .contentShape(.contextMenuPreview, BubblePreview(mine: mine, badge: !textShown && message.reaction != nil, corner: 18))
                     .contextMenu {
                         // Part of the same message, so the same tapbacks and Reply as its bubble.
                         Self.palette(message, react: react)
@@ -1114,10 +1133,6 @@ private struct Row: View {
                             Button("Share Link…", systemImage: "square.and.arrow.up") { sharing = url }
                         }
                     }
-                    .overlay(alignment: mine ? .topLeading : .topTrailing) {
-                        if !textShown, let r = message.reaction { Tapback(emoji: r, mine: mine) }
-                    }
-                    .padding(.top, !textShown && message.reaction != nil ? 14 : 0)
                     // A bare link is only this card: it carries the message's actions for VoiceOver too.
                     .modifier(SpokenActions(message: message, label: nil, reactor: reactor, react: react, reply: reply,
                                             copy: nil, extra: Self.previewURL(message).map { url in
@@ -1510,11 +1525,14 @@ struct BubbleShape: Shape {
 /// (the 14pt above it is the badge's room; see Tapback for where it sits).
 struct BubblePreview: Shape {
     let mine: Bool
-    let tail: Bool
+    var tail = false
     let badge: Bool
+    /// A photo or card: a plain rounded rect of this radius instead of a bubble.
+    var corner: CGFloat? = nil
     func path(in rect: CGRect) -> Path {
         let bubble = rect.inset(by: UIEdgeInsets(top: badge ? 14 : 0, left: 0, bottom: 0, right: 0))
-        let p = BubbleShape(mine: mine, tail: tail).path(in: bubble)
+        let p = corner.map { Path(roundedRect: bubble, cornerRadius: $0, style: .continuous) }
+            ?? BubbleShape(mine: mine, tail: tail).path(in: bubble)
         guard badge else { return p }
         let c = CGPoint(x: mine ? bubble.minX + 2 : bubble.maxX - 2, y: bubble.minY - 1)
         return p.union(Path(ellipseIn: CGRect(x: c.x - 16, y: c.y - 16, width: 32, height: 32)))
@@ -1532,17 +1550,19 @@ private struct Reactable: ViewModifier {
     /// A photo copies as the picture; other files have nothing to copy.
     var copy: (() -> Void)? = nil
     func body(content: Content) -> some View {
+        let shown = badge && message.reaction != nil
         content
-            .contentShape(.contextMenuPreview, .rect(cornerRadius: 18, style: .continuous))
+            // Before the menu, so it lifts with its tapback, like a text bubble.
+            .overlay(alignment: message.from == .me ? .topLeading : .topTrailing) {
+                if badge, let r = message.reaction { Tapback(emoji: r, mine: message.from == .me) }
+            }
+            .padding(.top, shown ? 14 : 0)
+            .contentShape(.contextMenuPreview, BubblePreview(mine: message.from == .me, badge: shown, corner: 18))
             .contextMenu {
                 Row.palette(message, react: react)
                 Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
                 if let copy { Button("Copy", systemImage: "doc.on.doc", action: copy) }
             }
-            .overlay(alignment: message.from == .me ? .topLeading : .topTrailing) {
-                if badge, let r = message.reaction { Tapback(emoji: r, mine: message.from == .me) }
-            }
-            .padding(.top, badge && message.reaction != nil ? 14 : 0)
             // The message's own actions once (where the tapback sits); a photo's Copy on every photo.
             .modifier(SpokenActions(message: message, label: nil, reactor: reactor, react: react, reply: reply, copy: copy, extra: [], enabled: badge))
     }
