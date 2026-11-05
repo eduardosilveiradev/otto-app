@@ -583,11 +583,14 @@ final class OttoStore {
     private func catchUp(notify: Bool, background: Bool = false) async {
         guard !(backend is MockBackend) else { return }
         var all = await backend.history(background: background, limit: 50)
-        // None of the last 50 is here: a long time offline. Go further back rather than leave a hole.
-        let have = Set(messages.map(\.wireID))
-        if !all.isEmpty, !messages.isEmpty, !all.contains(where: { have.contains($0.wireID) }) {
+        // Continuous with the last sync only if the page reaches back to it. If even the oldest of the 50
+        // is newer, more came in than the page holds (a long time offline): go further back. Anything
+        // local in the page (a message just sent) says nothing about what's missing before it.
+        let synced = UserDefaults.standard.object(forKey: "otto.syncedThrough") as? Date ?? .distantPast
+        if let oldest = all.first, oldest.date > synced, !messages.isEmpty {
             all = await backend.history(background: background, limit: 500)
         }
+        if let newest = all.map(\.date).max() { UserDefaults.standard.set(max(newest, synced), forKey: "otto.syncedThrough") }
         let lastOtto = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
         let index = Dictionary(messages.indices.map { (messages[$0].wireID, $0) }, uniquingKeysWith: { a, _ in a })
         var fresh: [Message] = []

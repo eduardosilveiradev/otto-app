@@ -149,6 +149,16 @@ if (scenario === 'all' || scenario === 'gap') {
   await waitFor(() => thread().filter(m => m.text?.startsWith('backlog ')).length === 60, 30000)
   check('gap: more than 50 missed replies all arrive', thread().filter(m => m.text?.startsWith('backlog ')).length === 60,
     String(thread().filter(m => m.text?.startsWith('backlog ')).length))
+  // The same with a message of yours sent right on reconnect, inside the newest 50: no false continuity.
+  kill()
+  for (let i = 0; i < 60; i++) await twin.call('reply', { chat_id: 'app', text: `second backlog ${i}` })
+  await twin.stop()
+  launch('-e2eSend', 'hello again')   // offline: it goes up with the reconnect, next to the catch-up
+  await waitFor(() => mine('hello again'), 20000)
+  twin = await twin.restart()
+  await waitFor(() => thread().filter(m => m.text?.startsWith('second backlog ')).length === 60, 30000)
+  check('gap: a fresh message of yours in the page does not hide the hole', thread().filter(m => m.text?.startsWith('second backlog ')).length === 60,
+    String(thread().filter(m => m.text?.startsWith('second backlog ')).length))
 }
 
 kill()
