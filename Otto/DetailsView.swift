@@ -88,7 +88,7 @@ struct DetailsView: View {
                 }
                 }
                 // Messages' rows are glass over the blurred thread, not solid grey.
-                .listRowBackground(Rectangle().fill(.white.opacity(0.07)))
+                .listRowBackground(Rectangle().fill(Color(UIColor { $0.userInterfaceStyle == .dark ? .white.withAlphaComponent(0.07) : .white.withAlphaComponent(0.65) })))
             }
             .refreshable { await store.refreshBrief(); await store.setSnooze(nil) }
             .task {
@@ -203,11 +203,7 @@ struct DetailsView: View {
                         Task { if !(await store.backend.setLoop(l.id, done: !closed)) { done.formSymmetricDifference([l.id]) } }
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: closed ? "checkmark" : l.title.contains("€") ? "eurosign" : "arrow.turn.up.left")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 26, height: 26)
-                                .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 7, style: .continuous))
+                            RowIcon(symbol: closed ? "checkmark" : l.title.contains("€") ? "eurosign" : "arrow.turn.up.left")
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(l.title).strikethrough(closed).lineLimit(2)
                                     .foregroundStyle(closed ? .secondary : .primary)
@@ -217,11 +213,7 @@ struct DetailsView: View {
                                 }
                             }
                             Spacer()
-                            Text(closed ? "Closed" : "Open")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(closed ? Color.secondary : Color.orange)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(closed ? Color(.tertiarySystemFill) : Color.orange.opacity(0.15), in: .capsule)
+                            Pill(text: closed ? "Closed" : "Open", tint: closed ? .secondary : .orange)
                         }
                     }
                     .buttonStyle(.plain)

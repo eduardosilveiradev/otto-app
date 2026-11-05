@@ -98,9 +98,10 @@ private struct Primary: View {
         Button(action: action) {
             ZStack {
                 Text(label).opacity(busy ? 0 : 1)
-                if busy { ProgressView().tint(.white) }
+                if busy { ProgressView().tint(Color(white: 0.12)) }
             }
             .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(Color(white: 0.12))   // white on this orange is ~2:1
             .frame(maxWidth: .infinity).frame(height: 52)
         }
         .buttonStyle(.glassProminent)
@@ -181,15 +182,7 @@ private struct ConnectPage: View {
                 .padding(14)
                 .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 14, style: .continuous))
             } else {
-                VStack(spacing: 24) {
-                    Glyph(name: "qrcode.viewfinder")
-                    Text("bun otto/apptokens.ts new iPhone --server https://your-mac…")
-                        .font(.system(size: 13, design: .monospaced))
-                        .textSelection(.enabled)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 14).padding(.vertical, 10)
-                        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
-                }
+                Glyph(name: "qrcode.viewfinder")
             }
         } footer: {
             if let problem {
@@ -200,17 +193,29 @@ private struct ConnectPage: View {
                 Primary(label: "Connect", busy: checking) { Task { await connect(server, token) } }
                 Secondary(label: "Scan a code instead") { withAnimation { manual = false; problem = nil } }
             } else {
+                Text("bun otto/apptokens.ts new iPhone --server https://your-mac…")
+                    .font(.system(size: 13, design: .monospaced))
+                    .textSelection(.enabled)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
+                    .padding(.bottom, 10)
+                // No camera scanner: typing it in is the main way, so it gets the big button.
                 if canScan {
                     Primary(label: "Scan code", busy: checking) { scanning = true }
+                } else {
+                    Primary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
                 }
                 PasteButton(payloadType: String.self) { strings in
                     guard let s = strings.first else { return }
                     Task { @MainActor in await take(s) }
                 }
                 .buttonBorderShape(.capsule)
-                .tint(canScan ? .secondary : .orange)
+                .tint(.secondary)
                 .labelStyle(.titleAndIcon)
-                Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
+                if canScan {
+                    Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
+                }
             }
             Secondary(label: "Look around with sample data") { next() }
         }

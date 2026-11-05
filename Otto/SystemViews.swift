@@ -22,6 +22,7 @@ struct ActivityScreen: View {
             case .triggers: Loaded(path: "triggers") { (t: Triggers, reload) in triggers(t).refreshable { await reload() } }
             }
         }
+        .contentMargins(.top, 4, for: .scrollContent)
         .safeAreaInset(edge: .top) {
             Picker("Show", selection: $tab) { ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) } }
                 .pickerStyle(.segmented).padding(.horizontal).padding(.bottom, 6)
@@ -153,7 +154,10 @@ struct StatusScreen: View {
         Loaded(path: "status") { (s: DashStatus, reload) in
             List {
                 Section("This phone") {
-                    LabeledContent("Live connection", value: store.connected ? "up" : "down")
+                    HStack(spacing: 10) {
+                        Circle().fill(store.connected ? Color.green : Color.red).frame(width: 9, height: 9)
+                        LabeledContent("Live connection", value: store.connected ? "up" : "down")
+                    }
                     if let drop = (store.backend as? LiveBackend)?.lastDrop {
                         Text("Last drop \(drop)").font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
                     }
@@ -167,10 +171,10 @@ struct StatusScreen: View {
                                 Text(r.detail).font(.footnote).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 8)
-                            if r.verdict != "up" { Text(r.verdict).font(.footnote).foregroundStyle(color(r.verdict)) }
+                            if r.verdict != "up" { Pill(text: r.verdict, tint: r.verdict == "down" ? .red : r.verdict == "degraded" ? .orange : .secondary) }
                         }
                     }
-                } footer: {
+                } header: { Text("On the Mac") } footer: {
                     let bad = s.rows.filter { $0.verdict == "down" || $0.verdict == "degraded" }.count
                     Text(bad == 0 ? "Everything that's on is up." : "\(bad) need\(bad == 1 ? "s" : "") a look.")
                 }
