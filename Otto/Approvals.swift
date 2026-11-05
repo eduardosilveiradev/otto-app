@@ -179,11 +179,14 @@ struct ApprovalSheet: View {
         }
         // A paid payment goes to the Mac now, then the sheet stays for the receipt until Done.
         if approve, request.payment != nil {
-            await store.decide(request.id, approve: true, keep: true)
+            guard await store.decide(request.id, approve: true, keep: true) else {
+                failed = "Couldn't reach your Mac, so nothing was paid. Try again."
+                return
+            }
             withAnimation(.snappy) { paid = true }
             return
         }
-        await store.decide(request.id, approve: approve)
+        if !(await store.decide(request.id, approve: approve)) { failed = "Couldn't reach your Mac. Try again." }
     }
 }
 

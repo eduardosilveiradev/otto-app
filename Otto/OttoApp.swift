@@ -633,7 +633,7 @@ final class OttoStore {
         guard let i = messages.firstIndex(where: { $0.id == id }) else { return false }
         messages[i].pending = true
         let end = ContinuousClock.now + timeout
-        while ContinuousClock.now < end {
+        while ContinuousClock.now < end, !Task.isCancelled {   // cancelled, the sleep returns at once: no spinning
             await deliver(id)
             if messages.first(where: { $0.id == id })?.pending == nil { return true }
             try? await Task.sleep(for: .milliseconds(300))
@@ -646,9 +646,17 @@ final class OttoStore {
     /// opening the app shows both. The socket's copy is deduped by id. Nil when there's no live
     /// server or it can't be reached; `mine` stays either way.
     func siri(_ mine: Message, send: (LiveBackend) async -> LiveBackend.Answer?) async -> LiveBackend.Answer? {
+        // Pending until the server has it: iOS can end a background intent mid-request, and the
+        // saved thread must then say unsent (and send it later), not look delivered.
+        var mine = mine
+        mine.pending = true
         messages.append(mine)
+        flush()
         defer { flush() }   // a background launch can be suspended before the debounced save
+        sending.insert(mine.id)   // the socket's retry waits for this request
+        defer { sending.remove(mine.id) }
         guard let live = backend as? LiveBackend, let a = await send(live) else { return nil }
+        if let i = messages.firstIndex(where: { $0.id == mine.id }) { messages[i].pending = nil }
         if let r = a.reply, !messages.contains(where: { $0.wireID == r.id }) {
             messages.append(Message(from: .otto, text: r.text, buttons: r.buttons, serverID: r.id))
         }
@@ -665,7 +673,8 @@ final class OttoStore {
         sending.insert(id)
         defer { sending.remove(id) }
         if m.isVoice { return await deliverVoice(m) }
-        let ok = if let jpeg = m.image { await backend.sendPhoto(jpeg, caption: m.text, id: m.wireID, shared: m.shared == true) }
+        let ok = if let jpeg = m.image, m.snap == true, let live = backend as? LiveBackend { await live.snap(jpeg, note: m.text, id: m.wireID) != nil }
+            else if let jpeg = m.image { await backend.sendPhoto(jpeg, caption: m.text, id: m.wireID, shared: m.shared == true) }
             else if let data = m.tap { await backend.tap(ActionButton(label: m.text, data: data), id: m.wireID) }
             else if let w = m.wallet { await backend.wallet(w, id: m.wireID) }
             else { await backend.send(m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true) }
@@ -719,10 +728,24 @@ final class OttoStore {
     func hideApproval(_ id: String) { hiddenApprovals.insert(id) }
 
     /// `keep`: the decision goes out, but the sheet stays up (a payment's receipt) until `closeApproval`.
-    func decide(_ id: String, approve: Bool, keep: Bool = false) async {
+    /// True once the Mac has the decision. False leaves the approval up: it isn't queued for later,
+    /// since a payment approved now shouldn't go through half an hour on, and the Mac shows it again
+    /// on the next connect while it's still live.
+    func decide(_ id: String, approve: Bool, keep: Bool = false) async -> Bool {
         if keep { keptApprovals.insert(id) }   // before the send: the Mac's "done" can beat its reply
-        await backend.decide(approval: id, approve: approve)
+        guard await backend.decide(approval: id, approve: approve) else {
+            keptApprovals.remove(id)
+            return false
+        }
         if !keep { approvals.removeAll { $0.id == id } }
+        return true
+    }
+
+    /// A message that can't be sent after all (Siri's saved place, with the Mac out of reach).
+    func giveUp(_ id: Message.ID) {
+        guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[i].pending = nil
+        messages[i].failed = true
     }
 
     func closeApproval(_ id: String) { keptApprovals.remove(id); approvals.removeAll { $0.id == id } }

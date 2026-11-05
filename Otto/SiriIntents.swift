@@ -79,7 +79,8 @@ struct SnapToOtto: AppIntent {
             return .result(dialog: "That isn't a photo I can read.")
         }
         let words = note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let mine = Message(from: .me, text: words, image: jpeg)
+        var mine = Message(from: .me, text: words, image: jpeg)
+        mine.snap = true
         guard let a = await OttoStore.shared.siri(mine, send: { await $0.snap(jpeg, note: words, id: mine.wireID) }) else {
             // Unreachable: it goes up as a plain photo when the app next connects, pending until then.
             let sent = await OttoStore.shared.sendAndConfirm(mine.id)
@@ -111,8 +112,10 @@ struct SaveThisPlace: AppIntent {
         guard let fix else { return .result(dialog: "Couldn't get your location.") }
         let place = await Here.describe(fix)
         let mine = Message(from: .me, text: "📍 " + (words.isEmpty ? (place["name"] as? String ?? "here") : words))
-        guard let a = await OttoStore.shared.siri(mine, send: { await $0.ask(id: mine.wireID, text: words, via: "here", place: place) })
-        else { return .result(dialog: "Otto's offline, so that place isn't saved.") }
+        guard let a = await OttoStore.shared.siri(mine, send: { await $0.ask(id: mine.wireID, text: words, via: "here", place: place) }) else {
+            OttoStore.shared.giveUp(mine.id)   // the place can't ride a later retry: say it didn't go
+            return .result(dialog: "Otto's offline, so that place isn't saved.")
+        }
         return .result(dialog: try await spoken(a))
     }
 }

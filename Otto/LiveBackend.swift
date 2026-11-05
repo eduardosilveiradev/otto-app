@@ -71,8 +71,8 @@ final class LiveBackend: OttoBackend {
     private var live = false
     private var connects = 0
     private var socket: URLSessionWebSocketTask?
-    /// Tapbacks and approval decisions not yet acked, oldest first. On disk, so one made just
-    /// before the app is killed still goes. (Messages and taps are kept in the thread instead.)
+    /// Tapbacks not yet acked, oldest first. On disk, so one made just before the app is
+    /// killed still goes. (Messages, taps and payments are kept in the thread instead.)
     private var outbox: [String] = UserDefaults.standard.stringArray(forKey: "otto.outbox") ?? [] {
         didSet { UserDefaults.standard.set(outbox, forKey: "otto.outbox") }
     }
@@ -155,8 +155,10 @@ final class LiveBackend: OttoBackend {
         await handOver(fields.merging(["type": "wallet", "op": id]) { a, _ in a }, op: id)
     }
 
-    func decide(approval id: String, approve: Bool) async {
-        await write(["type": "approval", "id": id, "decision": approve ? "approve" : "decline"])
+    /// Straight to the socket and waited on, not the outbox: see OttoStore.decide.
+    func decide(approval id: String, approve: Bool) async -> Bool {
+        let op = UUID().uuidString
+        return await handOver(["type": "approval", "op": op, "id": id, "decision": approve ? "approve" : "decline"], op: op)
     }
 
     func react(to id: String, emoji: String) async {

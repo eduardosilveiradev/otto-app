@@ -69,6 +69,8 @@ struct Message: Identifiable, Codable {
     var tap: String? = nil
     /// Yours, a Wallet payment (amount, merchant, card) for money tracking, when it couldn't go up at once.
     var wallet: [String: String]? = nil
+    /// Yours, a photo from Snap to Otto: filed, not discussed, so a retry goes up as a snap too.
+    var snap: Bool? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }
@@ -153,7 +155,8 @@ protocol OttoBackend: AnyObject {
     var voices: AsyncStream<(String, RemoteFile?)> { get }
     /// Otto rewriting a message it already sent: (wireID, new text).
     var edits: AsyncStream<(String, String)> { get }
-    func decide(approval id: String, approve: Bool) async
+    /// True once the server has the decision.
+    func decide(approval id: String, approve: Bool) async -> Bool
     /// The newest `limit` messages of the thread on the server.
     func history(background: Bool, limit: Int) async -> [Message]
     /// True once the server has the message; false means try again later.
@@ -201,7 +204,7 @@ extension OttoBackend {
     func stamps() async -> StampsReply? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
-    func decide(approval id: String, approve: Bool) async {}
+    func decide(approval id: String, approve: Bool) async -> Bool { true }
     func wallet(_ fields: [String: String], id: String) async -> Bool { true }
 }
 
