@@ -313,6 +313,11 @@ final class OttoStore {
                         files: [RemoteFile(id: "demo-pass-1", name: "Pass_1.pkpass", kind: "file"), RemoteFile(id: "demo-pass-2", name: "Pass_2.pkpass", kind: "file")]),
             ]
         }
+        // `-cardThread [types]`: Otto's cards, one per block type (Cards.swift).
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-cardThread") {
+            let args = ProcessInfo.processInfo.arguments
+            messages = Card.demoThread(i + 1 < args.count && !args[i + 1].hasPrefix("-") ? args[i + 1] : nil)
+        }
         // `-paymentDemo`: a payment confirmation up over the thread.
         if ProcessInfo.processInfo.arguments.contains("-paymentDemo") {
             approvals = [ApprovalRequest(id: "demo-pay", title: "Pay 17.00 EUR", summary: "Multisala Lux Roma", files: [], branch: nil, stat: nil, expires: nil,

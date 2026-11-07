@@ -895,7 +895,7 @@ private struct Row: View {
     }
     /// A photo or file with no words is only itself: no empty bubble under it. A voice note is its bubble.
     private var textShown: Bool {
-        let attached = message.isPhoto || !(message.files ?? []).isEmpty
+        let attached = message.isPhoto || !(message.files ?? []).isEmpty || !(message.card?.shown.isEmpty ?? true)
         return (!attached || !message.text.isEmpty || message.isVoice || message.audio != nil) && !hidesText
     }
     private var hidesText: Bool { preview != nil && Self.previewURL(message).map { Self.isOnlyLink(message, $0) } == true }
@@ -938,6 +938,7 @@ private struct Row: View {
         if !m.text.isEmpty { return draft(m)?.body ?? m.text }
         if m.isVoice || m.audio != nil { return "Voice message" }
         if m.isPhoto { return "Photo" }
+        if let c = m.card { return c.title ?? "Card" }
         switch m.files?.first?.kind {
         case "image": return "Photo"
         case "video": return "Video"
@@ -958,6 +959,11 @@ private struct Row: View {
         thread.react(e, on: message.id); reacted += 1
     }
     private func reply() { withAnimation(.snappy) { thread.replyingTo = message.id } }
+    /// A button under the bubble or on its card: copy, open, or go back to Otto as a tap.
+    private func press(_ b: ActionButton) {
+        if let c = b.copy { UIPasteboard.general.string = c; UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        else if let u = b.url.flatMap(URL.init(string:)) { openURL(u) } else { onTap(b) }
+    }
     /// A draft copies as the words that would go out, without its "draft:" line.
     private func copyText() { UIPasteboard.general.string = Self.draft(message)?.body ?? message.text }
     private var firstLink: URL? { Self.linked(message.text).runs.lazy.compactMap(\.link).first }
@@ -1103,6 +1109,9 @@ private struct Row: View {
                     Button("OK", role: .cancel) {}
                 } message: { Text($0) }
             }
+            if !mine, let card = message.card, !card.shown.isEmpty {
+                CardView(card: card, press: press)
+            }
             if let md = preview {
                 // No frame here: a maxWidth frame is 280 wide and centres a narrower card in it.
                 // LinkPreview already caps itself at 280 and hugs its content.
@@ -1140,10 +1149,7 @@ private struct Row: View {
             if !message.buttons.isEmpty {
                 HStack(spacing: 16) {
                     ForEach(message.buttons) { b in
-                        Button(b.label) {
-                            if let c = b.copy { UIPasteboard.general.string = c; UINotificationFeedbackGenerator().notificationOccurred(.success) }
-                            else if let u = b.url.flatMap(URL.init(string:)) { openURL(u) } else { onTap(b) }
-                        }.font(.system(size: 15)).tint(.blue)
+                        Button(b.label) { press(b) }.font(.system(size: 15)).tint(.blue)
                     }
                 }
                 .padding(.leading, 12)

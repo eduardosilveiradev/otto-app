@@ -65,6 +65,8 @@ struct Message: Identifiable, Codable {
     var scheduled: [DashTrigger]? = nil
     /// What Otto wrote down while writing this (money, memories, loops…), as cards (Recorded.swift).
     var recorded: [RecordedCard]? = nil
+    /// Data Otto drew for this message (generative UI), shown under the bubble (Cards.swift).
+    var card: Card? = nil
     /// A verification code to show in the drawer (OTP.swift). Cleared when the server edits the message after it expires.
     var otp: OTPCode? = nil
     /// A desktop was focused when it went out (server's desktop-focus quiet): in the thread, but no banner.
