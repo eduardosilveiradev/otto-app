@@ -27,7 +27,7 @@
   --ios-bg: #000; --ios-bg-grouped: #000; --ios-cell: #1c1c1e; --ios-cell2: #2c2c2e;
   --ios-sep: #38383b; --ios-chevron: #5a5a5e; --ios-fill: rgb(120 120 128 / .36); --ios-fill2: rgb(120 120 128 / .32);
   --ios-glass: rgb(30 30 32 / .66); --ios-glass-edge: rgb(255 255 255 / .14); --ios-glass-shadow: 0 8px 30px rgb(0 0 0 / .5);
-  --ios-sheet: #1c1c1e; --ios-alert: rgb(44 44 46 / .86); --ios-bubble-in: #262628; --ios-kbd: #2b2b2d; --ios-key: #6c6c6e; --ios-key2: #4a4a4c;
+  --ios-sheet: #1c1c1e; --ios-alert: rgb(44 44 46 / .86); --ios-bubble-in: #26252a; --ios-kbd: #2b2b2d; --ios-key: #6c6c6e; --ios-key2: #4a4a4c;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) { .ios[data-appearance="auto"] {
@@ -38,7 +38,7 @@
   --ios-bg: #000; --ios-bg-grouped: #000; --ios-cell: #1c1c1e; --ios-cell2: #2c2c2e;
   --ios-sep: #38383b; --ios-chevron: #5a5a5e; --ios-fill: rgb(120 120 128 / .36); --ios-fill2: rgb(120 120 128 / .32);
   --ios-glass: rgb(30 30 32 / .66); --ios-glass-edge: rgb(255 255 255 / .14); --ios-glass-shadow: 0 8px 30px rgb(0 0 0 / .5);
-  --ios-sheet: #1c1c1e; --ios-alert: rgb(44 44 46 / .86); --ios-bubble-in: #262628; --ios-kbd: #2b2b2d; --ios-key: #6c6c6e; --ios-key2: #4a4a4c;
+  --ios-sheet: #1c1c1e; --ios-alert: rgb(44 44 46 / .86); --ios-bubble-in: #26252a; --ios-kbd: #2b2b2d; --ios-key: #6c6c6e; --ios-key2: #4a4a4c;
   color-scheme: dark } }
 
 /* ---------- device ---------- */
