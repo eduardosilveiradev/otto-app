@@ -71,6 +71,11 @@ struct ChatView: View {
     final class Offset { var y: CGFloat = 0 }
     /// Far enough up the thread that the newest messages are out of sight.
     @State private var scrolledUp = false
+    @State private var visibleNewest: Message.ID?
+    private var newestOtto: Message? { thread.messages.last(where: { $0.from == .otto }) }
+    private var seenDate: Date? {
+        thread.isOtto && store.foreground && visibleNewest == newestOtto?.id ? newestOtto?.date : nil
+    }
     /// How many of the newest messages are laid out. The thread isn't lazy (see below), so a
     /// long one laid out whole made every change cost a pass over all of it; reaching the
     /// top lays out another page.
@@ -153,6 +158,10 @@ struct ChatView: View {
                                 onTap: { thread.tap($0, on: m.id) })
                                 .padding(.top, newBlock || prev?.from == .terminal ? 0 : (prev?.from == m.from ? 4 : 10))
                                 .id(m.id)
+                                .onScrollVisibilityChange(threshold: 0.01) { visible in
+                                    guard m.id == newestOtto?.id else { return }
+                                    visibleNewest = visible ? m.id : nil
+                                }
                                 // Yours lifts out of the text field, as wide as the field and blurred,
                                 // and narrows into its bubble (Messages, measured off a screen recording);
                                 // Otto's grows out of its tail corner.
@@ -273,6 +282,11 @@ struct ChatView: View {
             ottoTop
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
+        .task(id: seenDate) {
+            guard let date = seenDate, let live = store.backend as? LiveBackend else { return }
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+            await live.seen(date)
+        }
         .task { await calls.run(store.backend) }
         .task { if thread.isOtto { await gate.run(store.backend) } }
         .sheet(isPresented: $showGate) { GateSheet(watch: gate) }
