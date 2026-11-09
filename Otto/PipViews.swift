@@ -11,13 +11,13 @@ private let sheetColour = UIColor.secondarySystemGroupedBackground
 struct PipRoot: View {
     let store: OttoStore
 
-    private enum Kind { case handoff, pip }
+    private enum Kind { case handoff, page }
     /// One `sheet` in the store, shown by whichever presentation suits it.
     private func pipBinding(_ kind: Kind) -> Binding<PipSheet?> {
         let pips = store.pips
         return Binding(get: {
             switch (kind, pips.sheet) {
-            case (.handoff, .handoff?), (.pip, .pip?): pips.sheet
+            case (.handoff, .handoff?), (.page, .pip?), (.page, .group?): pips.sheet
             default: nil
             }
         }, set: { pips.sheet = $0 })
@@ -39,20 +39,52 @@ struct PipRoot: View {
         }
         .sheet(item: pipBinding(.handoff)) { if case .handoff(let id) = $0 { HandoffSheet(store: store, id: id) } }
         // Edge to edge with its own close button, and no grabber: the mockup's a full page.
-        .fullScreenCover(item: pipBinding(.pip)) { if case .pip(let id) = $0 { PipDetailSheet(store: store, id: id) } }
+        .fullScreenCover(item: pipBinding(.page)) {
+            switch $0 {
+            case .pip(let id): PipDetailSheet(store: store, id: id)
+            case .group(let id): GroupDetailSheet(store: store, id: id)
+            case .handoff: EmptyView()
+            }
+        }
     }
 }
 
-/// The hidden bar takes the edge swipe with it; this puts it back. Edge only: a swipe across a
-/// row means "reply" in Otto's thread, so the full-width back gesture stays off.
+/// Marks a left-aligned message, so the back swipe can ask when it starts whether it's on the
+/// row's left fifth. Asked once per swipe, so scrolling pays nothing. Takes no touches.
+final class LeftRowMarkerView: UIView {
+    private static let all = NSHashTable<LeftRowMarkerView>.weakObjects()
+    override func didMoveToWindow() { if window != nil { Self.all.add(self) } else { Self.all.remove(self) } }
+
+    static func startsBack(at p: CGPoint) -> Bool {
+        all.allObjects.contains {
+            let r = $0.convert($0.bounds, to: nil)
+            return r.contains(p) && p.x < r.minX + r.width / 5
+        }
+    }
+}
+
+struct LeftRowMarker: UIViewRepresentable {
+    func makeUIView(context: Context) -> LeftRowMarkerView {
+        let v = LeftRowMarkerView()
+        v.isUserInteractionEnabled = false
+        return v
+    }
+    func updateUIView(_ v: LeftRowMarkerView, context: Context) {}
+}
+
+/// The hidden bar takes the edge swipe with it; this puts it back. Past the edge, back only starts
+/// on the left fifth of a left-aligned message: anywhere else a swipe across a row means "reply".
 private struct EdgeSwipeBack: UIViewControllerRepresentable {
-    final class Controller: UIViewController {
+    final class Controller: UIViewController, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool { LeftRowMarkerView.startsBack(at: g.location(in: nil)) }
+
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
             guard let nav = navigationController else { return }
             nav.interactivePopGestureRecognizer?.delegate = nil
             nav.interactivePopGestureRecognizer?.isEnabled = true
-            nav.interactiveContentPopGestureRecognizer?.isEnabled = false
+            nav.interactiveContentPopGestureRecognizer?.delegate = self
+            nav.interactiveContentPopGestureRecognizer?.isEnabled = true
         }
     }
     func makeUIViewController(context: Context) -> Controller { Controller() }
@@ -66,6 +98,9 @@ struct ConversationsView: View {
     @State private var query = ""
     @State private var results: [ConversationSearchResult]?
     @FocusState private var searching: Bool
+    private enum New: Identifiable { case pip, group; var id: Self { self } }
+    @State private var new: New?
+    @State private var madeGroup: String?
 
     private var pips: PipStore { store.pips }
     private var searchText: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -103,6 +138,20 @@ struct ConversationsView: View {
         .scrollEdgeEffectStyle(.soft, for: .top)
         .overlay(alignment: .bottom) { dock }
         .ignoresSafeArea(.container, edges: .top)
+        .sheet(item: $new, onDismiss: {
+            if let id = madeGroup { madeGroup = nil; pips.open(id) }
+        }) {
+            switch $0 {
+            case .pip: PipEditSheet(store: store, pip: nil)
+            case .group: NewGroupSheet(store: store) { madeGroup = $0 }
+            }
+        }
+        #if DEBUG
+        .task {
+            if PipFixture.screen == "create-pip" || PipFixture.screen == "create-fail" { new = .pip }
+            if PipFixture.screen == "create-group" { new = .group }
+        }
+        #endif
         .task(id: searchText) {
             guard !searchText.isEmpty else { results = nil; return }
             try? await Task.sleep(for: .milliseconds(250))   // not on every keystroke
@@ -124,6 +173,20 @@ struct ConversationsView: View {
         .padding(.top, 55)
         .padding(.bottom, 6)
         .accessibilityLabel("Otto")
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .topTrailing) {
+            Menu {
+                Button("New group", systemImage: "person.2") { new = .group }
+                Button("New pip", systemImage: "face.smiling") { new = .pip }
+            } label: {
+                Image(systemName: "plus").font(.system(size: 18, weight: .medium))
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: .circle)
+            }
+            .tint(.primary)
+            .accessibilityLabel("New")
+            .padding(.trailing, 16).padding(.top, 82)
+        }
     }
 
     private var dock: some View {
@@ -569,6 +632,8 @@ struct PipDetailSheet: View {
     let id: String
     @Environment(\.dismiss) private var dismiss
     @State private var editing = false
+    @State private var deleting = false
+    @State private var failure: String?
 
     private var pips: PipStore { store.pips }
     private var p: PipDetail? { pips.details[id] }
@@ -577,32 +642,13 @@ struct PipDetailSheet: View {
         Group {
             if let p { content(p) } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .overlay(alignment: .topTrailing) {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark").font(.system(size: 18, weight: .medium))
-                    .frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(), in: .circle)
-            }
-            .tint(.primary)
-            .accessibilityLabel("Close")
-            .padding(.trailing, 16).padding(.top, -2)
-        }
-        .overlay(alignment: .topLeading) {
-            if p != nil {
-                Button("Edit") { editing = true }
-                    .font(.system(size: 17, weight: .medium))
-                    .frame(minWidth: 44, minHeight: 44).padding(.horizontal, 8)
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                    .tint(.primary)
-                    .padding(.leading, 16).padding(.top, -2)
-            }
-        }
+        .modifier(DetailChrome(action: p == nil ? nil : "Edit") { editing = true })
+        .modifier(FailureLine(text: failure))
         .sheet(isPresented: $editing) { if let p { PipEditSheet(store: store, pip: p) } }
         .task {
             #if DEBUG
             if PipFixture.screen.hasPrefix("edit-") { editing = true }
+            if PipFixture.screen == "pip-confirm" { deleting = true }
             #endif
             await pips.loadPip(id)
         }
@@ -663,41 +709,23 @@ struct PipDetailSheet: View {
                 }
                 .padding(.horizontal, 16)
                 .sensoryFeedback(.impact(weight: .light), trigger: p.paused)
+
+                PillButton(title: "Delete pip", destructive: true) { deleting = true }
+                    .padding(.horizontal, 16).padding(.top, 40)
+                    .confirmationDialog("Delete \(p.name)?", isPresented: $deleting, titleVisibility: .visible) {
+                        Button("Delete pip", role: .destructive) {
+                            Task {
+                                failure = await pips.deletePip(p.id)
+                                if failure == nil { dismiss() }
+                            }
+                        }
+                    } message: {
+                        Text("\(p.name) leaves your conversations and any groups it’s in.")
+                    }
             }
             .padding(.bottom, 32)
         }
         .scrollBounceBehavior(.basedOnSize)
-    }
-
-    private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
-        VStack(spacing: 0) { c() }
-            .background(Color(sheetColour), in: .rect(cornerRadius: 26, style: .continuous))
-            .padding(.horizontal, 16)
-            .padding(.bottom, 24)
-    }
-
-    private func section<C: View>(_ title: String, bottom: CGFloat = 24, @ViewBuilder _ c: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 13)).foregroundStyle(.secondary).padding(.horizontal, 32)
-            VStack(spacing: 0) { c() }
-                .background(Color(sheetColour), in: .rect(cornerRadius: 26, style: .continuous))
-                .padding(.horizontal, 16)
-        }
-        .padding(.bottom, bottom)
-    }
-
-    private func line<C: View>(divided: Bool, @ViewBuilder _ c: () -> C) -> some View {
-        HStack(spacing: 12) { c() }
-            .font(.system(size: 17))
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-            .overlay(alignment: .top) { if divided { Rectangle().fill(Color(.separator)).frame(height: 0.5).padding(.leading, 16) } }
-    }
-
-    private func tile(_ symbol: String, _ colour: Color) -> some View {
-        Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
-            .frame(width: 30, height: 30)
-            .background(colour, in: .rect(cornerRadius: 8, style: .continuous))
     }
 
     /// The server names what a pip may touch; this picks its tile.
@@ -726,30 +754,330 @@ struct PipDetailSheet: View {
     }
 }
 
-/// A pip's name, job and schedules. Nothing leaves the phone until Save.
+/// The page the detail screens sit on: grey, with close on the right and one action on the left.
+private struct DetailChrome: ViewModifier {
+    let action: String?
+    let tap: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .overlay(alignment: .topTrailing) {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").font(.system(size: 18, weight: .medium))
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .tint(.primary)
+                .accessibilityLabel("Close")
+                .padding(.trailing, 16).padding(.top, -2)
+            }
+            .overlay(alignment: .topLeading) {
+                if let action {
+                    Button(LocalizedStringKey(action), action: tap)
+                        .font(.system(size: 17, weight: .medium))
+                        .frame(minWidth: 44, minHeight: 44).padding(.horizontal, 8)
+                        .glassEffect(.regular.interactive(), in: .capsule)
+                        .tint(.primary)
+                        .padding(.leading, 16).padding(.top, -2)
+                }
+            }
+    }
+}
+
+/// Why a change didn't take, where it can't be scrolled away.
+private struct FailureLine: ViewModifier {
+    let text: String?
+    func body(content: Content) -> some View {
+        content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let text {
+                    Text(text).font(.system(size: 13)).foregroundStyle(Color(.systemRed))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 32).padding(.vertical, 10)
+                        .background(.bar)
+                }
+            }
+            .onChange(of: text) { if let text { AccessibilityNotification.Announcement(text).post() } }
+    }
+}
+
+// MARK: - Group details
+
+struct GroupDetailSheet: View {
+    let store: OttoStore
+    let id: String
+    @State private var renaming = false
+    @State private var draft = ""
+    @State private var deleting = false
+    @State private var busy = false
+    @State private var failure: String?
+    @State private var opened: PipSheet?
+
+    private var pips: PipStore { store.pips }
+    private var row: ConversationRow? { pips.row(id) }
+
+    var body: some View {
+        Group {
+            if let row { content(row) } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+        }
+        .modifier(DetailChrome(action: row == nil ? nil : "Rename") { draft = row?.name ?? ""; renaming = true })
+        .modifier(FailureLine(text: failure))
+        .alert("Rename group", isPresented: $renaming) {
+            TextField("Name", text: $draft)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") { rename(draft) }
+        }
+        .onChange(of: draft) { if draft.count > 60 { draft = String(draft.prefix(60)) } }
+        // Over this page, so closing a member's details comes back here.
+        .fullScreenCover(item: $opened) { if case .pip(let id) = $0 { PipDetailSheet(store: store, id: id) } }
+        .task {
+            #if DEBUG
+            if PipFixture.screen == "group-confirm" { deleting = true }
+            if PipFixture.screen == "group-fail" { rename("Lisbon in April") }
+            #endif
+            await pips.loadAll()
+        }
+    }
+
+    private func run(_ action: @escaping () async -> String?) {
+        busy = true
+        failure = nil
+        Task {
+            failure = await action()
+            busy = false
+        }
+    }
+
+    private func rename(_ name: String) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, n != row?.name else { return }
+        run { await pips.renameGroup(id, n) }
+    }
+
+    private func content(_ row: ConversationRow) -> some View {
+        let others = pips.details.values.filter { !row.members.contains($0.id) }.sorted { $0.name < $1.name }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(spacing: 0) {
+                    GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 88, ring: UIColor.systemGroupedBackground)
+                        .frame(width: 88, height: 88)
+                    Text(row.name).font(.system(size: 22, weight: .semibold)).multilineTextAlignment(.center).padding(.top, 4).padding(.horizontal, 72)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 20)
+
+                section("Members", bottom: 0) {
+                    if let otto = row.otto { member(otto, divided: false) }
+                    ForEach(row.pips) { member($0, divided: true) }
+                    if !others.isEmpty {
+                        Menu {
+                            ForEach(others) { p in Button(p.name) { run { await pips.addMember(p.id, to: id) } } }
+                        } label: {
+                            line(divided: true) {
+                                Image(systemName: "plus").frame(width: 40)
+                                Text("Add pip")
+                            }
+                        }
+                        .tint(.primary)
+                    }
+                }
+
+                PillButton(title: "Delete group", destructive: true) { deleting = true }
+                    .padding(.horizontal, 16).padding(.top, 40)
+                    .confirmationDialog("Delete \(row.name)?", isPresented: $deleting, titleVisibility: .visible) {
+                        Button("Delete group", role: .destructive) { run { await pips.deleteGroup(id) } }
+                    } message: {
+                        Text("\(row.name) leaves your conversations. Its pips stay.")
+                    }
+            }
+            .padding(.bottom, 32)
+            .disabled(busy)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    private func member(_ m: PipMember, divided: Bool) -> some View {
+        line(divided: divided) {
+            Button { opened = .pip(m.id) } label: {
+                HStack(spacing: 12) {
+                    FaceView(look: m.look, size: 40).frame(width: 40, height: 40)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(m.name).lineLimit(1)
+                        if let job = m.isOtto ? String(localized: "Always in the group") : pips.details[m.id]?.job {
+                            Text(job).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    Text(Self.state(m.state)).font(.system(size: 15)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .allowsHitTesting(!m.isOtto)   // Otto has no pip page
+            if !m.isOtto {
+                Button { run { await pips.removeMember(m.id, from: id) } } label: {
+                    Image(systemName: "minus.circle").font(.system(size: 20)).foregroundStyle(.secondary)
+                        .frame(width: 28, height: 44).contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove \(m.name) from the group")
+            }
+        }
+    }
+
+    private static func state(_ s: FaceState) -> String {
+        switch s {
+        case .working: String(localized: "Working")
+        case .needs: String(localized: "Needs you")
+        case .asleep: String(localized: "Asleep")
+        case .gpt: String(localized: "On GPT")
+        default: String(localized: "Idle")
+        }
+    }
+}
+
+// MARK: - Making and changing
+
+private struct NewGroupSheet: View {
+    let store: OttoStore
+    let created: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var picked = Set<String>()
+    @State private var saving = false
+    @State private var failure: String?
+
+    private var pips: PipStore { store.pips }
+    private var everyone: [PipDetail] { pips.details.values.sorted { $0.name < $1.name } }
+    private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Name") {
+                    TextField("Name this group", text: $name).textInputAutocapitalization(.words)
+                }
+                Section {
+                    HStack(spacing: 12) {
+                        FaceView(look: .otto, size: 32).frame(width: 32, height: 32)
+                        Text("Otto")
+                        Spacer(minLength: 8)
+                        Text("Always in the group").foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    ForEach(everyone) { p in
+                        Button {
+                            if picked.remove(p.id) == nil { picked.insert(p.id) }
+                        } label: {
+                            HStack(spacing: 12) {
+                                FaceView(look: p.look, size: 32).frame(width: 32, height: 32)
+                                Text(p.name).lineLimit(1)
+                                Spacer(minLength: 8)
+                                if picked.contains(p.id) { Image(systemName: "checkmark").fontWeight(.semibold) }
+                            }
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(picked.contains(p.id) ? .isSelected : [])
+                    }
+                } header: {
+                    Text("Members")
+                } footer: {
+                    if everyone.isEmpty { Text("No pips yet. The group can start with Otto, and you can add pips later.") }
+                }
+            }
+            .navigationTitle("New group")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if saving { ProgressView() } else { Button("Create", action: save).disabled(trimmed.isEmpty) }
+                }
+            }
+            .modifier(FailureLine(text: failure))
+        }
+        .tint(.primary)
+        .interactiveDismissDisabled(!name.isEmpty || !picked.isEmpty)
+        .onChange(of: name) { if name.count > 60 { name = String(name.prefix(60)) } }
+        .task { await pips.loadAll() }
+    }
+
+    private func save() {
+        saving = true
+        failure = nil
+        Task {
+            failure = await pips.createGroup(name: trimmed, members: picked.sorted(), created: created)
+            saving = false
+            if failure == nil { dismiss() }
+        }
+    }
+}
+
+/// A new pip (`pip` nil) or changes to one. Nothing leaves the phone until Save, and then only what changed.
 private struct PipEditSheet: View {
     let store: OttoStore
-    let pip: PipDetail
+    let pip: PipDetail?
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var job: String
+    @State private var instructions: String
+    @State private var solid: FaceSolid
+    @State private var colour: String
+    @State private var tools: Set<String>
     @State private var schedules: [PipSchedule]
+    @State private var allTools: [PipTool]?
+    @State private var toolsFailed = false
     @State private var path: [String] = []
     @State private var saving = false
-    @State private var failed = false
+    @State private var failure: String?
 
-    init(store: OttoStore, pip: PipDetail) {
+    /// Sphere is Otto's.
+    private static let solids = FaceSolid.allCases.filter { $0 != .sphere }
+    private static let colours: [(name: LocalizedStringKey, hex: String)] = [
+        ("Blue", "#3B6FD4"), ("Teal", "#1A8E9C"), ("Green", "#5DBB3F"), ("Yellow", "#F2C230"),
+        ("Pink", "#EE5F9E"), ("Purple", "#9656C4"), ("Slate", "#46526B"),
+    ]
+
+    init(store: OttoStore, pip: PipDetail?) {
         self.store = store
         self.pip = pip
-        _name = State(initialValue: pip.name)
-        _job = State(initialValue: pip.job)
-        _schedules = State(initialValue: pip.schedules)
+        _name = State(initialValue: pip?.name ?? "")
+        _job = State(initialValue: pip?.job ?? "")
+        _instructions = State(initialValue: pip?.instructions ?? "")
+        _solid = State(initialValue: pip?.solid ?? .gem)
+        _colour = State(initialValue: pip?.colour ?? Self.colours[0].hex)
+        _tools = State(initialValue: Set(pip?.tools ?? pip?.canReach.map(\.id) ?? []))
+        _schedules = State(initialValue: pip?.schedules ?? [])
     }
 
+    private var startTools: Set<String> { Set(pip?.tools ?? pip?.canReach.map(\.id) ?? []) }
     private static func blank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private static func incomplete(_ s: PipSchedule) -> Bool { blank(s.name) || blank(s.ask) }
-    private var changed: Bool { name != pip.name || job != pip.job || schedules != pip.schedules }
-    private var ready: Bool { changed && !Self.blank(name) && !Self.blank(job) && !schedules.contains(where: Self.incomplete) }
+
+    private var changed: Bool {
+        guard let pip else { return !name.isEmpty || !job.isEmpty || !instructions.isEmpty }
+        return name != pip.name || job != pip.job || instructions != (pip.instructions ?? "") || solid != pip.solid
+            || colour != pip.colour || tools != startTools || schedules != pip.schedules
+    }
+    private var ready: Bool {
+        // An older pip may have come without its instructions, and they aren't needed to change its name.
+        changed && !Self.blank(name) && !Self.blank(job) && (pip != nil || !Self.blank(instructions))
+            && !schedules.contains(where: Self.incomplete)
+    }
+
+    private var pickedColour: Binding<Color> {
+        Binding {
+            let c = FaceLook(solid: solid, colour: colour, state: .rest).rgb
+            return Color(red: Double(c.x), green: Double(c.y), blue: Double(c.z))
+        } set: {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0
+            UIColor($0).getRed(&r, green: &g, blue: &b, alpha: nil)
+            colour = String(format: "#%02X%02X%02X", Int(min(max(r, 0), 1) * 255), Int(min(max(g, 0), 1) * 255), Int(min(max(b, 0), 1) * 255))
+        }
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -760,29 +1088,14 @@ private struct PipEditSheet: View {
                 Section("Job") {
                     TextField("What this pip is for", text: $job, axis: .vertical)
                 }
-                Section("Schedules") {
-                    ForEach(schedules) { s in
-                        NavigationLink(value: s.id) {
-                            HStack {
-                                Text(s.name.isEmpty ? "New schedule" : s.name).lineLimit(1)
-                                Spacer(minLength: 8)
-                                Text(Self.incomplete(s) ? "Incomplete" : s.label).lineLimit(1)
-                                    .foregroundStyle(Self.incomplete(s) ? Color(.systemRed) : .secondary)
-                            }
-                        }
-                    }
-                    .onDelete { schedules.remove(atOffsets: $0) }
-                    if schedules.count < 10 {
-                        Button("Add schedule", systemImage: "plus") {
-                            let when = ScheduleWhen()
-                            let s = PipSchedule(id: UUID().uuidString, name: "", label: when.label, schedule: when.cron, tz: TimeZone.current.identifier, ask: "")
-                            schedules.append(s)
-                            path = [s.id]
-                        }
-                    }
+                Section("Instructions") {
+                    TextField("How it should do that job", text: $instructions, axis: .vertical).lineLimit(3...10)
                 }
+                face
+                reach
+                if pip != nil { scheduleList }
             }
-            .navigationTitle("Edit \(pip.name)")
+            .navigationTitle(pip.map { "Edit \($0.name)" } ?? String(localized: "New pip"))
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: String.self) { id in
                 if let i = schedules.firstIndex(where: { $0.id == id }) { ScheduleEditor(schedule: $schedules[i]) }
@@ -790,34 +1103,133 @@ private struct PipEditSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    if saving { ProgressView() } else { Button("Save", action: save).disabled(!ready) }
+                    if saving { ProgressView() } else { Button(pip == nil ? "Create" : "Save", action: save).disabled(!ready) }
                 }
             }
+            .modifier(FailureLine(text: failure))
         }
         .tint(.primary)
         .interactiveDismissDisabled(changed)
         .onChange(of: name) { if name.count > 60 { name = String(name.prefix(60)) } }
         .onChange(of: job) { if job.count > 200 { job = String(job.prefix(200)) } }
+        .onChange(of: instructions) { if instructions.count > 8000 { instructions = String(instructions.prefix(8000)) } }
         // Backed out of a new schedule without filling anything in: it was never there.
         .onChange(of: path) { if path.isEmpty { schedules.removeAll { Self.blank($0.name) && Self.blank($0.ask) } } }
-        .alert("Couldn’t save", isPresented: $failed) { Button("OK") {} } message: {
-            Text("Your changes are still here. Check the connection and try again.")
-        }
+        .sensoryFeedback(.selection, trigger: solid)
         .task {
+            allTools = await store.pips.tools()
+            toolsFailed = allTools == nil
             #if DEBUG
             if PipFixture.screen == "edit-schedule", let s = schedules.first { path = [s.id] }
+            if PipFixture.screen == "create-pip" { try? await Task.sleep(for: .seconds(2)); solid = .drum; colour = "#9656C4" }
+            if PipFixture.screen == "create-fail" { name = "Scout"; job = "Finds things"; instructions = "Look first"; save() }
             #endif
         }
     }
 
+    private var face: some View {
+        Section("Face") {
+            FaceView(look: FaceLook(solid: solid, colour: colour, state: .rest), size: 96, live: true)
+                .frame(width: 96, height: 96).frame(maxWidth: .infinity)
+                .accessibilityHidden(true)
+            HStack(spacing: 0) {
+                ForEach(Self.solids, id: \.self) { s in
+                    Button { solid = s } label: {
+                        FaceView(look: FaceLook(solid: s, colour: colour, state: .rest), size: 40).frame(width: 40, height: 40)
+                            .frame(width: 50, height: 50)
+                            .overlay { if solid == s { Circle().strokeBorder(.primary, lineWidth: 2) } }
+                            .frame(maxWidth: .infinity)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(s.rawValue.replacing("-", with: " ").capitalized)
+                    .accessibilityAddTraits(solid == s ? .isSelected : [])
+                }
+            }
+            HStack(spacing: 0) {
+                ForEach(Self.colours, id: \.hex) { c in
+                    Button { colour = c.hex } label: {
+                        Circle().fill(Color(FaceLook(solid: solid, colour: c.hex, state: .rest).tint)).frame(width: 28, height: 28)
+                            .padding(4)
+                            .overlay { if colour == c.hex { Circle().strokeBorder(.primary, lineWidth: 2) } }
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(c.name))
+                    .accessibilityAddTraits(colour == c.hex ? .isSelected : [])
+                }
+                ColorPicker("Any colour", selection: pickedColour, supportsOpacity: false)
+                    .labelsHidden().frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder private var reach: some View {
+        Section("Can reach") {
+            if let allTools {
+                ForEach(allTools) { t in
+                    Button {
+                        if tools.remove(t.id) == nil { tools.insert(t.id) }
+                    } label: {
+                        HStack {
+                            Text(t.label)
+                            Spacer(minLength: 8)
+                            if tools.contains(t.id) { Image(systemName: "checkmark").fontWeight(.semibold) }
+                        }
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(tools.contains(t.id) ? .isSelected : [])
+                }
+            } else if toolsFailed {
+                Text("Couldn’t load this list. This server may not have it yet.").foregroundStyle(.secondary)
+            } else {
+                ProgressView().frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private var scheduleList: some View {
+        Section("Schedules") {
+            ForEach(schedules) { s in
+                NavigationLink(value: s.id) {
+                    HStack {
+                        Text(s.name.isEmpty ? "New schedule" : s.name).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(Self.incomplete(s) ? "Incomplete" : s.label).lineLimit(1)
+                            .foregroundStyle(Self.incomplete(s) ? Color(.systemRed) : .secondary)
+                    }
+                }
+            }
+            .onDelete { schedules.remove(atOffsets: $0) }
+            if schedules.count < 10 {
+                Button("Add schedule", systemImage: "plus") {
+                    let when = ScheduleWhen()
+                    let s = PipSchedule(id: UUID().uuidString, name: "", label: when.label, schedule: when.cron, tz: TimeZone.current.identifier, ask: "")
+                    schedules.append(s)
+                    path = [s.id]
+                }
+            }
+        }
+    }
+
     private func save() {
-        let n = name.trimmingCharacters(in: .whitespacesAndNewlines), j = job.trimmingCharacters(in: .whitespacesAndNewlines)
+        func set<T: Equatable>(_ new: T, _ old: T?) -> T? { new == old ? nil : new }
+        func clean(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let patch = PipPatch(
+            name: set(clean(name), pip?.name), job: set(clean(job), pip?.job),
+            instructions: set(instructions, pip?.instructions ?? (pip == nil ? nil : "")),
+            solid: set(solid, pip?.solid), colour: set(colour, pip?.colour),
+            tools: pip != nil && tools == startTools ? nil : tools.sorted(),
+            schedules: pip != nil && schedules != pip?.schedules
+                ? schedules.map { PipPatch.Schedule(name: $0.name, label: $0.label, schedule: $0.schedule, tz: $0.tz, ask: $0.ask) } : nil)
         saving = true
+        failure = nil
         Task {
-            let ok = await store.pips.update(pip: pip.id, name: n == pip.name ? nil : n, job: j == pip.job ? nil : j,
-                                             schedules: schedules == pip.schedules ? nil : schedules)
+            if let pip { failure = await store.pips.update(pip: pip.id, patch) } else { failure = await store.pips.createPip(patch) }
             saving = false
-            if ok { dismiss() } else { failed = true }
+            if failure == nil { dismiss() }
         }
     }
 }
@@ -892,6 +1304,38 @@ private struct ScheduleEditor: View {
 
 // MARK: - Shared
 
+private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
+    VStack(spacing: 0) { c() }
+        .background(Color(sheetColour), in: .rect(cornerRadius: 26, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 24)
+}
+
+private func section<C: View>(_ title: String, bottom: CGFloat = 24, @ViewBuilder _ c: () -> C) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+        Text(title).font(.system(size: 13)).foregroundStyle(.secondary).padding(.horizontal, 32)
+        VStack(spacing: 0) { c() }
+            .background(Color(sheetColour), in: .rect(cornerRadius: 26, style: .continuous))
+            .padding(.horizontal, 16)
+    }
+    .padding(.bottom, bottom)
+}
+
+private func line<C: View>(divided: Bool, @ViewBuilder _ c: () -> C) -> some View {
+    HStack(spacing: 12) { c() }
+        .font(.system(size: 17))
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .overlay(alignment: .top) { if divided { Rectangle().fill(Color(.separator)).frame(height: 0.5).padding(.leading, 16) } }
+}
+
+private func tile(_ symbol: String, _ colour: Color) -> some View {
+    Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
+        .frame(width: 30, height: 30)
+        .background(colour, in: .rect(cornerRadius: 8, style: .continuous))
+}
+
+
 private struct CloseButton: View {
     let action: () -> Void
     var body: some View {
@@ -910,6 +1354,7 @@ private struct PillButton: View {
     let title: String
     var systemImage: String? = nil
     var primary = false
+    var destructive = false
     let action: () -> Void
 
     var body: some View {
@@ -920,7 +1365,7 @@ private struct PillButton: View {
             }
             .font(.system(size: 17, weight: .semibold))
             .frame(maxWidth: .infinity).frame(height: 50)
-            .foregroundStyle(primary ? Color(.systemBackground) : .primary)
+            .foregroundStyle(primary ? Color(.systemBackground) : destructive ? Color(.systemRed) : .primary)
             .background(primary ? Color.primary : Color(.secondarySystemFill), in: .capsule)
             .contentShape(.capsule)
         }

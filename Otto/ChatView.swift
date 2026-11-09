@@ -442,10 +442,7 @@ struct ChatView: View {
     /// With only Otto, today's picture. With pips, everyone is a solid, Otto included.
     @ViewBuilder private var title: some View {
         if let row, row.isGroup {
-            // A group has no page of its own in the mockup, but its members do.
-            Menu {
-                ForEach(row.pips) { p in Button(p.name) { store.pips.sheet = .pip(p.id) } }
-            } label: {
+            Button { store.pips.sheet = .group(row.id) } label: {
                 HeaderTitle(name: row.name) { GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 68) }
             }
             .padding(.top, -7)
@@ -976,6 +973,7 @@ private struct Row: View {
     @GestureState private var dragging = false
     @State private var morph: Double = 1
     @State private var swipe: CGFloat = 0
+    @State private var rowWidth: CGFloat = 0
     /// Decided on a drag's first move: sideways is a reply swipe, anything else belongs to the scroll.
     @State private var sideways: Bool?
     @State private var reacted = 0
@@ -1379,6 +1377,8 @@ private struct Row: View {
         }
         // The whole row takes the swipe, not just the bubble: yours start 105pt in from the edge.
         .contentShape(.rect)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
+        .background { if !mine { LeftRowMarker() } }
         .simultaneousGesture(
             canAnswer ? DragGesture(minimumDistance: 20)
                 .updating($dragging) { _, d, _ in d = true }
@@ -1386,7 +1386,8 @@ private struct Row: View {
                     let t = g.translation
                     // Locked on the first move, so a drag that drifts diagonally keeps doing one thing.
                     if sideways == nil {
-                        sideways = t.width > 0 && t.width > abs(t.height) * 1.5
+                        // The left fifth of a left-aligned row is the back swipe's (see LeftRowMarker).
+                        sideways = t.width > 0 && t.width > abs(t.height) * 1.5 && (mine || g.startLocation.x >= rowWidth / 5)
                         if sideways == true { onSwiping(true) }
                     }
                     guard sideways == true else { return }

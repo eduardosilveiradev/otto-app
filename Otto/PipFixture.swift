@@ -51,7 +51,13 @@ enum PipFixture {
         return r
     }
 
+    private nonisolated(unsafe) static var changed: [ConversationRow]?
     private static var rows: [ConversationRow] {
+        get { changed ?? seedRows }
+        set { changed = newValue }
+    }
+
+    private static var seedRows: [ConversationRow] {
         let tomorrow7 = cal.date(bySettingHour: 7, minute: 0, second: 0, of: cal.date(byAdding: .day, value: 1, to: thursday)!)!.timeIntervalSince1970 * 1000
         var r = [
             row("app", "otto", "Otto", [member("otto", .rest)], sender: "otto", text: "On it.", ts: at(0, 8, 13)),
@@ -124,7 +130,8 @@ enum PipFixture {
                 PipSchedule(id: "b", name: "Weekend plan", label: "Fri 18:00", schedule: "0 18 * * 5", tz: "Europe/Lisbon", ask: "Plan the weekend"),
             ] : [],
             canReach: [.init(id: "calendar", name: "Calendar", sharedWithOtto: true), .init(id: "routes", name: "Places and routes", sharedWithOtto: false)],
-            runsOn: .init(model: "gpt-6.1-sol", requestedModel: "gpt-6.1-sol", available: true, reason: "Claude’s weekly limit is low.", claudeReturnsAt: monday.formatted(.iso8601)))
+            runsOn: .init(model: "gpt-6.1-sol", requestedModel: "gpt-6.1-sol", available: true, reason: "Claude’s weekly limit is low.", claudeReturnsAt: monday.formatted(.iso8601)),
+            instructions: "Plan around the calendar and warn before anyone has to leave.", tools: ["calendar", "routes"])
     }
 
     static func respond(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) -> PipResponse? {
@@ -134,7 +141,50 @@ enum PipFixture {
         struct Sent: Encodable { let message: ConversationMessage }
         func ok(_ v: some Encodable) -> PipResponse? { (try? JSONEncoder().encode(v)).map { PipResponse(status: 200, data: $0) } }
         let parts = path.split(separator: "/").map { $0.removingPercentEncoding ?? String($0) }
+        // `*-fail`: a server without the sibling job's routes.
+        if screen.hasSuffix("-fail"), parts[1] == "groups" || (parts[1] == "pips" && (method != "GET" || parts.last == "tools")) { return PipResponse(status: 404, data: Data()) }
+        let f = (try? JSONSerialization.jsonObject(with: body ?? Data())) as? [String: Any] ?? [:]
+        func changeGroup(_ id: String, _ edit: (inout ConversationRow) -> Void) -> PipResponse? {
+            guard let i = rows.firstIndex(where: { $0.id == id }) else { return PipResponse(status: 404, data: Data()) }
+            edit(&rows[i])
+            return ok(rows[i])
+        }
+        func asMember(_ id: String) -> PipMember? { detail(id).map { PipMember(id: $0.id, name: $0.name, solid: $0.solid, colour: $0.colour, state: .rest) } }
         switch (method, parts.dropFirst().first, parts.count) {
+        case ("GET", "pips", 2):
+            struct All: Encodable { let pips: [PipDetail] }
+            let ids = Set(rows.flatMap(\.members)).subtracting(["otto"]).sorted()
+            return ok(All(pips: ids.compactMap(detail)))
+        case ("GET", "pips", 3) where parts[2] == "tools":
+            struct Tool: Encodable { let id, label: String }
+            struct Tools: Encodable { let tools: [Tool] }
+            return ok(Tools(tools: [.init(id: "calendar", label: "Calendar"), .init(id: "routes", label: "Places and routes"), .init(id: "web", label: "Web search"), .init(id: "mail", label: "Mail")]))
+        case ("POST", "pips", 2):
+            guard let template = detail("planner") else { return nil }
+            let id = "made-\(rows.count)", name = f["name"] as? String ?? "", solid = FaceSolid(rawValue: f["solid"] as? String ?? "") ?? .gem, colour = f["colour"] as? String ?? ""
+            let d = PipDetail(id: id, name: name, job: f["job"] as? String ?? "", description: "", solid: solid, colour: colour, paused: false, state: .rest, schedules: [], canReach: [], runsOn: template.runsOn, instructions: f["instructions"] as? String, tools: f["tools"] as? [String])
+            edited[id] = d
+            rows.append(row(id, "pip", name, [PipMember(id: id, name: name, solid: solid, colour: colour, state: .rest), member("otto", .rest)], sender: id, text: "Ready when you are.", ts: Date.now.formatted(.iso8601)))
+            return ok(d)
+        case ("DELETE", "pips", 3):
+            rows.removeAll { $0.kind == "pip" && $0.members.contains(parts[2]) }
+            for i in rows.indices { rows[i].members.removeAll { $0 == parts[2] }; rows[i].memberStates.removeAll { $0.id == parts[2] } }
+            return PipResponse(status: 204, data: Data())
+        case ("POST", "groups", 2):
+            let name = f["name"] as? String ?? "", members = (f["members"] as? [String] ?? []).compactMap(asMember) + [member("otto", .rest)]
+            let r = row("group-\(rows.count)", "group", name, members, sender: "otto", text: "Group started", ts: Date.now.formatted(.iso8601))
+            rows.append(r)
+            return ok(r)
+        case ("PATCH", "groups", 3): return changeGroup(parts[2]) { $0.name = f["name"] as? String ?? $0.name }
+        case ("POST", "groups", 4):
+            guard let m = asMember(f["pip_id"] as? String ?? "") else { return PipResponse(status: 404, data: Data()) }
+            return changeGroup(parts[2]) { $0.members.append(m.id); $0.memberStates.insert(m, at: 0) }
+        case ("DELETE", "groups", 5):
+            if parts[4] == "otto" { return PipResponse(status: 400, data: Data()) }
+            return changeGroup(parts[2]) { r in r.members.removeAll { $0 == parts[4] }; r.memberStates.removeAll { $0.id == parts[4] } }
+        case ("DELETE", "groups", 3):
+            rows.removeAll { $0.id == parts[2] }
+            return PipResponse(status: 204, data: Data())
         case ("GET", "conversations", 2): return ok(Rows(conversations: rows))
         case ("GET", "conversations", 3) where parts[2] == "search":
             struct Hit: Encodable { let conversation: ConversationRow; let matches: [ConversationMessage] }
@@ -147,16 +197,18 @@ enum PipFixture {
             return ok(Found(results: hits))
         case ("GET", "conversations", 4) where parts[3] == "history": return ok(Messages(messages: thread(parts[2]).map { var m = $0; m.read = m.sender == "user" ? true : nil; return m }))
         case ("POST", "conversations", 4) where parts[3] == "messages":
-            let f = (try? JSONSerialization.jsonObject(with: body ?? Data())) as? [String: String] ?? [:]
-            return ok(Sent(message: ConversationMessage(id: f["id"] ?? "", conversation_id: parts[2], sender: "user", kind: "text", text: f["text"] ?? "", ts: Date.now.formatted(.iso8601))))
+            return ok(Sent(message: ConversationMessage(id: f["id"] as? String ?? "", conversation_id: parts[2], sender: "user", kind: "text", text: f["text"] as? String ?? "", ts: Date.now.formatted(.iso8601))))
         case ("POST", "conversations", 4): return PipResponse(status: 204, data: Data())
         case ("GET", "pips", 3): return detail(parts[2]).flatMap(ok)
         case ("PATCH", "pips", 3):
             guard var d = detail(parts[2]) else { return PipResponse(status: 404, data: Data()) }
-            let f = (try? JSONSerialization.jsonObject(with: body ?? Data())) as? [String: Any] ?? [:]
             d.paused = f["paused"] as? Bool ?? d.paused
             d.name = f["name"] as? String ?? d.name
             d.job = f["job"] as? String ?? d.job
+            d.instructions = f["instructions"] as? String ?? d.instructions
+            d.solid = (f["solid"] as? String).flatMap(FaceSolid.init(rawValue:)) ?? d.solid
+            d.colour = f["colour"] as? String ?? d.colour
+            d.tools = f["tools"] as? [String] ?? d.tools
             if let s = f["schedules"] as? [[String: String]] {
                 d.schedules = s.enumerated().map { PipSchedule(id: "s\($0)", name: $1["name"] ?? "", label: $1["label"] ?? "", schedule: $1["schedule"] ?? "", tz: $1["tz"] ?? "", ask: $1["ask"] ?? "") }
             }
@@ -197,8 +249,8 @@ enum PipFixture {
             let id = CommandLine.arguments[i + 1], when = ScheduleWhen()
             Task {
                 try? await Task.sleep(for: .seconds(2))
-                let ok = await store.pips.update(pip: id, name: "Renamed", job: "A new job", schedules: [PipSchedule(id: "new", name: "Check in", label: when.label, schedule: when.cron, tz: "Europe/Lisbon", ask: "Say what changed")])
-                print("PIPTEST save ok=\(ok) \(store.pips.details[id]?.schedules.map(\.label) ?? [])")
+                let failure = await store.pips.update(pip: id, PipPatch(name: "Renamed", job: "A new job", schedules: [.init(name: "Check in", label: when.label, schedule: when.cron, tz: "Europe/Lisbon", ask: "Say what changed")]))
+                print("PIPTEST save failure=\(failure ?? "none") \(store.pips.details[id]?.schedules.map(\.label) ?? [])")
             }
         }
         guard on else { return }
@@ -288,7 +340,23 @@ enum PipFixture {
         case "jump":
             let hit = await p.search("Alfama").first { $0.conversation.id == "lisbon-a" }
             p.open("lisbon-a", at: hit?.matches.last)
-        case "details", "edit-pip", "edit-schedule": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .pip("planner")
+        case "group-card", "group-confirm", "group-fail":
+            p.open("lisbon-a"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .group("lisbon-a")
+        case "group-changed":
+            p.open("lisbon-a")
+            let a = await p.renameGroup("lisbon-a", "Lisbon in April")
+            let b = await p.addMember("code", to: "lisbon-a")
+            let c = await p.removeMember("planner", from: "lisbon-a")
+            print("PIPTEST group \([a, b, c])")
+            p.sheet = .group("lisbon-a")
+        case "gone":
+            p.open("lisbon-a")
+            let a = await p.deleteGroup("lisbon-a"), b = await p.deletePip("school")
+            let n = await p.createPip(PipPatch(name: "Scout", job: "Finds things", instructions: "Look first", solid: .drum, colour: "#9656C4", tools: []))
+            let g = await p.createGroup(name: "Weekend crew", members: ["code"]) { print("PIPTEST created \($0)") }
+            print("PIPTEST deleted \([a, b]) made \([n, g]) rows \(p.rows.map(\.name)) path \(p.path)")
+            p.path = []
+        case "details", "edit-pip", "edit-schedule", "pip-confirm": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .pip("planner")
         default: break
         }
     }

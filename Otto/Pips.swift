@@ -1,9 +1,9 @@
 import Foundation
 import Observation
 
-// Pips: named helpers under Otto, in their own threads and groups. Otto makes them, so there's no
-// way to create one here. The wire types are otto-core's docs/pips-api.md. With only Otto (or an
-// older server, which 404s every route) `active` stays false and the app is the one thread it was.
+// Pips: named helpers under Otto, in their own threads and groups. Otto makes them, and so can you.
+// The wire types are otto-core's docs/pips-api.md. An older server 404s every route, so `active`
+// stays false and the app is the one thread it was.
 
 // MARK: - Wire types
 
@@ -88,6 +88,21 @@ struct PipSchedule: Codable, Hashable, Identifiable, Sendable {
     var ask: String
 }
 
+struct PipTool: Decodable, Identifiable, Sendable {
+    let id: String
+    let label: String
+}
+
+/// What goes up to create or change a pip: only the fields that are set, and only ones the server takes.
+struct PipPatch: Encodable {
+    struct Schedule: Encodable { let name, label, schedule, tz, ask: String }
+    var name, job, instructions: String?
+    var solid: FaceSolid?
+    var colour: String?
+    var tools: [String]?
+    var schedules: [Schedule]?
+}
+
 /// The part of a cron line the editor can change: one time on some weekdays. 0 is Sunday, as in cron.
 struct ScheduleWhen: Equatable {
     var hour = 9, minute = 0
@@ -142,6 +157,8 @@ struct PipDetail: Codable, Hashable, Identifiable, Sendable {
     var schedules: [PipSchedule]
     var canReach: [Reach]
     var runsOn: RunsOn
+    var instructions: String? = nil
+    var tools: [String]? = nil
 
     var look: FaceLook { FaceLook(solid: solid, colour: colour, state: state) }
 }
@@ -381,7 +398,7 @@ enum PipClock {
 // MARK: - The store
 
 enum PipSheet: Identifiable, Hashable {
-    case handoff(String), pip(String)
+    case handoff(String), pip(String), group(String)
     var id: Self { self }
 }
 
@@ -473,6 +490,7 @@ enum PipSheet: Identifiable, Hashable {
         switch sheet {
         case .handoff(let id)?: await loadHandoff(id)
         case .pip(let id)?: await loadPip(id)
+        case .group?: await loadAll()
         case nil: break
         }
     }
@@ -631,16 +649,82 @@ enum PipSheet: Identifiable, Hashable {
         }
     }
 
-    /// Only what changed goes up, and only the fields the server takes. False if it didn't take.
-    func update(pip id: String, name: String?, job: String?, schedules: [PipSchedule]?) async -> Bool {
-        struct Out: Encodable { let name, label, schedule, tz, ask: String }
-        struct Patch: Encodable { let name, job: String?; let schedules: [Out]? }
-        let patch = Patch(name: name, job: job, schedules: schedules?.map { Out(name: $0.name, label: $0.label, schedule: $0.schedule, tz: $0.tz, ask: $0.ask) })
-        guard let r = await request("PATCH", "app/pips/\(Self.esc(id))", body: try? JSONEncoder().encode(patch)), r.status == 200,
-              let p = try? JSONDecoder().decode(PipDetail.self, from: r.data) else { return false }
-        details[id] = p
-        refreshSoon()   // the name is on rows and in headers too
-        return true
+    func loadAll() async {
+        struct Page: Decodable { let pips: [PipDetail] }
+        guard let r = await request("GET", "app/pips"), r.status == 200,
+              let page = try? JSONDecoder().decode(Page.self, from: r.data) else { return }
+        details = Dictionary(page.pips.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// nil when the server has no such route.
+    func tools() async -> [PipTool]? {
+        struct Page: Decodable { let tools: [PipTool] }
+        guard let r = await request("GET", "app/pips/tools"), r.status == 200 else { return nil }
+        return (try? JSONDecoder().decode(Page.self, from: r.data))?.tools
+    }
+
+    /// nil if it took, otherwise the line to show. Nothing local moves until the server says yes.
+    private func change(_ method: String, _ path: String, _ body: (any Encodable)? = nil, took: (Data) -> Void = { _ in }) async -> String? {
+        let data = body.flatMap { try? JSONEncoder().encode($0) }
+        guard let r = await request(method, path, body: data) else { return String(localized: "Couldn’t reach Otto. Nothing changed.") }
+        guard (200..<300).contains(r.status) else {
+            return r.status == 404 ? String(localized: "This server can’t do that yet. Nothing changed.") : String(localized: "That didn’t go through. Nothing changed.")
+        }
+        took(r.data)
+        return nil
+    }
+
+    private func gotRow(_ d: Data) -> ConversationRow? {
+        guard let r = try? JSONDecoder().decode(ConversationRow.self, from: d) else { refreshSoon(); return nil }
+        if let i = rows.firstIndex(where: { $0.id == r.id }) { rows[i] = r } else { rows.append(r) }
+        return r
+    }
+
+    private func gotPip(_ d: Data) {
+        if let p = try? JSONDecoder().decode(PipDetail.self, from: d) { details[p.id] = p }
+        refreshSoon()   // the name and face are on rows and in headers too
+    }
+
+    func update(pip id: String, _ patch: PipPatch) async -> String? {
+        await change("PATCH", "app/pips/\(Self.esc(id))", patch, took: gotPip)
+    }
+
+    func createPip(_ patch: PipPatch) async -> String? { await change("POST", "app/pips", patch, took: gotPip) }
+
+    func deletePip(_ id: String) async -> String? {
+        let failure = await change("DELETE", "app/pips/\(Self.esc(id))")
+        guard failure == nil else { return failure }
+        path.removeAll { row($0)?.kind == "pip" && row($0)?.pips.first?.id == id }
+        details[id] = nil
+        await refresh()
+        return nil
+    }
+
+    func createGroup(name: String, members: [String], created: (String) -> Void) async -> String? {
+        struct New: Encodable { let name: String; let members: [String] }
+        return await change("POST", "app/groups", New(name: name, members: members)) { if let r = gotRow($0) { created(r.id) } }
+    }
+
+    func renameGroup(_ id: String, _ name: String) async -> String? {
+        await change("PATCH", "app/groups/\(Self.esc(id))", ["name": name]) { _ = gotRow($0) }
+    }
+
+    func addMember(_ pip: String, to id: String) async -> String? {
+        await change("POST", "app/groups/\(Self.esc(id))/members", ["pip_id": pip]) { _ = gotRow($0) }
+    }
+
+    func removeMember(_ pip: String, from id: String) async -> String? {
+        await change("DELETE", "app/groups/\(Self.esc(id))/members/\(Self.esc(pip))") { _ = gotRow($0) }
+    }
+
+    /// It's archived on the server and leaves the list; back to that list.
+    func deleteGroup(_ id: String) async -> String? {
+        let failure = await change("DELETE", "app/groups/\(Self.esc(id))")
+        guard failure == nil else { return failure }
+        rows.removeAll { $0.id == id }
+        sheet = nil
+        path = []
+        return nil
     }
 
     func search(_ q: String) async -> [ConversationSearchResult] {
