@@ -301,3 +301,25 @@ figure { margin: 0 }
   .cap, .cb { transition: none }
   .who:active .cap, .cb:active { transform: none }
 }
+
+/* ---------- live renderer ---------- */
+.lv { --lv: var(--st-light); display: grid; gap: 24px; justify-items: center; padding: 24px 16px; border-radius: 24px; background: var(--lv) }
+@media (prefers-color-scheme: dark) { .lv { --lv: var(--st-dark) } }
+@media (min-width: 760px) { .lv { grid-template-columns: minmax(0, 360px) minmax(0, 1fr); align-items: center; gap: 40px; padding: 32px } }
+.lv canvas, .lvf { width: min(100%, 360px); aspect-ratio: 1; display: block }
+.lv canvas { cursor: grab; touch-action: pan-y }
+.lv canvas:active { cursor: grabbing }
+.lvf, .lvn, .lv.nogl canvas, .lv.nogl .pks { display: none }
+.lv.nogl .lvf, .lv.nogl .lvn { display: block }
+.lvn { margin: 0; color: var(--mute); font-size: 15px }
+.pks { display: grid; gap: 24px; width: 100% }
+.pk { display: flex; flex-wrap: wrap; gap: 8px }
+.pk p { flex: 0 0 100%; margin: 0; color: var(--mute); font-size: 13px }
+.pk button { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 1px solid var(--hair); border-radius: 12px; background: none; color: inherit; font: inherit; font-size: 15px; cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; transition: transform 100ms var(--press), background-color 100ms }
+.pk button img { width: 24px; height: 24px }
+.pk button:active { transform: scale(.97) }
+.pk button[aria-pressed="true"] { background: var(--fg); color: var(--pg); border-color: transparent }
+.pk button:disabled { opacity: .45; cursor: default }
+.pk button:focus-visible { outline: 2px solid #ff7a1a; outline-offset: 2px }
+@media (hover: hover) and (pointer: fine) { .pk button:not([aria-pressed="true"]):not(:disabled):hover { background: var(--hair) } }
+@media (prefers-reduced-motion: reduce) { .pk button { transition: none } }
