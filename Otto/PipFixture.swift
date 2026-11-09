@@ -106,6 +106,8 @@ enum PipFixture {
     ]
 
     private static let handoffs: [PipHandoff] = [
+        PipHandoff(id: "h-you", from: "user", to: "school", conversation: "app", ask: "Is the trip form in yet?", reply: "Yes, it went in on Tuesday.", status: "answered", askedAt: at(0, 8, 30, real: true), endedAt: at(0, 8, 31, real: true)),
+        PipHandoff(id: "h-you-failed", from: "user", to: "school", conversation: "app", ask: "Is the trip form in yet?", status: "failed", askedAt: at(0, 8, 30, real: true), error: "School didn’t wake within 30 seconds, so nothing was sent."),
         PipHandoff(id: "h-travel", from: "inbox", to: "planner", conversation: "app", ask: "How long to the dentist on Thursday?", reply: "Leave by 8:50.", status: "answered", askedAt: at(0, 8, 6, real: true), toldOttoAt: at(0, 8, 7, real: true), toldUserAt: at(0, 8, 7, real: true)),
         PipHandoff(id: "h-pr", from: "otto", to: "code", conversation: "app", ask: "Can you review PR #214 before lunch? It renames the settings keys, 3 files.", reply: "Read the diff. Two comments, neither blocks the merge. Tests pass.", status: "answered", askedAt: at(0, 8, 12, real: true), toldOttoAt: at(0, 8, 13, real: true), toldUserAt: at(0, 8, 13, real: true)),
         PipHandoff(id: "h-pr-open", from: "otto", to: "code", conversation: "app", ask: "Can you review PR #214 before lunch?", status: "asked", askedAt: at(0, 8, 12, real: true)),
@@ -242,7 +244,15 @@ enum PipFixture {
         // `-pipsOpen <id>`: open a conversation against a real server, for end-to-end checks.
         if let i = CommandLine.arguments.firstIndex(of: "-pipsOpen"), i + 1 < CommandLine.arguments.count {
             let id = CommandLine.arguments[i + 1]
-            Task { try? await Task.sleep(for: .seconds(2)); store.pips.open(id) }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                store.pips.open(id)
+                // `-pipsHandoff <id>`: then its sheet, for a real handoff.
+                if let h = CommandLine.arguments.firstIndex(of: "-pipsHandoff"), h + 1 < CommandLine.arguments.count {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    store.pips.sheet = .handoff(CommandLine.arguments[h + 1])
+                }
+            }
         }
         // `-pipsSaveDemo <id>`: the editor's save against a real server.
         if let i = CommandLine.arguments.firstIndex(of: "-pipsSaveDemo"), i + 1 < CommandLine.arguments.count {
@@ -253,6 +263,7 @@ enum PipFixture {
                 print("PIPTEST save failure=\(failure ?? "none") \(store.pips.details[id]?.schedules.map(\.label) ?? [])")
             }
         }
+        if CommandLine.arguments.contains("-pipsOwnerDemo") { Task { await ownerDemo(store) } }
         guard on else { return }
         if CommandLine.arguments.contains("-pipsNotifyTest") { Task { await notifyTest(store) } }
         PipClock.fixed = cal.date(bySettingHour: 9, minute: 41, second: 0, of: thursday)
@@ -300,6 +311,30 @@ enum PipFixture {
         Task { await open(store) }
     }
 
+    /// `-pipsOwnerDemo`: every owner route through the store's own calls, against a real server.
+    @MainActor private static func ownerDemo(_ store: OttoStore) async {
+        let p = store.pips
+        try? await Task.sleep(for: .seconds(3))
+        await p.loadAll()
+        let tools = await p.tools()
+        print("PIPTEST tools \(tools?.map(\.id) ?? ["FAILED"]) existing \(p.details.values.map(\.name).sorted())")
+        let first = await p.createPip(PipPatch(name: "Demo pip", job: "Tries the routes", instructions: "Report", solid: .drum, colour: "#9656C4", tools: Array((tools ?? []).prefix(1).map(\.id))))
+        await p.loadAll()
+        guard let pip = p.details.values.first(where: { $0.name == "Demo pip" }), let other = p.details.values.first(where: { $0.name != "Demo pip" }) else { print("PIPTEST no pip \(first ?? "none")"); return }
+        print("PIPTEST create pip \(first ?? "ok") tools=\(pip.tools ?? []) solid=\(pip.solid.rawValue)")
+        print("PIPTEST patch pip \(await p.update(pip: pip.id, PipPatch(instructions: "Report back", solid: .gumdrop, colour: "#F06A9B")) ?? "ok") -> \(p.details[pip.id].map { "\($0.solid.rawValue) \($0.colour) \($0.instructions ?? "nil")" } ?? "nil")")
+        var gid = ""
+        print("PIPTEST create group \(await p.createGroup(name: "Demo group", members: [other.id]) { gid = $0 } ?? "ok") id=\(gid) members=\(p.row(gid)?.members ?? [])")
+        print("PIPTEST rename \(await p.renameGroup(gid, "Demo renamed") ?? "ok") -> \(p.row(gid)?.name ?? "nil")")
+        print("PIPTEST add \(await p.addMember(pip.id, to: gid) ?? "ok") -> \(p.row(gid)?.members.count ?? -1)")
+        print("PIPTEST remove \(await p.removeMember(pip.id, from: gid) ?? "ok") -> \(p.row(gid)?.members.count ?? -1)")
+        print("PIPTEST remove otto \(await p.removeMember("otto", from: gid) ?? "ok") -> \(p.row(gid)?.members.count ?? -1)")
+        print("PIPTEST delete group \(await p.deleteGroup(gid) ?? "ok") still=\(p.row(gid) != nil)")
+        print("PIPTEST delete pip \(await p.deletePip(pip.id) ?? "ok") details=\(p.details[pip.id] != nil) rows=\(p.rows.map(\.name))")
+        let found = await p.search("Report")
+        print("PIPTEST search hits=\(found.count)")
+    }
+
     /// Real delivery through the real paths: provisional permission needs no tap on an alert.
     /// The caller sends the app to the background during the first sleep.
     @MainActor private static func notifyTest(_ store: OttoStore) async {
@@ -330,6 +365,8 @@ enum PipFixture {
         let p = store.pips
         switch screen {
         case "otto", "otto-group": p.open("app")
+        case "handoff-you": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .handoff("h-you")
+        case "handoff-you-failed": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .handoff("h-you-failed")
         case "handoff": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .handoff("h-pr")
         case "failed": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .handoff("h-form")
         case "group":

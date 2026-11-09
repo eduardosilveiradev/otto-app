@@ -492,13 +492,15 @@ struct HandoffSheet: View {
         .presentationBackground(Color(sheetColour))
     }
 
+    /// `user` is the owner, who has no pip record or face.
     private func member(_ who: String) -> PipMember {
-        pips.member(who) ?? PipMember(id: who, name: who, solid: .gem, colour: "#6B97EC", state: .rest)
+        if who == "user" { return PipMember(id: who, name: String(localized: "You"), solid: .gem, colour: "#8E8E93", state: .rest) }
+        return pips.member(who) ?? PipMember(id: who, name: who, solid: .gem, colour: "#6B97EC", state: .rest)
     }
 
     private func content(_ h: PipHandoff) -> some View {
         let from = member(h.from), to = member(h.to), failed = h.status == "failed"
-        let fromLook = from.look.with(failed ? .failed : .rest)
+        let fromLook = h.from == "user" ? nil : from.look.with(failed ? .failed : .rest)
         let toLook = to.look.with(failed ? .asleep : .rest)
         return VStack(spacing: 0) {
             Text("\(from.name) to \(to.name)")
@@ -531,9 +533,9 @@ struct HandoffSheet: View {
         .overlay(alignment: .topTrailing) { CloseButton { dismiss() } }
     }
 
-    private func said(_ text: String, by look: FaceLook, ring: PipMember) -> some View {
+    private func said(_ text: String, by look: FaceLook?, ring: PipMember) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
-            FaceView(look: look, size: 34, ring: sheetColour).frame(width: 34, height: 34)
+            if let look { FaceView(look: look, size: 34, ring: sheetColour).frame(width: 34, height: 34) } else { OwnerFace(size: 34) }
             Text(text)
                 .font(.system(size: 15))
                 .padding(.horizontal, 12).padding(.vertical, 8)
@@ -555,6 +557,8 @@ struct HandoffSheet: View {
 
     private func result(_ h: PipHandoff, from: PipMember, to: PipMember) -> String {
         if h.status == "failed" { return h.error ?? "Nothing was sent." }
+        // One you started stays in its thread, so Otto is never told.
+        if h.from == "user", h.status == "answered" { return h.endedAt.map { "\(to.name) answered at \(PipClock.time($0))." } ?? "\(to.name) answered." }
         guard let told = h.toldOttoAt, h.status == "answered" else { return "Waiting on \(to.name)." }
         let line = "\(to.name) told Otto at \(PipClock.time(told))"
         return h.toldUserAt != nil ? "\(line), and Otto told you." : "\(line)."
@@ -575,9 +579,21 @@ struct HandoffSheet: View {
     }
 }
 
+/// The owner, where a pip would have a solid.
+private struct OwnerFace: View {
+    let size: CGFloat
+    var body: some View {
+        Image(systemName: "person.fill").font(.system(size: size * 0.46)).foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(Color(.systemGray2), in: .circle)
+            .accessibilityHidden(true)
+    }
+}
+
 /// The path between two faces. It lives only in this sheet, never in a thread.
 private struct HandoffPath: View {
-    let from: FaceLook
+    /// nil is the owner.
+    let from: FaceLook?
     let to: FaceLook
     let failed: Bool
 
@@ -590,13 +606,13 @@ private struct HandoffPath: View {
         }
     }
 
-    private var line: LinearGradient { LinearGradient(colors: [Color(from.tint), Color(to.tint)], startPoint: .leading, endPoint: .trailing) }
+    private var line: LinearGradient { LinearGradient(colors: [from.map { Color($0.tint) } ?? Color(.systemGray2), Color(to.tint)], startPoint: .leading, endPoint: .trailing) }
     private let style = StrokeStyle(lineWidth: 3, lineCap: .round)
 
     var body: some View {
         ZStack(alignment: .top) {
             HStack(spacing: 0) {
-                FaceView(look: from, size: 72, live: true, ring: sheetColour).frame(width: 72, height: 72)
+                if let from { FaceView(look: from, size: 72, live: true, ring: sheetColour).frame(width: 72, height: 72) } else { OwnerFace(size: 72) }
                 Spacer(minLength: 0)
                 FaceView(look: to, size: 72, live: true, ring: sheetColour).frame(width: 72, height: 72)
             }

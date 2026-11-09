@@ -140,6 +140,9 @@ enum FaceGPU {
         blit.endEncoding()
         buffer.commit()
         buffer.waitUntilCompleted()
+        // iOS refuses GPU work from the background, where stay-awake keeps the app running, and can cut off
+        // a long render. Either leaves the texture clear: a transparent face that must never be kept.
+        guard buffer.status == .completed else { return nil }
         let data = Data(bytes: readback.contents(), count: length)
         return data.withUnsafeBytes { raw -> CGImage? in
             guard let ctx = CGContext(data: UnsafeMutableRawPointer(mutating: raw.baseAddress!), width: px, height: px, bitsPerComponent: 8, bytesPerRow: px * 4,
@@ -163,8 +166,9 @@ enum FaceCache {
     private static let memory = NSCache<NSString, FaceFrames>()
     private static let work = DispatchQueue(label: "otto.faces", qos: .userInitiated)
     /// Bump when the shader or a pose changes, so old renders on disk aren't used.
-    private static let version = 1
+    private static let version = 2   // 2: drops the blank faces version 1 could save
     private static let folder: URL = {
+        try? FileManager.default.removeItem(at: URL.cachesDirectory.appending(path: "faces-\(version - 1)"))
         let dir = URL.cachesDirectory.appending(path: "faces-\(version)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -189,7 +193,8 @@ enum FaceCache {
             let url = folder.appending(path: "\(k)-\(name).png")
             if let src = CGImageSourceCreateWithURL(url as CFURL, nil),
                let img = CGImageSourceCreateImageAtIndex(src, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) { return img }
-            guard let img = FaceGPU.image(look, b: b, px: px) else { return nil }
+            // Cut off at full quality: a lighter render for this run, and the full one next launch.
+            guard let img = FaceGPU.image(look, b: b, px: px) else { return FaceGPU.image(look, b: b, px: px, samples: 2) }
             if let out = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) {
                 CGImageDestinationAddImage(out, img, nil)
                 CGImageDestinationFinalize(out)
@@ -374,6 +379,7 @@ final class FaceUIView: UIView {
         ringLayer.mask = ringMask
         NotificationCenter.default.addObserver(self, selector: #selector(restart), name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(restart), name: UIApplication.willEnterForegroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(retryBlank), name: UIApplication.didBecomeActiveNotification, object: nil)
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (v: FaceUIView, _: UITraitCollection) in v.buildBadge(); v.paint() }
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -421,9 +427,15 @@ final class FaceUIView: UIView {
         imageLayer.isHidden = false
     }
 
+    /// A face asked for while the app was in the background couldn't be drawn; now it can.
+    @objc private func retryBlank() {
+        if frames == nil, let s = shown, !s.live { loadFrames(s.look, size: s.size) }
+    }
+
     private func loadFrames(_ look: FaceLook, size: CGFloat) {
         let px = max(1, Int((size * scale).rounded()))
         if let f = FaceCache.cached(look, px: px) { apply(f); return }
+        frames = nil
         FaceCache.load(look, px: px) { [weak self] f in
             guard let self, self.shown?.look == look, self.shown?.size == size else { return }
             self.apply(f)
