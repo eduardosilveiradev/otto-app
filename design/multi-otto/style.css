@@ -23,16 +23,16 @@ figure { margin: 0 }
 .av { --s: 48px; position: relative; display: inline-block; flex: none; width: var(--s); height: var(--s); vertical-align: middle }
 .av img, .av svg { position: absolute; inset: 0; width: 100%; height: 100% }
 .av svg { overflow: visible }
-.av .bk { opacity: 0; animation: blink 5.2s var(--d, 0s) infinite }
+.av .bk { opacity: 0; object-fit: cover; animation: blink 5.2s step-end var(--d, 0s) infinite }
 .st-working img { animation: bob .7s ease-in-out infinite alternate }
-.st-working .bk { animation: blink 5.2s var(--d, 0s) infinite, bob .7s ease-in-out infinite alternate }
+.st-working .bk { animation: blink 5.2s step-end var(--d, 0s) infinite, bob .7s ease-in-out infinite alternate }
 .st-asleep img { transform-origin: 50% 98%; animation: breathe 3.4s ease-in-out infinite }
 .st-needs > * { animation: wiggle 4.5s ease-in-out infinite; animation-delay: var(--d, 0s) }
 .dot { animation: dots 1.1s infinite }
 .dot:nth-child(2) { animation-delay: .18s } .dot:nth-child(3) { animation-delay: .36s }
 .z { font: 800 24px ui-rounded, "SF Pro Rounded", var(--sys); animation: zee 3.2s ease-in infinite; opacity: 0 }
 .z2 { animation-delay: 1.05s } .z3 { animation-delay: 2.1s }
-@keyframes blink { 0%, 93.9%, 97.1%, 100% { opacity: 0 } 94%, 97% { opacity: 1 } }
+@keyframes blink { 0%, 99%, 100% { opacity: 0 } 94%, 98% { opacity: 1; object-position: 0 0 } 95%, 97% { opacity: 1; object-position: 50% 0 } 96% { opacity: 1; object-position: 100% 0 } }
 @keyframes bob { to { transform: translateY(-3%) } }
 @keyframes breathe { 50% { transform: scale(1.035) } }
 @keyframes wiggle { 0%, 82%, 100% { transform: rotate(0) } 86% { transform: rotate(-5deg) } 91% { transform: rotate(4deg) } 95% { transform: rotate(-2deg) } }
