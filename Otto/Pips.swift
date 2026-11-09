@@ -81,11 +81,45 @@ struct ConversationPreview: Codable, Hashable, Sendable {
 
 struct PipSchedule: Codable, Hashable, Identifiable, Sendable {
     let id: String
-    let name: String
-    let label: String
-    let schedule: String
+    var name: String
+    var label: String
+    var schedule: String
     let tz: String
-    let ask: String
+    var ask: String
+}
+
+/// The part of a cron line the editor can change: one time on some weekdays. 0 is Sunday, as in cron.
+struct ScheduleWhen: Equatable {
+    var hour = 9, minute = 0
+    var days = Set(1...5)
+
+    init() {}
+
+    /// nil for anything fancier than `m h * * days`.
+    init?(cron: String) {
+        let f = cron.split(separator: " ").map(String.init)
+        guard f.count == 5, f[2] == "*", f[3] == "*", let m = Int(f[0]), let h = Int(f[1]), (0..<60).contains(m), (0..<24).contains(h) else { return nil }
+        var found = Set<Int>()
+        for part in f[4] == "*" ? ["0-6"] : f[4].split(separator: ",").map(String.init) {
+            let r = part.split(separator: "-", omittingEmptySubsequences: false).map { Int($0) ?? -1 }
+            guard r.count <= 2, let a = r.first, let b = r.last, a >= 0, a <= b, b <= 7 else { return nil }
+            found.formUnion((a...b).map { $0 % 7 })   // cron lets 7 be Sunday too
+        }
+        guard !found.isEmpty else { return nil }
+        (hour, minute, days) = (h, m, found)
+    }
+
+    var cron: String { "\(minute) \(hour) * * \(days.count == 7 ? "*" : days.sorted().map(String.init).joined(separator: ","))" }
+
+    var label: String {
+        let time = String(format: "%d:%02d", hour, minute)
+        if days.count == 7 { return "Every day \(time)" }
+        if days == Set(1...5) { return "Weekdays \(time)" }
+        if days == [0, 6] { return "Weekends \(time)" }
+        let cal = Calendar.current
+        let inWeek = days.sorted { ($0 - cal.firstWeekday + 8) % 7 < ($1 - cal.firstWeekday + 8) % 7 }
+        return inWeek.map { cal.shortStandaloneWeekdaySymbols[$0] }.joined(separator: ", ") + " \(time)"
+    }
 }
 
 struct PipDetail: Codable, Hashable, Identifiable, Sendable {
@@ -296,11 +330,19 @@ enum PipClock {
         await resendPending()
     }
 
-    func send(_ text: String) {
+    private func add(_ text: String) -> UUID {
         let m = Message(from: .me, text: text, pending: true)
         messages.append(m)
-        Task { await deliver(m.id) }
+        return m.id
     }
+
+    func send(_ text: String) {
+        let id = add(text)
+        Task { await deliver(id) }
+    }
+
+    /// From a notification: answered before iOS is told we're done, because it may suspend the app then.
+    func sendNow(_ text: String) async { await deliver(add(text)) }
 
     private func deliver(_ id: UUID) async {
         guard let m = messages.first(where: { $0.id == id }), m.pending == true else { return }
@@ -353,6 +395,7 @@ enum PipSheet: Identifiable, Hashable {
     var sheet: PipSheet?
     /// The conversation on screen, whose unread dot stays clear.
     @ObservationIgnored var visible: String?
+    @ObservationIgnored var match: ConversationMessage?
 
     @ObservationIgnored weak var store: OttoStore?
     @ObservationIgnored private var threads: [String: PipThread] = [:]
@@ -360,8 +403,9 @@ enum PipSheet: Identifiable, Hashable {
     let folder: URL
     private var rowsFile: URL { folder.appending(path: "conversations.json") }
 
-    /// A second conversation exists. Until then there's no list and no back button.
-    var active: Bool { rows.count > 1 }
+    /// The server has the conversation routes, so there's a list, even of Otto alone. An older
+    /// server never fills `rows`, and stays the single thread.
+    var active: Bool { !rows.isEmpty }
 
     init(name: String) {
         folder = URL.applicationSupportDirectory.appending(path: "pips-\(name.lowercased().replacing(" ", with: "-"))")
@@ -404,8 +448,10 @@ enum PipSheet: Identifiable, Hashable {
         return details[id].map { PipMember(id: $0.id, name: $0.name, solid: $0.solid, colour: $0.colour, state: $0.state) }
     }
 
-    func open(_ id: String) {
+    /// `match`: a search result, which ChatView scrolls to once the thread has loaded.
+    func open(_ id: String, at match: ConversationMessage? = nil) {
         sheet = nil
+        self.match = match
         path = [id]
     }
 
@@ -438,7 +484,7 @@ enum PipSheet: Identifiable, Hashable {
               let page = try? JSONDecoder().decode(Page.self, from: r.data) else { return }
         let wasActive = active
         rows = page.conversations
-        // The second conversation just appeared under someone reading Otto's thread: they stay in it.
+        // The list arrived late, under someone already reading Otto's thread: they stay in it.
         if !wasActive, active, path.isEmpty, !launching { path = ["app"] }
     }
 
@@ -459,10 +505,11 @@ enum PipSheet: Identifiable, Hashable {
         for m in page.messages where m.dir == nil { store?.upsert(m) }
     }
 
-    private func handle(_ e: ConversationEvent) {
+    func handle(_ e: ConversationEvent) {
         switch e {
         case .message(let m):
             if m.conversation_id == "app" { store?.upsert(m) } else { thread(m.conversation_id).upsert(m) }
+            if store?.foreground == false { notify(m) }
             guard let i = rows.firstIndex(where: { $0.id == m.conversation_id }), m.kind == "text" || m.kind == "system" else { refreshSoon(); return }
             rows[i].lastMessage = ConversationPreview(sender: m.sender, text: m.text, ts: m.ts)
             if visible == m.conversation_id { markRead(m.conversation_id) } else if m.sender != "user" { rows[i].unread += 1 }
@@ -492,6 +539,43 @@ enum PipSheet: Identifiable, Hashable {
             rows[i].activity.removeAll { $0.id == m.id }
             if m.activity?.isEmpty == false { rows[i].activity.append(m) }
         }
+    }
+
+    // MARK: Notifications: Otto's two paths (see Notifier), for what doesn't come through the old transport
+
+    private static let notifiedKey = "pips.notifiedThrough"
+    /// Everything up to here was on screen or has had its banner.
+    private var notifiedThrough: Date {
+        get { UserDefaults.standard.object(forKey: Self.notifiedKey) as? Date ?? .now }
+        set { UserDefaults.standard.set(newValue, forKey: Self.notifiedKey) }
+    }
+
+    func leftApp() { notifiedThrough = .now }
+
+    private func notify(_ m: ConversationMessage) {
+        guard m.kind == "text", m.sender != "user", m.dir == nil, !m.text.isEmpty,
+              let date = LiveBackend.date(m.ts), date > notifiedThrough else { return }
+        notifiedThrough = date
+        let id = m.conversation_id, r = row(id)
+        let who = m.sender == "otto" ? "Otto" : member(m.sender)?.name ?? r?.name ?? "Otto"
+        // Otto's thread keeps Otto's routing: no conversation means the old reply path and the old tap.
+        Notifier.shared.post(title: id == "app" ? who : r?.name ?? who, body: r?.isGroup == true ? "\(who): \(m.text)" : m.text,
+                             thread: "pip-\(id)", id: m.id, conversation: id == "app" ? nil : id)
+    }
+
+    /// A background wake: what came in since the last look, oldest first, as banners.
+    func backgroundCatchUp() async {
+        struct Page: Decodable { let messages: [ConversationMessage] }
+        await refresh()
+        let since = notifiedThrough
+        var fresh: [ConversationMessage] = []
+        for r in rows where (LiveBackend.date(r.lastMessage?.ts) ?? .distantPast) > since {
+            let q = [URLQueryItem(name: "limit", value: "50"), URLQueryItem(name: "since", value: since.formatted(.iso8601))]
+            guard let h = await request("GET", "app/conversations/\(Self.esc(r.id))/history", query: q), h.status == 200,
+                  let page = try? JSONDecoder().decode(Page.self, from: h.data) else { continue }
+            fresh += page.messages
+        }
+        for m in fresh.sorted(by: { (LiveBackend.date($0.ts) ?? .distantPast) < (LiveBackend.date($1.ts) ?? .distantPast) }) { notify(m) }
     }
 
     // MARK: Actions
@@ -545,6 +629,18 @@ enum PipSheet: Identifiable, Hashable {
             }
             details[id] = p
         }
+    }
+
+    /// Only what changed goes up, and only the fields the server takes. False if it didn't take.
+    func update(pip id: String, name: String?, job: String?, schedules: [PipSchedule]?) async -> Bool {
+        struct Out: Encodable { let name, label, schedule, tz, ask: String }
+        struct Patch: Encodable { let name, job: String?; let schedules: [Out]? }
+        let patch = Patch(name: name, job: job, schedules: schedules?.map { Out(name: $0.name, label: $0.label, schedule: $0.schedule, tz: $0.tz, ask: $0.ask) })
+        guard let r = await request("PATCH", "app/pips/\(Self.esc(id))", body: try? JSONEncoder().encode(patch)), r.status == 200,
+              let p = try? JSONDecoder().decode(PipDetail.self, from: r.data) else { return false }
+        details[id] = p
+        refreshSoon()   // the name is on rows and in headers too
+        return true
     }
 
     func search(_ q: String) async -> [ConversationSearchResult] {

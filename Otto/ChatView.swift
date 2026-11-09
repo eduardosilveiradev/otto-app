@@ -135,8 +135,30 @@ struct ChatView: View {
     /// "Read" once the server says Otto has taken the message in; until then it may be sitting
     /// in the queue behind a long turn, which is "Delivered". Not guessed from a later message of
     /// Otto's: that can be a proactive one, or an answer to something else.
-    private func receipt(for i: Int, in messages: [Message]) -> Bool {
-        messages[i].read == true
+    /// None in a group, and none once a handoff after your message has finished: the work has answered it.
+    private func receipt(for i: Int, in messages: [Message]) -> Bool? {
+        let finished = messages[(i + 1)...].contains { m in
+            m.handoffID.flatMap { store.pips.handoffs[$0]?.status }.map { $0 == "answered" || $0 == "failed" } ?? false
+        }
+        return isGroup || finished ? nil : messages[i].read == true
+    }
+
+    /// A tapped search result, once the thread has loaded: scroll to it and light it up.
+    private func jumpToMatch() async {
+        guard let w = store.pips.match else { return }
+        store.pips.match = nil
+        let hit = Message(w)
+        // Old-transport rows in Otto's thread carry other ids, so those match on their words and time.
+        func found() -> Message.ID? {
+            thread.messages.first { $0.wireID == hit.wireID }?.id
+                ?? thread.messages.filter { $0.text == hit.text }
+                    .min { abs($0.date.timeIntervalSince(hit.date)) < abs($1.date.timeIntervalSince(hit.date)) }?.id
+        }
+        // ponytail: older than the 200 a thread loads, it lands alone in date order; history has no `before` to page with.
+        if found() == nil { (thread as? PipThread)?.upsert(w) }
+        guard let id = found() else { return }
+        try? await Task.sleep(for: .seconds(0.45))   // the push finishing, and the rows that just loaded
+        jump(to: id)
     }
 
     var body: some View {
@@ -160,7 +182,7 @@ struct ChatView: View {
             do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
             await live.seen(date)
         }
-        .modifier(ThreadSeen(pips: store.pips, thread: thread))
+        .modifier(ThreadSeen(pips: store.pips, thread: thread) { await jumpToMatch() })
         .task { if thread.isOtto { await gate.run(store.backend) } }
         .sheet(isPresented: $showGate) { GateSheet(watch: gate) }
         // `-openGate`: open the boarding pass as soon as there is one, for screenshots.
@@ -240,7 +262,7 @@ struct ChatView: View {
                         let newBlock = prev.map { m.date.timeIntervalSince($0.date) > 3600 } ?? true
                         if newBlock { Stamp(date: m.date, yesterday: pipsOn) }
                         if m.isPipLine {
-                            PipLine(message: m, afterLine: !newBlock && prev?.isPipLine == true).id(m.id).transition(.opacity)
+                            PipLine(message: m, afterLine: !newBlock && prev?.isPipLine == true, highlighted: flashed == m.id).id(m.id).transition(.opacity)
                         } else if m.from == .terminal {
                             TerminalLine(message: m, afterStamp: newBlock).id(m.id).transition(.opacity)
                         } else {
@@ -1037,9 +1059,10 @@ private struct Row: View {
         return t == url.absoluteString || URL(string: t)?.absoluteString == url.absoluteString
     }
     /// A photo or file with no words is only itself: no empty bubble under it. A voice note is its bubble.
+    /// A group link is only itself even with words: the server's "I started…" says what the card says.
     private var textShown: Bool {
-        let attached = message.isPhoto || !(message.files ?? []).isEmpty || !(message.card?.shown.isEmpty ?? true) || message.groupLink != nil
-        return (!attached || !message.text.isEmpty || message.isVoice || message.audio != nil) && !hidesText
+        let attached = message.isPhoto || !(message.files ?? []).isEmpty || !(message.card?.shown.isEmpty ?? true)
+        return (!attached || !message.text.isEmpty || message.isVoice || message.audio != nil) && !hidesText && message.groupLink == nil
     }
     private var hidesText: Bool { preview != nil && Self.previewURL(message).map { Self.isOnlyLink(message, $0) } == true }
 
@@ -1225,13 +1248,13 @@ private struct Row: View {
                 }
                 .padding(.horizontal, 14).padding(.vertical, 9.5)
                 .foregroundStyle(mine ? .white : .primary)
-                .background(BubbleShape(mine: mine, tail: tail && message.groupLink == nil).fill(mine ? .outgoingBubble : .incomingBubble))
+                .background(BubbleShape(mine: mine, tail: tail).fill(mine ? .outgoingBubble : .incomingBubble))
                 // Before the menu, so the bubble lifts with its tapback (and its tail), as it looks in the thread.
                 .overlay(alignment: mine ? .topLeading : .topTrailing) {
                     if let r = message.reaction { Tapback(emoji: r, mine: mine) }
                 }
                 .padding(.top, message.reaction == nil ? 0 : 14)
-                .contentShape(.contextMenuPreview, BubblePreview(mine: mine, tail: tail && message.groupLink == nil, badge: message.reaction != nil))
+                .contentShape(.contextMenuPreview, BubblePreview(mine: mine, tail: tail, badge: message.reaction != nil))
                 // The field's width and place at 0, the bubble at 1: on the bubble itself, so the
                 // stretch is field width over bubble width (the row is as wide as the screen).
                 .modifier(SendMorph(progress: morph, lift: lift))
@@ -1394,6 +1417,7 @@ private struct Row: View {
 private struct ThreadSeen: ViewModifier {
     let pips: PipStore
     let thread: any ChatThread
+    let loaded: @MainActor () async -> Void
     func body(content: Content) -> some View {
         content
             .task {
@@ -1401,6 +1425,7 @@ private struct ThreadSeen: ViewModifier {
                 pips.visible = thread.conversationID
                 pips.markRead(thread.conversationID)
                 await (thread as? PipThread)?.load()
+                await loaded()
             }
             .onDisappear { if pips.visible == thread.conversationID { pips.visible = nil } }
     }

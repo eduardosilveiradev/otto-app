@@ -90,6 +90,7 @@ private struct MainRoot: View {
             .environment(store)
             .task { Notifier.shared.requestPermission(); await store.start() }
             .onChange(of: phase, initial: true) { _, p in
+                if store.foreground && p != .active { store.pips.leftApp() }
                 store.foreground = p == .active
                 if p == .active { store.sendShared(); Notifier.clearAll() }
                 if p == .background { store.flush(); Notifier.scheduleRefresh() }
@@ -191,6 +192,7 @@ final class OttoStore {
             // Unreadable (a bad row, a schema it doesn't know): kept aside, not overwritten by the next save.
             else { try? FileManager.default.moveItem(at: file, to: file.appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970))")) }
         }
+        pips.store = self   // a background wake or a notification reply can come before start()
     }
 
     private func checkForUpdate() async {
@@ -302,7 +304,6 @@ final class OttoStore {
     }
 
     func start() async {
-        pips.store = self
         Task { await tick() }
         Task { await pips.run() }
         #if DEBUG
@@ -694,6 +695,7 @@ final class OttoStore {
     func backgroundSync() async {
         UserDefaults.standard.set(Date(), forKey: "lastRefresh")
         await catchUp(notify: true, background: true)
+        await pips.backgroundCatchUp()
         await reportHealth("refresh")
     }
 

@@ -78,7 +78,7 @@ struct ConversationsView: View {
                         Text("No results").foregroundStyle(.secondary).padding(.top, 40)
                     }
                     ForEach(Array(results.enumerated()), id: \.element.id) { i, r in
-                        ConversationCell(row: r.conversation, match: r.matches.last?.text, divided: i > 0, store: store)
+                        ConversationCell(row: r.conversation, match: r.matches.last, divided: i > 0, store: store)
                     }
                 } else {
                     ForEach(Array(pips.list.enumerated()), id: \.element.id) { i, row in
@@ -89,6 +89,15 @@ struct ConversationsView: View {
         }
         .contentMargins(.bottom, 100, for: .scrollContent)
         .scrollDismissesKeyboard(.interactively)
+        .overlay {
+            if searchText.isEmpty && pips.list.isEmpty {
+                ContentUnavailableView {
+                    Text("No other conversations yet")
+                } description: {
+                    Text("Tap Otto to open your thread. When a job needs its own pip or a group, Otto starts one and it shows up here.")
+                }
+            }
+        }
         .background(Color(.systemBackground))
         .safeAreaBar(edge: .top, spacing: 0) { top }
         .scrollEdgeEffectStyle(.soft, for: .top)
@@ -168,14 +177,14 @@ struct HeaderTitle<Face: View>: View {
 private struct ConversationCell: View {
     let row: ConversationRow
     /// A search hit: the matching message in place of the preview.
-    let match: String?
+    let match: ConversationMessage?
     let divided: Bool
     let store: OttoStore
 
     private var pips: PipStore { store.pips }
 
     var body: some View {
-        Button { pips.open(row.id) } label: {
+        Button { pips.open(row.id, at: match) } label: {
             HStack(spacing: 12) {
                 picture
                 VStack(alignment: .leading, spacing: 0) {
@@ -215,7 +224,7 @@ private struct ConversationCell: View {
     /// In order: a search hit, what it's doing right now, when a sleeper wakes, the last message.
     @ViewBuilder private var preview: some View {
         if let match {
-            Text(match).foregroundStyle(.secondary)
+            Text(match.text).foregroundStyle(.secondary)
         } else if let doing = row.activity.first(where: { $0.activity?.isEmpty == false })?.activity {
             HStack(spacing: 6) {
                 TypingDots(dot: 5, gap: 3).frame(width: 21, height: 5)
@@ -248,6 +257,7 @@ private struct CellPress: ButtonStyle {
 struct PipLine: View {
     let message: Message
     let afterLine: Bool
+    var highlighted = false
     @Environment(OttoStore.self) private var store
 
     private var pips: PipStore { store.pips }
@@ -287,6 +297,10 @@ struct PipLine: View {
                 label
             }
         }
+        .background {
+            Capsule().fill(Color(.systemFill)).opacity(highlighted ? 1 : 0)
+                .padding(.top, afterLine ? 0 : 14).padding(.bottom, 8).padding(.horizontal, 16)
+        }
         .task(id: message.handoffID) {
             if let id = message.handoffID, pips.handoffs[id] == nil { await pips.loadHandoff(id) }
         }
@@ -302,6 +316,13 @@ struct GroupLinkBubble: View {
     let group: GroupLink
     let open: () -> Void
 
+    /// "Otto, Fares and Stays", as the mockup writes it. The server's own line has no "and".
+    private var names: String {
+        let list = group.memberList
+        guard !list.contains(" and "), let last = list.range(of: ", ", options: .backwards) else { return list }
+        return list.replacingCharacters(in: last, with: " and ")
+    }
+
     var body: some View {
         Button(action: open) {
             HStack(spacing: 10) {
@@ -309,7 +330,7 @@ struct GroupLinkBubble: View {
                           size: 44, ring: UIColor(Color.incomingBubble))
                 VStack(alignment: .leading, spacing: 0) {
                     Text(group.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary).lineLimit(1)
-                    Text(group.memberList).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(names).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             .padding(.leading, 10).padding(.trailing, 14).padding(.vertical, 8)
@@ -317,7 +338,7 @@ struct GroupLinkBubble: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Group \(group.name), \(group.memberList)")
+        .accessibilityLabel("Group \(group.name), \(names)")
     }
 }
 
@@ -547,6 +568,7 @@ struct PipDetailSheet: View {
     let store: OttoStore
     let id: String
     @Environment(\.dismiss) private var dismiss
+    @State private var editing = false
 
     private var pips: PipStore { store.pips }
     private var p: PipDetail? { pips.details[id] }
@@ -567,7 +589,23 @@ struct PipDetailSheet: View {
             .accessibilityLabel("Close")
             .padding(.trailing, 16).padding(.top, -2)
         }
-        .task { await pips.loadPip(id) }
+        .overlay(alignment: .topLeading) {
+            if p != nil {
+                Button("Edit") { editing = true }
+                    .font(.system(size: 17, weight: .medium))
+                    .frame(minWidth: 44, minHeight: 44).padding(.horizontal, 8)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .tint(.primary)
+                    .padding(.leading, 16).padding(.top, -2)
+            }
+        }
+        .sheet(isPresented: $editing) { if let p { PipEditSheet(store: store, pip: p) } }
+        .task {
+            #if DEBUG
+            if PipFixture.screen.hasPrefix("edit-") { editing = true }
+            #endif
+            await pips.loadPip(id)
+        }
     }
 
     private func content(_ p: PipDetail) -> some View {
@@ -685,6 +723,170 @@ struct PipDetailSheet: View {
         var parts = [r.reason.trimmingCharacters(in: .whitespacesAndNewlines)].filter { !$0.isEmpty }
         if let d = LiveBackend.date(r.claudeReturnsAt) { parts.append("Back on \(d.formatted(.dateTime.weekday(.wide))).") }
         return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+}
+
+/// A pip's name, job and schedules. Nothing leaves the phone until Save.
+private struct PipEditSheet: View {
+    let store: OttoStore
+    let pip: PipDetail
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var job: String
+    @State private var schedules: [PipSchedule]
+    @State private var path: [String] = []
+    @State private var saving = false
+    @State private var failed = false
+
+    init(store: OttoStore, pip: PipDetail) {
+        self.store = store
+        self.pip = pip
+        _name = State(initialValue: pip.name)
+        _job = State(initialValue: pip.job)
+        _schedules = State(initialValue: pip.schedules)
+    }
+
+    private static func blank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private static func incomplete(_ s: PipSchedule) -> Bool { blank(s.name) || blank(s.ask) }
+    private var changed: Bool { name != pip.name || job != pip.job || schedules != pip.schedules }
+    private var ready: Bool { changed && !Self.blank(name) && !Self.blank(job) && !schedules.contains(where: Self.incomplete) }
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            Form {
+                Section("Name") {
+                    TextField("Name", text: $name).textInputAutocapitalization(.words)
+                }
+                Section("Job") {
+                    TextField("What this pip is for", text: $job, axis: .vertical)
+                }
+                Section("Schedules") {
+                    ForEach(schedules) { s in
+                        NavigationLink(value: s.id) {
+                            HStack {
+                                Text(s.name.isEmpty ? "New schedule" : s.name).lineLimit(1)
+                                Spacer(minLength: 8)
+                                Text(Self.incomplete(s) ? "Incomplete" : s.label).lineLimit(1)
+                                    .foregroundStyle(Self.incomplete(s) ? Color(.systemRed) : .secondary)
+                            }
+                        }
+                    }
+                    .onDelete { schedules.remove(atOffsets: $0) }
+                    if schedules.count < 10 {
+                        Button("Add schedule", systemImage: "plus") {
+                            let when = ScheduleWhen()
+                            let s = PipSchedule(id: UUID().uuidString, name: "", label: when.label, schedule: when.cron, tz: TimeZone.current.identifier, ask: "")
+                            schedules.append(s)
+                            path = [s.id]
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Edit \(pip.name)")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: String.self) { id in
+                if let i = schedules.firstIndex(where: { $0.id == id }) { ScheduleEditor(schedule: $schedules[i]) }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if saving { ProgressView() } else { Button("Save", action: save).disabled(!ready) }
+                }
+            }
+        }
+        .tint(.primary)
+        .interactiveDismissDisabled(changed)
+        .onChange(of: name) { if name.count > 60 { name = String(name.prefix(60)) } }
+        .onChange(of: job) { if job.count > 200 { job = String(job.prefix(200)) } }
+        // Backed out of a new schedule without filling anything in: it was never there.
+        .onChange(of: path) { if path.isEmpty { schedules.removeAll { Self.blank($0.name) && Self.blank($0.ask) } } }
+        .alert("Couldn’t save", isPresented: $failed) { Button("OK") {} } message: {
+            Text("Your changes are still here. Check the connection and try again.")
+        }
+        .task {
+            #if DEBUG
+            if PipFixture.screen == "edit-schedule", let s = schedules.first { path = [s.id] }
+            #endif
+        }
+    }
+
+    private func save() {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines), j = job.trimmingCharacters(in: .whitespacesAndNewlines)
+        saving = true
+        Task {
+            let ok = await store.pips.update(pip: pip.id, name: n == pip.name ? nil : n, job: j == pip.job ? nil : j,
+                                             schedules: schedules == pip.schedules ? nil : schedules)
+            saving = false
+            if ok { dismiss() } else { failed = true }
+        }
+    }
+}
+
+private struct ScheduleEditor: View {
+    @Binding var schedule: PipSchedule
+    @State private var when: ScheduleWhen
+    /// A cron line too fancy for days and a time: left alone until the reader changes one.
+    private let understood: Bool
+
+    private let cal = Calendar.current
+    private var week: [Int] { (0..<7).map { ($0 + cal.firstWeekday - 1) % 7 } }
+
+    init(schedule: Binding<PipSchedule>) {
+        _schedule = schedule
+        let parsed = ScheduleWhen(cron: schedule.wrappedValue.schedule)
+        _when = State(initialValue: parsed ?? ScheduleWhen())
+        understood = parsed != nil
+    }
+
+    private var time: Binding<Date> {
+        Binding {
+            cal.date(bySettingHour: when.hour, minute: when.minute, second: 0, of: .now) ?? .now
+        } set: {
+            let c = cal.dateComponents([.hour, .minute], from: $0)
+            when.hour = c.hour ?? when.hour
+            when.minute = c.minute ?? when.minute
+        }
+    }
+
+    var body: some View {
+        Form {
+            Section("Name") {
+                TextField("Morning route check", text: $schedule.name).textInputAutocapitalization(.sentences)
+            }
+            Section("What to do") {
+                TextField("What the pip should do each time", text: $schedule.ask, axis: .vertical)
+            }
+            Section {
+                HStack(spacing: 0) { ForEach(week, id: \.self, content: day) }
+                DatePicker("Time", selection: time, displayedComponents: .hourAndMinute)
+            } header: {
+                Text("When")
+            } footer: {
+                if !understood { Text("Now: \(schedule.label). Picking a day or time replaces it.") }
+            }
+        }
+        .navigationTitle(schedule.name.isEmpty ? "New schedule" : schedule.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .sensoryFeedback(.selection, trigger: when.days)
+        .onChange(of: when) { schedule.schedule = when.cron; schedule.label = when.label }
+    }
+
+    private func day(_ d: Int) -> some View {
+        let on = when.days.contains(d)
+        return Button {
+            // A schedule that never runs is a deleted one, and that's the row's swipe.
+            if !on { when.days.insert(d) } else if when.days.count > 1 { when.days.remove(d) }
+        } label: {
+            Text(cal.veryShortStandaloneWeekdaySymbols[d]).font(.system(size: 15, weight: .medium))
+                .foregroundStyle(on ? Color(.systemBackground) : .primary)
+                .frame(width: 36, height: 36)
+                .background(on ? Color.primary : Color(.secondarySystemFill), in: .circle)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(cal.standaloneWeekdaySymbols[d])
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 

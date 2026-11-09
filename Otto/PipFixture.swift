@@ -1,5 +1,6 @@
 #if DEBUG
 import SwiftUI
+import UserNotifications
 
 /// Every mockup state, for screenshots. `-pipsFixture` serves the mockup's made-up data through the
 /// real pips API seam, so decoding and the store run as they would against a server. `-pipsScreen`
@@ -63,6 +64,7 @@ enum PipFixture {
             row("release-b", "group", "Release 4.2", [member("code", .needs), member("inbox", .working), member("otto", .rest)], sender: "code", text: "Changelog is ready", ts: at(3, 18, 0)),
             row("porto-b", "group", "Porto weekend", [member("school", .asleep), member("planner", .rest), member("otto", .rest)], sender: "planner", text: "Trains are booked", ts: at(4, 12, 0)),
         ]
+        if screen == "otto-only" { return r.filter { $0.kind == "otto" } }
         if screen != "conversations" { r.append(row("lisbon-a", "group", "Lisbon in March", lisbonMembers, sender: "stays", text: "Three places in Alfama", ts: at(0, 18, 22))) }
         return r
     }
@@ -105,7 +107,10 @@ enum PipFixture {
         PipHandoff(id: "h-form", from: "planner", to: "school", conversation: "app", ask: "When is the trip form due?", status: "failed", askedAt: at(0, 8, 20, real: true), error: "School didn’t wake within 30 seconds, so nothing was sent."),
     ]
 
+    private nonisolated(unsafe) static var edited: [String: PipDetail] = [:]
+
     private static func detail(_ id: String) -> PipDetail? {
+        if let e = edited[id] { return e }
         guard let m = rows.flatMap(\.memberStates).first(where: { $0.id == id }) else { return nil }
         let monday = cal.nextDate(after: .now, matching: DateComponents(weekday: 2), matchingPolicy: .nextTime)!
         let isPlanner = id == "planner"
@@ -140,16 +145,23 @@ enum PipFixture {
                 return r.name.localizedCaseInsensitiveContains(q) || !m.isEmpty ? Hit(conversation: r, matches: m) : nil
             }
             return ok(Found(results: hits))
-        case ("GET", "conversations", 4) where parts[3] == "history": return ok(Messages(messages: (histories[parts[2]] ?? []).map { var m = $0; m.read = m.sender == "user" ? true : nil; return m }))
+        case ("GET", "conversations", 4) where parts[3] == "history": return ok(Messages(messages: thread(parts[2]).map { var m = $0; m.read = m.sender == "user" ? true : nil; return m }))
         case ("POST", "conversations", 4) where parts[3] == "messages":
             let f = (try? JSONSerialization.jsonObject(with: body ?? Data())) as? [String: String] ?? [:]
             return ok(Sent(message: ConversationMessage(id: f["id"] ?? "", conversation_id: parts[2], sender: "user", kind: "text", text: f["text"] ?? "", ts: Date.now.formatted(.iso8601))))
         case ("POST", "conversations", 4): return PipResponse(status: 204, data: Data())
         case ("GET", "pips", 3): return detail(parts[2]).flatMap(ok)
         case ("PATCH", "pips", 3):
-            var d = detail(parts[2])
-            d?.paused = ((try? JSONSerialization.jsonObject(with: body ?? Data())) as? [String: Bool])?["paused"] ?? false
-            return d.flatMap(ok)
+            guard var d = detail(parts[2]) else { return PipResponse(status: 404, data: Data()) }
+            let f = (try? JSONSerialization.jsonObject(with: body ?? Data())) as? [String: Any] ?? [:]
+            d.paused = f["paused"] as? Bool ?? d.paused
+            d.name = f["name"] as? String ?? d.name
+            d.job = f["job"] as? String ?? d.job
+            if let s = f["schedules"] as? [[String: String]] {
+                d.schedules = s.enumerated().map { PipSchedule(id: "s\($0)", name: $1["name"] ?? "", label: $1["label"] ?? "", schedule: $1["schedule"] ?? "", tz: $1["tz"] ?? "", ask: $1["ask"] ?? "") }
+            }
+            edited[parts[2]] = d
+            return ok(d)
         case ("GET", "handoffs", 3): return handoffs.first { $0.id == parts[2] }.flatMap(ok)
         case ("POST", "handoffs", 4): return PipResponse(status: 200, data: Data("{}".utf8))
         default: return PipResponse(status: 404, data: Data())
@@ -157,6 +169,13 @@ enum PipFixture {
     }
 
     // MARK: Otto's thread, per section, and opening it
+
+    /// `jump`: enough after the match that it's beyond the page a thread first lays out.
+    private static func thread(_ id: String) -> [ConversationMessage] {
+        let h = histories[id] ?? []
+        guard screen == "jump", let last = h.last else { return h }
+        return h + (0..<80).map { say("x\($0)", id, "fares", "Still checking fares, \($0 + 1) of 80.", last.ts) }
+    }
 
     private static func t(_ daysBack: Int, _ h: Int, _ m: Int) -> Date {
         cal.date(bySettingHour: h, minute: m, second: 0, of: cal.date(byAdding: .day, value: -daysBack, to: .now)!)!
@@ -173,7 +192,17 @@ enum PipFixture {
             let id = CommandLine.arguments[i + 1]
             Task { try? await Task.sleep(for: .seconds(2)); store.pips.open(id) }
         }
+        // `-pipsSaveDemo <id>`: the editor's save against a real server.
+        if let i = CommandLine.arguments.firstIndex(of: "-pipsSaveDemo"), i + 1 < CommandLine.arguments.count {
+            let id = CommandLine.arguments[i + 1], when = ScheduleWhen()
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                let ok = await store.pips.update(pip: id, name: "Renamed", job: "A new job", schedules: [PipSchedule(id: "new", name: "Check in", label: when.label, schedule: when.cron, tz: "Europe/Lisbon", ask: "Say what changed")])
+                print("PIPTEST save ok=\(ok) \(store.pips.details[id]?.schedules.map(\.label) ?? [])")
+            }
+        }
         guard on else { return }
+        if CommandLine.arguments.contains("-pipsNotifyTest") { Task { await notifyTest(store) } }
         PipClock.fixed = cal.date(bySettingHour: 9, minute: 41, second: 0, of: thursday)
         let me = { (text: String, date: Date) in Message(from: .me, text: text, date: date) }
         let read = { (text: String, date: Date) in Message(from: .me, text: text, date: date, read: true) }
@@ -194,8 +223,9 @@ enum PipFixture {
                 line("School didn’t answer Planner", t(0, 8, 20), handoff: "h-form"),
             ]
         case "otto-group":
-            var link = Message(from: .otto, text: "", date: t(0, 18, 20))
-            link.groupLink = GroupLink(id: "lisbon-a", name: "Lisbon in March", members: lisbonMembers, memberList: "Otto, Fares, Stays and Planner")
+            // What the real server sends: its announcement as the text, and its member line without an "and".
+            var link = Message(from: .otto, text: "I started Lisbon in March.", date: t(0, 18, 20))
+            link.groupLink = GroupLink(id: "lisbon-a", name: "Lisbon in March", members: lisbonMembers, memberList: "Otto, Fares, Stays, Planner")
             store.messages = [
                 read("Help me plan Lisbon in March, flights and somewhere to stay", t(0, 18, 20)),
                 otto("I started a group for it.", t(0, 18, 20)),
@@ -218,6 +248,31 @@ enum PipFixture {
         Task { await open(store) }
     }
 
+    /// Real delivery through the real paths: provisional permission needs no tap on an alert.
+    /// The caller sends the app to the background during the first sleep.
+    @MainActor private static func notifyTest(_ store: OttoStore) async {
+        let center = UNUserNotificationCenter.current()
+        _ = try? await center.requestAuthorization(options: [.provisional, .badge])
+        center.removeAllDeliveredNotifications()
+        try? await Task.sleep(for: .seconds(9))
+        let now = Date.now.addingTimeInterval(1).formatted(.iso8601)
+        print("PIPTEST foreground=\(store.foreground)")
+        store.pips.handle(.message(ConversationMessage(id: "n1", conversation_id: "saturday-b", sender: "planner", kind: "text", text: "Live in a group", ts: now)))
+        store.pips.handle(.message(ConversationMessage(id: "n2", conversation_id: "saturday-b", sender: "user", kind: "text", text: "Mine: no banner", ts: now)))
+        store.pips.handle(.message(ConversationMessage(id: "n3", conversation_id: "saturday-b", sender: "planner", kind: "text", text: "Replayed: no second banner", ts: now)))
+        try? await Task.sleep(for: .seconds(1))
+        func delivered() async -> [UNNotification] { await center.deliveredNotifications() }
+        print("PIPTEST live delivered=\(await delivered().count)")
+        UserDefaults.standard.set(Date(timeIntervalSinceNow: -40 * 86400), forKey: "pips.notifiedThrough")
+        await store.pips.backgroundCatchUp()
+        try? await Task.sleep(for: .seconds(1))
+        let first = await delivered().count
+        await store.pips.backgroundCatchUp()
+        try? await Task.sleep(for: .seconds(1))
+        print("PIPTEST catchup delivered=\(first) again=\(await delivered().count)")
+        for n in await delivered().prefix(6) { let c = n.request.content; print("PIPTEST \(c.title) | \(c.body) | \(c.threadIdentifier) | \(c.categoryIdentifier) | \(c.userInfo)") }
+    }
+
     @MainActor private static func open(_ store: OttoStore) async {
         try? await Task.sleep(for: .seconds(0.6))   // the rows, from run()
         let p = store.pips
@@ -230,7 +285,10 @@ enum PipFixture {
             try? await Task.sleep(for: .seconds(0.8))
             store.demoDraft = "@Inbox forward the booking"
         case "new-group": p.open("lisbon-a")
-        case "details": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .pip("planner")
+        case "jump":
+            let hit = await p.search("Alfama").first { $0.conversation.id == "lisbon-a" }
+            p.open("lisbon-a", at: hit?.matches.last)
+        case "details", "edit-pip", "edit-schedule": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .pip("planner")
         default: break
         }
     }
