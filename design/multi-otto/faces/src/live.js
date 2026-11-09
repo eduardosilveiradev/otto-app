@@ -9,10 +9,20 @@
   const TWEEN = calm ? 1 : 340, BLINK = 240;
   const lerp = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k);
   const ease = x => 1 - Math.pow(1 - x, 3);
+  const smooth = x => x * x * (3 - 2 * x);
 
   let who = 'otto', state = 'rest';
-  let from = faceParams(who, state), to = from, t0 = -1e9, blinkAt = -1e9;
+  const target = () => ({ ...faceParams(who, state), close: 0, bend: 1 });
+  let from = target(), to = from, t0 = -1e9, blinkAt = -1e9;
   let orbit = [0, 0], drag = null, raf = 0, seen = true, motionSamples = 2;
+
+  // the flat line both eye types pass through, sized to match a fully closed capsule exactly
+  const flatLine = i => {
+    const cap = from.arc === 0 ? from : to.arc === 0 ? to : null, s = cap || from, half = s[`e${i}`][3], r = s.er[i];
+    if (!cap) return { w: half, r };
+    const h = (half + r) * .2;
+    return { w: r * 1.25 - h, r: h };
+  };
 
   const at = now => {
     const p = Math.min(1, (now - t0) / TWEEN), k = ease(p), blink = (now - blinkAt) / BLINK;
@@ -22,12 +32,21 @@
     v.morph = from.shape === to.shape ? 0 : k;
     if (from.arc === to.arc) {
       v.e0 = lerp(from.e0, to.e0, k); v.e1 = lerp(from.e1, to.e1, k); v.er = lerp(from.er, to.er, k); v.arc = to.arc;
-    } else {                                  // capsules and arcs can't blend: one pair shrinks away, the other grows in
-      const leaving = p < .5, q = ease(leaving ? p * 2 : p * 2 - 1), s = leaving ? from : to;
-      v.e0 = s.e0; v.e1 = s.e1; v.er = s.er.map(r => r * (leaving ? 1 - q : q)); v.arc = s.arc;
+      v.close = from.close * (1 - k); v.bend = from.bend + (1 - from.bend) * k;
+    } else {                                  // the eye goes through a flat line: a capsule closes into it, an arc straightens into it
+      const s = smooth(p), out = s < .5, q = out ? s * 2 : s * 2 - 1, side = out ? from : to, t = out ? q : 1 - q, isArc = side.arc !== 0;
+      v.er = [0, 0];
+      for (const i of [0, 1]) {
+        const key = `e${i}`, e = side[key], line = flatLine(i), xy = lerp(from[key].slice(0, 2), to[key].slice(0, 2), s);
+        v[key] = [...xy, e[2], isArc ? e[3] + (line.w - e[3]) * t : e[3]];
+        v.er[i] = isArc ? side.er[i] + (line.r - side.er[i]) * t : side.er[i];
+      }
+      v.arc = side.arc;
+      v.close = isArc ? 0 : out ? from.close + (1 - from.close) * q : 1 - q;
+      v.bend = !isArc ? 1 : out ? from.bend * (1 - q) : q;
     }
     const blinking = blink >= 0 && blink < 1;
-    v.B = blinking && v.arc === 0 ? Math.sin(Math.PI * blink) : 0;
+    v.B = Math.max(v.close, blinking && v.arc === 0 ? Math.sin(Math.PI * blink) : 0);
     return { v, busy: p < 1 || blinking };
   };
 
@@ -48,7 +67,7 @@
   const go = () => {
     const now = performance.now(), { v } = at(now);
     from = { ...v, shape: v.morph > .5 ? v.shape2 : v.shape };   // carry on from what's on screen, including any turn
-    to = faceParams(who, state); t0 = now; orbit = [0, 0];
+    to = target(); t0 = now; orbit = [0, 0];
     press('data-face', who); press('data-pose', state);
     canvas.setAttribute('aria-label', `${label('data-face')}, ${label('data-pose')}`);
     blinkBtn.disabled = to.arc !== 0;

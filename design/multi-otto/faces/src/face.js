@@ -7,7 +7,7 @@ uniform vec3 ALBEDO, POSE;    // POSE: pitch, yaw, roll
 uniform vec4 E0, E1;          // eye: x, y, tilt, half length
 uniform vec2 ER;              // eye radii
 uniform vec2 EO;              // per-solid eye offset
-uniform float B, MORPH, RES;  // blink 0 open to 1 closed; SHAPE to SHAPE2; canvas size in pixels
+uniform float B, MORPH, RES, BEND;  // blink 0 open to 1 closed; SHAPE to SHAPE2; canvas size in pixels
 out vec4 o;
 
 const float HALF = 1.;        // canvas half width: the 100-unit face box is 2.0 wide
@@ -52,7 +52,7 @@ float eye1(vec2 p, vec4 e, float r) {
   vec2 q = p - e.xy;
   float a = e.z * (1. - B), c = cos(a), s = sin(a);   // a closing eye levels out, flattens and widens a little
   q = vec2(c * q.x + s * q.y, -s * q.x + c * q.y);
-  if (ARC != 0) { q.y *= float(ARC); return arc(q, e.w, .075, r); }
+  if (ARC != 0) { q.y *= float(ARC); return arc(q, e.w, max(.075 * BEND, .001), r); }
   vec2 h = mix(vec2(r, e.w + r), vec2(r * 1.25, (e.w + r) * .2), B);
   float rc = min(h.x, h.y);
   vec2 d = abs(q) - h + rc;
@@ -160,7 +160,7 @@ const eye = (x, y, tilt, half) => [...u(x, y), tilt * Math.PI / 180, half];
 const FACE_STATES = {
   //        eyes                                                   radii          arc  pose nudge (pitch, yaw, roll)
   rest:    [eye(37, 51, 0, .09),   eye(63, 51, 0, .09),            [.1, .1],      0, [0, 0, 0]],
-  working: [eye(44, 38, -26, .08), eye(70, 40, -26, .04),          [.1, .1],      0, [-.08, .28, 0]],
+  working: [eye(39, 45, -8, .08),  eye(63, 45, -8, .08),           [.1, .1],      0, [.1, .1, 0]],
   needs:   [eye(36, 51, 0, .17),   eye(64, 51, 0, .17),            [.12, .12],    0, [-.1, 0, 0]],
   asleep:  [eye(37, 52, 0, .14),   eye(63, 52, 0, .14),            [.05, .05],   -1, [.14, 0, -.1]],
   gpt:     [eye(37, 53, 0, .14),   eye(63, 53, 0, .14),            [.058, .058],  1, [0, -.14, .05]],
@@ -170,11 +170,9 @@ const FACE_STATES = {
 function faceParams(who, state) {
   const [shape, albedo, pitch, yaw, roll, solidEyes] = FACE_SOLIDS[who];
   const [e0, e1, er, arc, stateNudge] = FACE_STATES[state];
-  let nudge = stateNudge, eo = solidEyes;
+  let nudge = stateNudge;
   if (who === 'inbox') nudge = nudge.map(n => n * .4);
-  if (who === 'inbox' && state === 'working') eo = [-.03, -.14];   // the glance up stays on the flat face, clear of the top edge
-  if (who === 'fares' && state === 'working') eo = [-.04, -.02];   // these eyes already sit high; the diamond narrows there
-  return { shape, albedo: albedo.map(v => Math.pow(v / 255, 2.2)), pose: [pitch + nudge[0], yaw + nudge[1], roll + nudge[2]], e0, e1, er, arc, eo };
+  return { shape, albedo: albedo.map(v => Math.pow(v / 255, 2.2)), pose: [pitch + nudge[0], yaw + nudge[1], roll + nudge[2]], e0, e1, er, arc, eo: solidEyes };
 }
 
 function faceRenderer(canvas) {
@@ -198,7 +196,7 @@ void main(){ gl_Position = vec4(vec2[3](vec2(-1,-1),vec2(3,-1),vec2(-1,3))[gl_Ve
     gl.uniform3f(U('ALBEDO'), ...p.albedo); gl.uniform3f(U('POSE'), ...p.pose);
     gl.uniform4f(U('E0'), ...p.e0); gl.uniform4f(U('E1'), ...p.e1);
     gl.uniform2f(U('ER'), ...p.er); gl.uniform2f(U('EO'), ...p.eo);
-    gl.uniform1f(U('B'), p.B || 0); gl.uniform1f(U('MORPH'), p.morph || 0); gl.uniform1f(U('RES'), canvas.width);
+    gl.uniform1f(U('B'), p.B || 0); gl.uniform1f(U('MORPH'), p.morph || 0); gl.uniform1f(U('RES'), canvas.width); gl.uniform1f(U('BEND'), p.bend ?? 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.finish();
   };
