@@ -485,12 +485,13 @@ final class OttoStore {
             for await text in backend.statuses {
                 ottoTyping = true
                 ottoStatus = text
+                reconcileVoiceDelivery()
                 armTypingTimeout()
             }
         }
         Task {
             for await items in backend.todoLists {
-                if !items.isEmpty { ottoTyping = true; armTypingTimeout() }
+                if !items.isEmpty { ottoTyping = true; reconcileVoiceDelivery(); armTypingTimeout() }
                 ottoTodos = items
             }
         }
@@ -500,7 +501,7 @@ final class OttoStore {
             for await on in backend.typing {
                 serverTyping = true
                 ottoTyping = on
-                if on { armTypingTimeout() }
+                if on { reconcileVoiceDelivery(); armTypingTimeout() }
             }
         }
         Task {
@@ -514,7 +515,13 @@ final class OttoStore {
         }
         Task {
             for await ids in backend.reads {
-                for id in ids { if let i = messages.firstIndex(where: { $0.wireID == id }) { messages[i].read = true } }
+                for id in ids {
+                    if let i = messages.firstIndex(where: { $0.wireID == id }) {
+                        messages[i].read = true
+                        messages[i].pending = nil
+                        messages[i].failed = nil
+                    }
+                }
             }
         }
         Task {
@@ -541,7 +548,10 @@ final class OttoStore {
             for await (id, emoji) in backend.reactions {
                 // A tapback can be Otto's whole answer, so it ends the typing dots too.
                 if !serverTyping { ottoTyping = false }
-                if let i = messages.firstIndex(where: { $0.wireID == id }) { messages[i].reaction = emoji }
+                if let i = messages.firstIndex(where: { $0.wireID == id }) {
+                    messages[i].reaction = emoji
+                    if messages[i].from == .me { messages[i].pending = nil; messages[i].failed = nil }
+                }
             }
         }
         for await m in backend.incoming {
@@ -686,6 +696,16 @@ final class OttoStore {
         await live.postHealth(await Notifier.health(reason: reason))
     }
 
+    /// Activity has no message id. Check history rather than assuming it is about our upload.
+    private func reconcileVoiceDelivery() {
+        guard voiceReconcile == nil, messages.contains(where: { $0.from == .me && $0.isVoice && $0.pending == true }) else { return }
+        voiceReconcile = Task {
+            defer { voiceReconcile = nil }
+            await catchUp(notify: !foreground)
+        }
+    }
+    @ObservationIgnored private var voiceReconcile: Task<Void, Never>?
+
     /// The server's history against this thread, matched by id. What isn't here goes in, in its
     /// place by time: Otto's replies that went into a socket iOS had frozen, and yours from
     /// elsewhere (the share sheet, the dashboard). What is here gets what a lost frame carried:
@@ -724,6 +744,7 @@ final class OttoStore {
             if let r = h.reaction, messages[i].from == .me { messages[i].reaction = r }
             if h.from == .me {
                 if messages[i].pending == true || messages[i].failed == true { messages[i].pending = nil; messages[i].failed = nil }
+                if messages[i].isVoice && !h.text.isEmpty && h.text != "(voice message)" { messages[i].text = h.text }
                 if h.read == true { messages[i].read = true }
             } else if h.from == .otto {
                 if messages[i].isVoice && messages[i].audio == nil && h.audio != nil { messages[i].audio = h.audio }
@@ -925,10 +946,16 @@ final class OttoStore {
             if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i].pending = nil; messages[i].failed = true }
             return
         }
-        guard let text = await backend.sendVoice(audio, id: m.wireID, replyTo: m.replyTo),
-              let i = messages.firstIndex(where: { $0.id == m.id }) else { return }
-        // In place: a read receipt or a tapback that landed while the upload was out stays.
-        messages[i].text = text
+        let text = await backend.sendVoice(audio, id: m.wireID, replyTo: m.replyTo)
+        guard let i = messages.firstIndex(where: { $0.id == m.id }) else { return }
+        guard let text else {
+            // A receipt/history may already have proved delivery while HTTP was still waiting.
+            if messages[i].pending == true { messages[i].failed = true }
+            await catchUp(notify: !foreground)
+            return
+        }
+        // A deduped response can have no transcript; keep one recovered from history.
+        if !text.isEmpty { messages[i].text = text }
         messages[i].pending = nil
         messages[i].failed = nil
     }
