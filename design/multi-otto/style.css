@@ -23,7 +23,6 @@ a:focus-visible, button:focus-visible { outline: 2px solid #ff7a1a; outline-offs
 .eye { transform-box: fill-box; transform-origin: center; animation: blink 5.2s infinite; animation-delay: var(--d, 0s) }
 .body { transform-box: fill-box; transform-origin: 50% 100% }
 .st-working .body { animation: bob .7s ease-in-out infinite alternate }
-.st-working .eyes { transform: translate(4px, 7px) }
 .st-asleep .body { animation: breathe 3.4s ease-in-out infinite; filter: saturate(.7) brightness(.97) }
 .st-needs { animation: wiggle 4.5s ease-in-out infinite; animation-delay: var(--d, 0s) }
 .st-needs .eye { animation: none }
