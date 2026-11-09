@@ -1,0 +1,750 @@
+* {
+  box-sizing:border-box}
+html {
+  scroll-behavior:auto}
+body {
+  margin:0;
+  background:#eeeae4;
+  color:#292724;
+  font:16px/1.5 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a {
+  color:inherit;
+  text-underline-offset:4px}
+p {
+  max-width:65ch;
+  text-wrap:pretty}
+h1,h2,h3,h4,p,figure {
+  margin:0}
+h1,h2 {
+  letter-spacing:-.02em;
+  text-wrap:balance}
+h1 {
+  font-size:48px;
+  line-height:1.1;
+  margin:24px 0 16px}
+h2 {
+  font-size:28px;
+  line-height:1.2}
+h3 {
+  font-size:20px}
+.pagehead,main,footer {
+  max-width:1360px;
+  margin:auto;
+  padding:48px 32px}
+.pagehead {
+  padding-bottom:0}
+.pagelogo {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-weight:650;
+  font-size:21px}
+.pagelogo .face {
+  width:36px;
+  height:36px}
+.caption {
+  font-size:14px;
+  color:#635f59;
+  margin-top:16px}
+nav {
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px 24px;
+  margin-top:28px}
+nav a {
+  min-height:44px;
+  display:flex;
+  align-items:center;
+  font-size:14px}
+section {
+  padding-top:40px;
+  margin-bottom:56px;
+  scroll-margin-top:24px}
+.sectionintro {
+  margin-bottom:32px}
+.sectionintro p {
+  margin-top:12px;
+  color:#635f59}
+.pair {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:48px}
+figure {
+  min-width:0}
+figcaption {
+  font-size:14px;
+  color:#635f59;
+  margin-bottom:24px;
+  text-align:center}
+.phonebox {
+  display:flex;
+  justify-content:center;
+  padding:4px 0 28px}
+.ios {
+  --ios-bubble-in:#e9e9eb;
+  --text-muted:#65656b;
+  --chat-blue:#006de5;
+  --link:#005ecb;
+  --error:#b52526}
+.ios[data-appearance=dark] {
+  --ios-bubble-in:#262529;
+  --text-muted:#a2a2aa;
+  --chat-blue:#006de5;
+  --link:#65adff;
+  --error:#ff8c8f}
+.ios-screen {
+  font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  letter-spacing:0}
+.face {
+  --fruit:#ffa24b;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:16%;
+  width:60px;
+  height:60px;
+  flex-shrink:0;
+  border-radius:50%;
+  background:var(--fruit);
+  vertical-align:middle}
+.face i {
+  width:10%;
+  height:19%;
+  border-radius:50px;
+  background:#1f1f1f;
+  transform:translateY(-10%)}
+.face.sleep i {
+  height:9%;
+  width:16%;
+  background:none;
+  border-bottom:3px solid #1f1f1f;
+  border-radius:0 0 50% 50%}
+.face.inbox {
+  --fruit:#ffd074}
+.face.code {
+  --fruit:#8bc9b9}
+.face.school {
+  --fruit:#c7b4df}
+.face.home {
+  --fruit:#a9c77a}
+.face.travel {
+  --fruit:#e9b0a5}
+.contact {
+  position:absolute;
+  top:58px;
+  left:16px;
+  right:16px;
+  height:101px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between}
+.identity {
+  position:absolute;
+  left:50%;
+  transform:translateX(-50%);
+  display:flex;
+  align-items:center;
+  flex-direction:column;
+  gap:4px;
+  width:220px}
+.identity b {
+  font-size:15px;
+  font-weight:600}
+.chev {
+  color:var(--text-muted);
+  padding-left:3px}
+.back {
+  color:var(--link);
+  font-size:38px;
+  width:44px}
+.headmore {
+  font-size:17px;
+  background:var(--ios-gray6);
+  border-radius:50%;
+  width:44px;
+  height:44px;
+  display:grid;
+  place-items:center}
+.stack {
+  display:flex;
+  padding-left:10px;
+  height:60px;
+  align-items:center}
+.stack .face {
+  width:43px;
+  height:43px;
+  margin-left:-10px;
+  border:2px solid var(--ios-bg)}
+.thread {
+  position:absolute;
+  top:174px;
+  bottom:100px;
+  left:16px;
+  right:16px;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:12px}
+.msg {
+  position:relative;
+  max-width:78%;
+  padding:9.5px 14px;
+  border-radius:19px;
+  font-size:17px;
+  line-height:1.35;
+  overflow-wrap:anywhere}
+.msg.in {
+  background:var(--ios-bubble-in);
+  color:var(--ios-label)}
+.msg.out {
+  background:var(--chat-blue);
+  color:#fff;
+  align-self:flex-end}
+.msg::before,.msg::after {
+  content:'';
+  position:absolute;
+  bottom:0;
+  height:17px}
+.msg.in::before {
+  left:-7px;
+  width:20px;
+  background:var(--ios-bubble-in);
+  border-bottom-right-radius:16px 14px}
+.msg.in::after {
+  left:-10px;
+  width:10px;
+  background:var(--ios-bg);
+  border-bottom-right-radius:10px}
+.msg.out::before {
+  right:-7px;
+  width:20px;
+  background:var(--chat-blue);
+  border-bottom-left-radius:16px 14px}
+.msg.out::after {
+  right:-10px;
+  width:10px;
+  background:var(--ios-bg);
+  border-bottom-left-radius:10px}
+.system {
+  color:var(--text-muted);
+  font-size:12px;
+  line-height:1.5;
+  text-align:center;
+  align-self:stretch;
+  margin:7px 14px}
+.system a {
+  text-decoration:none;
+  color:var(--link)}
+.failure {
+  color:var(--error)}
+.link {
+  color:var(--link)}
+.sender {
+  font-size:12px;
+  color:var(--text-muted);
+  margin:4px 0 -9px 12px}
+.composer {
+  position:absolute;
+  bottom:32px;
+  left:27px;
+  right:27px;
+  display:flex;
+  gap:12px;
+  align-items:center;
+  height:44px}
+.plus {
+  font-size:27px;
+  color:var(--text-muted)}
+.field {
+  flex:1;
+  border:1px solid var(--ios-gray3);
+  border-radius:22px;
+  min-height:38px;
+  padding:7px 36px 7px 13px;
+  font-size:17px;
+  color:var(--text-muted);
+  position:relative;
+  white-space:nowrap}
+.send {
+  position:absolute;
+  right:4px;
+  top:4px;
+  border-radius:50%;
+  background:var(--chat-blue);
+  color:#fff;
+  width:28px;
+  height:28px;
+  display:grid;
+  place-items:center;
+  font-weight:600}
+.mention {
+  color:var(--link)}
+.listtop {
+  display:flex;
+  justify-content:space-between;
+  color:var(--link);
+  padding:67px 20px 14px;
+  font-size:17px}
+.listtitle {
+  font-size:34px;
+  line-height:1.2;
+  padding:8px 20px 18px;
+  letter-spacing:-.02em}
+.search {
+  margin:0 16px 16px;
+  background:var(--ios-gray6);
+  border-radius:12px;
+  color:var(--text-muted);
+  padding:10px 14px}
+.conversation {
+  display:flex;
+  gap:12px;
+  align-items:center;
+  min-height:111px;
+  padding:10px 16px 10px 9px}
+.conversation .face {
+  width:52px;
+  height:52px}
+.unread {
+  width:7px;
+  height:7px;
+  flex-shrink:0;
+  border-radius:50%}
+.unread.on {
+  background:var(--chat-blue)}
+.rowtext {
+  flex:1;
+  min-width:0;
+  border-bottom:.5px solid var(--ios-sep);
+  padding-bottom:10px}
+.rowtitle {
+  display:flex;
+  justify-content:space-between;
+  font-size:17px}
+.rowtitle>span {
+  font-size:12px;
+  color:var(--text-muted)}
+.job {
+  font-size:13px;
+  margin-top:2px}
+.preview {
+  font-size:14px;
+  color:var(--text-muted);
+  margin-top:2px}
+.state {
+  font-size:12px;
+  color:var(--text-muted);
+  margin-top:2px}
+.listfoot {
+  text-align:center;
+  font-size:13px;
+  color:var(--text-muted);
+  margin-top:20px}
+.shade {
+  position:absolute;
+  inset:54px 0 0;
+  background:#0005}
+.underlay {
+  padding:190px 16px}
+.sheet {
+  position:absolute;
+  top:190px;
+  bottom:0;
+  left:0;
+  right:0;
+  border-radius:30px 30px 0 0;
+  background:var(--ios-gray6);
+  padding:8px 16px 32px}
+.grab {
+  height:5px;
+  width:36px;
+  border-radius:4px;
+  background:var(--ios-gray2);
+  margin:0 auto 10px}
+.sheetnav {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  font-size:17px;
+  height:44px}
+.sheetnav>span {
+  color:var(--link);
+  min-width:60px}
+.sheetnav>span:last-child {
+  text-align:right}
+.newface {
+  text-align:center;
+  padding:16px}
+.formgroup {
+  border-radius:18px;
+  background:var(--ios-cell);
+  overflow:hidden;
+  margin-top:12px}
+.formrow {
+  padding:12px 16px;
+  border-bottom:.5px solid var(--ios-sep);
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  font-size:16px;
+  line-height:1.4}
+.formrow:last-child {
+  border:0}
+.formrow b {
+  font-size:13px;
+  font-weight:500;
+  color:var(--text-muted)}
+.sheet h4 {
+  font-size:13px;
+  font-weight:500;
+  margin:18px 16px 12px;
+  color:var(--text-muted)}
+.swatches {
+  display:flex;
+  justify-content:space-between;
+  padding:0 16px}
+.swatches span {
+  width:38px;
+  height:38px;
+  border-radius:50%;
+  background:#e9b0a5;
+  display:grid;
+  place-items:center;
+  color:#292724}
+.swatches span:nth-child(2) {
+  background:#ffd074}
+.swatches span:nth-child(3) {
+  background:#8bc9b9}
+.swatches span:nth-child(4) {
+  background:#c7b4df}
+.swatches span:nth-child(5) {
+  background:#a9c77a}
+.chosen {
+  outline:2px solid var(--ios-label);
+  outline-offset:3px}
+.sheetnote {
+  font-size:13px;
+  color:var(--text-muted);
+  line-height:1.45;
+  margin:14px 8px 0}
+.details {
+  top:155px}
+.detailsface {
+  text-align:center;
+  margin:20px 0}
+.detailsface .face {
+  width:76px;
+  height:76px}
+.detailsface h3 {
+  margin-top:12px}
+.detailsface>span {
+  font-size:13px;
+  color:var(--text-muted)}
+.pause {
+  margin-top:24px;
+  border-radius:15px;
+  background:var(--ios-cell);
+  color:var(--error);
+  padding:14px;
+  text-align:center;
+  font-size:17px}
+.macbox {
+  height:410px;
+  position:relative}
+.mac {
+  --win:#f5f0e8;
+  --card:#fdfaf5;
+  --fg:#1c1a17;
+  --muted:#5f5950;
+  --sel:#e5dfd5;
+  --sep:#ded8cf;
+  --bubble:#e9e9eb;
+  --out:#6b7178;
+  --accent:#a94f00;
+  position:absolute;
+  width:1060px;
+  height:720px;
+  background:var(--win);
+  color:var(--fg);
+  border-radius:22px;
+  overflow:hidden;
+  box-shadow:0 0 0 1px #0002,0 20px 50px #0002;
+  display:flex;
+  font-size:13px;
+  line-height:1.4}
+.mac.dark {
+  --win:#111;
+  --card:#222;
+  --fg:#fff;
+  --muted:#b9bdc4;
+  --sel:#303033;
+  --sep:#303033;
+  --bubble:#262529;
+  --out:#60656b;
+  --accent:#f5a462}
+.sidebar {
+  margin:8px;
+  width:228px;
+  flex-shrink:0;
+  background:var(--card);
+  border-radius:16px;
+  padding:46px 8px 12px;
+  position:relative}
+.lights {
+  position:absolute;
+  top:16px;
+  left:16px;
+  display:flex;
+  gap:8px}
+.lights i {
+  width:12px;
+  height:12px;
+  border-radius:50%;
+  background:#ff5f57}
+.lights i:nth-child(2) {
+  background:#febc2e}
+.lights i:nth-child(3) {
+  background:#28c840}
+.brand {
+  display:flex;
+  gap:10px;
+  align-items:center;
+  padding:12px}
+.brand .face {
+  width:32px;
+  height:32px}
+.macnav {
+  display:flex;
+  gap:10px;
+  padding:10px 12px;
+  align-items:center;
+  border-radius:9px}
+.macnav .face {
+  width:32px;
+  height:32px}
+.macnav b {
+  font-weight:500}
+.macnav small {
+  display:block;
+  color:var(--muted);
+  font-size:11px;
+  margin-top:2px}
+.selected {
+  background:var(--sel)}
+.navnew {
+  padding:16px 12px;
+  color:var(--accent)}
+.navdivider {
+  height:1px;
+  background:var(--sep);
+  margin:4px 10px 12px}
+.navitem {
+  padding:8px 12px;
+  border-radius:9px;
+  display:flex;
+  justify-content:space-between}
+.navitem span {
+  color:var(--muted)}
+.navbottom {
+  position:absolute;
+  bottom:20px;
+  left:20px;
+  color:var(--muted)}
+.macmain {
+  flex:1;
+  min-width:0;
+  position:relative}
+.mactoolbar {
+  height:78px;
+  padding:28px;
+  display:flex;
+  gap:12px;
+  align-items:center}
+.mactoolbar b {
+  font-size:17px}
+.mactoolbar>span {
+  color:var(--muted);
+  font-size:12px}
+.macthread {
+  padding:24px 32px;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:12px}
+.mac .msg {
+  font-size:14px;
+  max-width:75%;
+  padding:8px 12px;
+  border-radius:18px}
+.mac .msg.in,.mac .msg.in::before {
+  background:var(--bubble);
+  color:var(--fg)}
+.mac .msg.out,.mac .msg.out::before {
+  background:var(--out)}
+.mac .msg::after {
+  background:var(--win)}
+.mac .system,.mac .sender {
+  color:var(--muted);
+  font-size:11px}
+.mac .composer {
+  bottom:24px;
+  left:28px;
+  right:28px}
+.mac .field {
+  border-color:var(--sep);
+  font-size:14px;
+  color:var(--muted);
+  background:var(--card)}
+.mac .plus {
+  color:var(--muted)}
+.mac .send {
+  background:var(--out)}
+.workpanel {
+  width:236px;
+  flex-shrink:0;
+  margin:20px 0;
+  border-left:1px solid var(--sep);
+  padding:12px 20px}
+.workpanel h4 {
+  font-size:13px;
+  margin-bottom:24px}
+.workperson {
+  margin-bottom:28px}
+.workperson .face {
+  width:28px;
+  height:28px;
+  margin-right:8px}
+.workperson p {
+  font-size:13px;
+  margin-top:12px}
+.workperson small {
+  display:block;
+  font-size:11px;
+  color:var(--muted);
+  margin-top:6px}
+.workperson .attention {
+  color:var(--accent)}
+.modelnote,.panelnote {
+  font-size:12px;
+  color:var(--muted);
+  line-height:1.5}
+.modelnote {
+  padding:14px 0;
+  border-top:1px solid var(--sep);
+  margin-top:24px}
+footer {
+  font-size:14px;
+  color:#635f59;
+  padding-top:0;
+  padding-bottom:48px}
+
+@media(min-width:1550px) {
+.macbox {
+  height:435px}
+}
+
+@media(max-width:1250px) and (min-width:761px) {
+.macbox {
+  height:315px}
+.pair {
+  gap:24px}
+}
+
+@media(max-width:1000px) and (min-width:761px) {
+  .macpair {
+  grid-template-columns:1fr}
+.macbox {
+  height:475px}
+}
+
+@media(max-width:760px) {
+  .pagehead,main,footer {
+  padding-left:20px;
+  padding-right:20px}
+.pagehead {
+  padding-top:32px}
+h1 {
+  font-size:36px}
+.pair {
+  grid-template-columns:1fr;
+  gap:32px}
+.macbox {
+  height:234px}
+section {
+  margin-bottom:32px}
+figcaption {
+  text-align:left;
+  margin-bottom:16px}
+main {
+  padding-top:16px}
+nav {
+  gap:0 18px}
+.sectionintro {
+  margin-bottom:24px}
+}
+
+@media(max-width:370px) {
+.macbox {
+  height:194px}
+}
+
+
+/* Keep iOS points fixed;
+   scale the complete device rather than reflow its screen. */
+.phonebox>.ios {
+  --scale:.86;
+  width:calc(430px * var(--scale));
+  height:calc(902px * var(--scale))}
+
+.phonebox .ios-device {
+  transform:scale(var(--scale));
+  transform-origin:0 0}
+
+.mac {
+  --scale:.56;
+  transform:scale(var(--scale));
+  transform-origin:0 0}
+
+.system a {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:44px}
+
+.mac .macnav small,.mac .system,.mac .sender,.workperson small {
+  font-size:12px}
+
+@media(min-width:1550px) {
+  .mac {
+  --scale:.59}
+}
+
+@media(max-width:1250px) and (min-width:761px) {
+  .phonebox>.ios {
+  --scale:.78}
+.mac {
+  --scale:.43}
+}
+
+@media(max-width:1000px) and (min-width:761px) {
+  .phonebox>.ios {
+  --scale:.68}
+.mac {
+  --scale:.65}
+}
+
+@media(max-width:760px) {
+  .phonebox>.ios {
+  --scale:.78}
+.mac {
+  --scale:.32}
+}
+
+@media(max-width:370px) {
+  .phonebox>.ios {
+  --scale:.63}
+.mac {
+  --scale:.26}
+}
+
