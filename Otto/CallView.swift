@@ -34,7 +34,7 @@ final class CallManager {
     /// 0…1, whoever is louder, Otto or the user (unless muted); drives the screen glow.
     var anyLevel: Float { max(level, muted ? 0 : vapi?.localAudioLevel ?? 0) }
 
-    func start() {
+    func start(context: String? = nil) {
         let d = UserDefaults.standard
         guard let key = d.string(forKey: "vapiPublicKey"), let assistant = d.string(forKey: "vapiAssistantId") else { return }
         let vapi = Vapi(publicKey: key)
@@ -58,9 +58,11 @@ final class CallManager {
         }.store(in: &bag)
 
         var overrides: [String: Any] = [:]
-        if let owner = d.string(forKey: "ownerNumber"), !owner.isEmpty {
-            overrides["variableValues"] = ["customer": ["number": owner]]
-        }
+        var values: [String: Any] = [:]
+        if let owner = d.string(forKey: "ownerNumber"), !owner.isEmpty { values["customer"] = ["number": owner] }
+        // Which conversation the call came from; the assistant's prompt reads it as {{conversation}}.
+        if let context { values["conversation"] = context }
+        if !values.isEmpty { overrides["variableValues"] = values }
         Task {
             do { _ = try await vapi.start(assistantId: assistant, assistantOverrides: overrides) }
             catch { self.error = error.localizedDescription; self.phase = .ended }
@@ -85,7 +87,9 @@ final class CallManager {
 struct CallView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var call = CallManager()
-    
+    /// The group or pip the call was placed from; nil from Otto's own thread.
+    var context: String? = nil
+
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color(red: 0.16, green: 0.1, blue: 0.06), .black], startPoint: .top, endPoint: .bottom)
@@ -137,7 +141,7 @@ struct CallView: View {
                 .padding(.bottom, 50)
             }
         }
-        .onAppear { call.start() }
+        .onAppear { call.start(context: context) }
         .onChange(of: call.phase) { _, p in
             if p == .ended && call.error == nil { dismiss() }
         }

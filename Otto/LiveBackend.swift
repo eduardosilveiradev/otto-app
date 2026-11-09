@@ -53,6 +53,7 @@ final class LiveBackend: OttoBackend {
     let voices: AsyncStream<(String, RemoteFile?)>
     let edits: AsyncStream<(String, String)>
     let notifies: AsyncStream<(String, String)>
+    let conversationEvents: AsyncStream<ConversationEvent>
 
     private let base: URL       // http(s)://host:port
     private let token: String
@@ -66,6 +67,7 @@ final class LiveBackend: OttoBackend {
     private let voiceOut: AsyncStream<(String, RemoteFile?)>.Continuation
     private let edited: AsyncStream<(String, String)>.Continuation
     private let notifyOut: AsyncStream<(String, String)>.Continuation
+    private let conversationOut: AsyncStream<ConversationEvent>.Continuation
     private let session = URLSession(configuration: .default)
     /// The socket's own session, replaced on every drop. After iOS suspends the app a
     /// session can be left where every new websocket handshake fails while plain HTTP on
@@ -104,6 +106,7 @@ final class LiveBackend: OttoBackend {
         (voices, voiceOut) = AsyncStream.makeStream()
         (edits, edited) = AsyncStream.makeStream()
         (notifies, notifyOut) = AsyncStream.makeStream()
+        (conversationEvents, conversationOut) = AsyncStream.makeStream()
         loop = Task { [weak self] in await self?.run() }
     }
 
@@ -362,6 +365,7 @@ final class LiveBackend: OttoBackend {
             if k.type == "approval_done", let id = k.id { approvalOut.yield(.done(id)); return }
             if k.type == "hello" { lock.withLock { acksOn = true }; return }
             if k.type == "ack", let id = k.id { lock.withLock { acked.insert(id); if k.gone == true { gone.insert(id) } }; return }
+            if let e = ConversationEvent.decode(type: k.type, data) { conversationOut.yield(e); return }
         }
         guard let f = try? JSONDecoder().decode(WireMessage.self, from: data) else { return }
         if f.type == "react", let id = f.id, let emoji = f.emoji { reacted.yield((id, emoji)); return }
@@ -473,6 +477,19 @@ final class LiveBackend: OttoBackend {
         guard let (data, resp) = try? await session.data(for: req),
               let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else { return nil }
         return data
+    }
+
+    func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse? {
+        var c = URLComponents(url: base, resolvingAgainstBaseURL: false)!
+        c.percentEncodedPath = "/" + path   // ids are already escaped: they're opaque and may hold a slash
+        if !query.isEmpty { c.queryItems = query }
+        var req = URLRequest(url: c.url!)
+        req.httpMethod = method
+        req.timeoutInterval = 20
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if method != "GET" { req.httpBody = body ?? Data("{}".utf8); req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        guard let (data, resp) = try? await session.data(for: req), let code = (resp as? HTTPURLResponse)?.statusCode else { return nil }
+        return PipResponse(status: code, data: data)
     }
 
     // MARK: HTTP

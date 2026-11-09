@@ -33,6 +33,14 @@ struct OttoApp: App {
     }
 }
 
+private enum PipRootSwitch {
+    #if DEBUG
+    static let faces = PipFixture.on && PipFixture.screen == "faces"
+    #else
+    static let faces = false
+    #endif
+}
+
 private struct MainRoot: View {
     @State private var store = OttoStore.shared
     @Environment(\.scenePhase) private var phase
@@ -53,7 +61,15 @@ private struct MainRoot: View {
             } else {
                 // Up under the status bar: the header's scroll-edge blur then fades the thread out at the
                 // screen's edge. Stopped at the safe area, the blurred bubbles were cut off there in a band.
-                ChatScreen(store: store).ignoresSafeArea(.keyboard).ignoresSafeArea(.container, edges: .top)
+                if PipRootSwitch.faces {
+                    #if DEBUG
+                    FaceGrid()
+                    #endif
+                } else if store.pips.active {
+                    PipRoot(store: store)
+                } else {
+                    ChatScreen(store: store).ignoresSafeArea(.keyboard).ignoresSafeArea(.container, edges: .top)
+                }
             }
         }
             // Over the content, so it is already laid out underneath when the splash fades.
@@ -107,6 +123,8 @@ final class OttoStore {
     static let shared = OttoStore(backend: LiveBackend.fromDefaults() ?? MockBackend())
 
     let backend: OttoBackend
+    /// Pips and groups. Empty until the server says there's a second conversation.
+    let pips: PipStore
     /// While false, Otto's messages also go out as local notifications.
     var foreground = true
     var messages: [Message] = [] { didSet { save() } }
@@ -164,6 +182,7 @@ final class OttoStore {
 
     init(backend: OttoBackend) {
         self.backend = backend
+        pips = PipStore(name: backend.name)
         let dir = URL.applicationSupportDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         file = dir.appending(path: "chat-\(backend.name.lowercased().replacing(" ", with: "-")).json")
@@ -267,6 +286,7 @@ final class OttoStore {
                 if animated { Task { await catchUp(notify: !foreground) } }
                 Task { await resendPending() }
                 Task { await reportHealth("connect") }
+                Task { await pips.reconnected() }
             }
             expireVoiceWaits()
             markUndelivered()
@@ -282,8 +302,11 @@ final class OttoStore {
     }
 
     func start() async {
+        pips.store = self
         Task { await tick() }
+        Task { await pips.run() }
         #if DEBUG
+        PipFixture.seed(self)
         // `-seedThread`: a thread with long bubbles (and a link), for checking layout without a server.
         if ProcessInfo.processInfo.arguments.contains("-seedThread") {
             let long = String(repeating: "this is a long message that should wrap onto several lines. ", count: 6)
@@ -927,6 +950,11 @@ final class OttoStore {
     }
 
     func tap(_ button: ActionButton, on id: Message.ID) {
+        if button.data?.hasPrefix(PipStore.buttonPrefix) == true {   // a pip's: goes back to the pip
+            if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].buttons = [] }
+            pips.press(button, in: "app")
+            return
+        }
         // Buttons are one-shot, same as Telegram: strip them once tapped.
         if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].buttons = [] }
         // Kept and retried like a message: a "send ✓" lost in a frozen socket would otherwise look sent.

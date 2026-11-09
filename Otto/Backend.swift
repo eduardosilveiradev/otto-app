@@ -85,6 +85,14 @@ struct Message: Identifiable, Codable {
     /// Only from history: not a message but an "edit" or "reaction" for one older than the page,
     /// applied to the message it names and never shown on its own.
     var patch: String? = nil
+    /// Who wrote it, in a conversation: "otto" or a pip id. Nil in Otto's own transport.
+    var pip: String? = nil
+    /// A handoff line: tap for what was said.
+    var handoffID: String? = nil
+    /// A "made" or "added" line: tap for that pip.
+    var pipRef: String? = nil
+    /// Otto's link to a group it made.
+    var groupLink: GroupLink? = nil
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }
@@ -208,7 +216,13 @@ protocol OttoBackend: AnyObject {
     func gate() async -> GateReply?
     /// The passport page (`/app/stamps`); nil when the Mac didn't answer.
     func stamps() async -> StampsReply?
+    /// Pips and groups: the new `conversation_*`, `pip_*`, `handoff_*` and `group_link` frames.
+    var conversationEvents: AsyncStream<ConversationEvent> { get }
+    /// One call to the pips API (docs/pips-api.md in otto-core): its status and body, or nil with no answer.
+    func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse?
 }
+
+struct PipResponse { let status: Int; let data: Data }
 
 extension OttoBackend {
     var voices: AsyncStream<(String, RemoteFile?)> { AsyncStream { _ in } }
@@ -226,6 +240,8 @@ extension OttoBackend {
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
     func decide(approval id: String, approve: Bool) async -> ApprovalOutcome { .done }
     func wallet(_ fields: [String: String], id: String) async -> Bool { true }
+    var conversationEvents: AsyncStream<ConversationEvent> { AsyncStream { _ in } }
+    func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse? { nil }
 }
 
 /// One switch on the Mac's settings page; `section` is otto, recurring or connectors.
@@ -261,6 +277,11 @@ final class MockBackend: OttoBackend {
 
     func react(to id: String, emoji: String) async {}
     func file(_ id: String) async -> Data? { nil }
+    #if DEBUG
+    func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse? {
+        PipFixture.respond(method, path, query: query, body: body)
+    }
+    #endif
 
     static let triggers: [DashTrigger] = {
         let h: Double = 3_600_000, now = Date().timeIntervalSince1970 * 1000
@@ -334,6 +355,9 @@ final class MockBackend: OttoBackend {
     }
 
     func gate() async -> GateReply? {
+        #if DEBUG
+        if PipFixture.on { return nil }
+        #endif
         let dep = Date().addingTimeInterval(3 * 3600)
         return GateReply(card: GateCard(
             key: "TA482@mock", flight: "TA482", carrier: "TA", from: "SFO", to: "JFK",
