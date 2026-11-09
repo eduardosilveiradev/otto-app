@@ -78,7 +78,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // Time Sensitive needs an entitlement a free team can't have, so urgency rides on the
         // relevance score instead: it orders the scheduled summary, and may inform Priority Notifications.
         // One subject per stack, so an Apple Intelligence summary of the stack is about one thing.
-        post(title: "Otto", body: m.text, thread: m.thread ?? "otto", id: m.id.uuidString,
+        post(title: "Otto", body: m.text, thread: m.thread ?? "otto", id: m.wireID,
              relevance: m.level == "timeSensitive" ? 1 : m.thread == "chat" ? 0.8 : 0.5)
     }
 
@@ -95,6 +95,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         UserDefaults.standard.set(unread, forKey: Self.unreadKey)
         content.badge = NSNumber(value: unread)
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+    }
+
+    static func clear(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: ids)
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        center.getDeliveredNotifications { notifications in
+            let remaining = notifications.filter { !ids.contains($0.request.identifier) }.count
+            UserDefaults.standard.set(remaining, forKey: unreadKey)
+            center.setBadgeCount(remaining)
+        }
     }
 
     private static let unreadKey = "unreadCount"

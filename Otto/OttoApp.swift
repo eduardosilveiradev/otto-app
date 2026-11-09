@@ -283,6 +283,10 @@ final class OttoStore {
 
     func start() async {
         Task { await tick() }
+        reconcileDesktop()
+        if let sync = backend.desktopSync {
+            Task { for await _ in sync.updates { reconcileDesktop(); saveNow() } }
+        }
         #if DEBUG
         // `-seedThread`: a thread with long bubbles (and a link), for checking layout without a server.
         if ProcessInfo.processInfo.arguments.contains("-seedThread") {
@@ -523,6 +527,7 @@ final class OttoStore {
         Task {
             // A focused desktop let go: one banner for what it held. Those messages are already in the thread.
             for await (id, text) in backend.notifies where !foreground {
+                guard backend.desktopSync?.snapshot.read.contains(id) != true else { continue }
                 Notifier.shared.post(title: "Otto", body: text, thread: "otto", id: id)
             }
         }
@@ -545,8 +550,9 @@ final class OttoStore {
             // history first, then the socket flushes the held copy.
             guard !messages.contains(where: { $0.wireID == m.wireID }) else { continue }
             messages.append(m)
+            reconcileDesktop()
             if m.otp != nil { otpDrawer = m }
-            if !foreground && m.from == .otto && m.quiet != true { Notifier.shared.post(m) }
+            if !foreground && m.from == .otto && m.quiet != true && backend.desktopSync?.snapshot.read.contains(m.wireID) != true { Notifier.shared.post(m) }
         }
     }
 
@@ -725,10 +731,11 @@ final class OttoStore {
                 if messages[i].text != h.text && !(h.text.count >= 8000 && messages[i].text.hasPrefix(h.text)) { messages[i].text = h.text }
             }
         }
-        guard !fresh.isEmpty else { return }
+        guard !fresh.isEmpty else { reconcileDesktop(); return }
         if !serverTyping && fresh.contains(where: { $0.from == .otto }) { ottoTyping = false }
         for m in fresh { messages.insert(m, at: messages.lastIndex { $0.date <= m.date }.map { $0 + 1 } ?? 0) }
-        if notify { for m in fresh where m.from == .otto && m.quiet != true { Notifier.shared.post(m) } }
+        reconcileDesktop()
+        if notify { for m in fresh where m.from == .otto && m.quiet != true && backend.desktopSync?.snapshot.read.contains(m.wireID) != true { Notifier.shared.post(m) } }
     }
 
     func send(_ text: String, shared: Bool = false, id: UUID = UUID()) {
@@ -796,7 +803,7 @@ final class OttoStore {
         if m.photo == true && m.imageData == nil { if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].pending = nil; messages[i].failed = true }; return }
         let ok = if let jpeg = m.imageData, m.snap == true, let live = backend as? LiveBackend { await live.snap(jpeg, note: m.text, id: m.wireID) != nil }
             else if let jpeg = m.imageData { await backend.sendPhoto(jpeg, caption: m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true) }
-            else if let data = m.tap { await backend.tap(ActionButton(label: m.text, data: data), id: m.wireID) }
+            else if let data = m.tap { await backend.tap(ActionButton(label: m.text, data: data), id: m.wireID, source: m.tapOf) }
             else if let w = m.wallet { await backend.wallet(w, id: m.wireID) }
             else { await backend.send(m.text, id: m.wireID, replyTo: m.replyTo, shared: m.shared == true) }
         guard ok, let i = messages.firstIndex(where: { $0.id == id }) else { return }
@@ -926,12 +933,22 @@ final class OttoStore {
         messages[i].failed = nil
     }
 
+    private func reconcileDesktop() {
+        guard let state = backend.desktopSync?.snapshot else { return }
+        state.apply(to: &messages)
+        Notifier.clear(state.notificationIDs(in: messages))
+    }
+
     func tap(_ button: ActionButton, on id: Message.ID) {
         // Buttons are one-shot, same as Telegram: strip them once tapped.
-        if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].buttons = [] }
+        guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
+        let source = messages[i].wireID
+        messages[i].buttons = []
+        messages[i].card?.actions = []
         // Kept and retried like a message: a "send ✓" lost in a frozen socket would otherwise look sent.
-        let m = Message(from: .me, text: button.label, pending: true, tap: button.data ?? "")
+        let m = Message(from: .me, text: button.label, pending: true, tap: button.data ?? "", tapOf: source)
         messages.append(m)
+        saveNow()
         ottoTyping = true
         Task { await deliver(m.id) }
     }
