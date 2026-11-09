@@ -81,4 +81,3 @@
 .ios-status .time { position: absolute; left: 33px; width: 80px; top: 21px; text-align: center; font: 600 17px/22px var(--ios-font); letter-spacing: -0.4px; font-variant-numeric: tabular-nums }
 .ios-status .icons { position: absolute; right: 36px; top: 24px; display: flex; gap: 7px; align-items: center; height: 13px }
 .ios-status svg { display: block; fill: currentColor }
-
