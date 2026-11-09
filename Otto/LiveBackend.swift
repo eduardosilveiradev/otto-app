@@ -446,6 +446,17 @@ final class LiveBackend: OttoBackend {
         _ = await post("app/health", body)
     }
 
+    @MainActor private var lastSeenSent: Int64 = 0
+
+    /// Best effort, including on older servers: never queue or repeat an attempted timestamp.
+    @MainActor func seen(_ date: Date) async {
+        let ts = Int64((date.timeIntervalSince1970 * 1000).rounded())
+        guard !Task.isCancelled, ts > lastSeenSent,
+              let body = try? JSONSerialization.data(withJSONObject: ["ts": ts]) else { return }
+        lastSeenSent = ts
+        _ = await post("app/seen", body, contentType: "application/json")
+    }
+
     func snooze(_ change: SnoozeChange?) async -> Snooze? {
         var req = URLRequest(url: base.appendingPathComponent("app/snooze"))
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -489,12 +500,13 @@ final class LiveBackend: OttoBackend {
     }
 
     /// Uploads go over plain HTTP, not the socket: its frames are capped at 64 KB.
-    private func post(_ path: String, _ body: Data, query: [URLQueryItem] = []) async -> Data? {
+    private func post(_ path: String, _ body: Data, query: [URLQueryItem] = [], contentType: String? = nil) async -> Data? {
         var c = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { c.queryItems = query }
         var req = URLRequest(url: c.url!)
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let contentType { req.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         req.timeoutInterval = 120   // transcription runs before the response
         guard let (data, resp) = try? await session.upload(for: req, from: body),
               let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else { return nil }
