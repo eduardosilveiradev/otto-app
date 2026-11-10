@@ -73,6 +73,8 @@ struct Message: Identifiable, Codable {
     var quiet: Bool? = nil
     /// Yours, a button tap: the data that goes up (the bubble shows the label). Pending until the server has it.
     var tap: String? = nil
+    /// Source wire ID, saved with a pending tap so every retry names the same button set.
+    var tapOf: String? = nil
     /// Yours, a Wallet payment (amount, merchant, card) for money tracking, when it couldn't go up at once.
     var wallet: [String: String]? = nil
     /// Yours, a photo from Snap to Otto: filed, not discussed, so a retry goes up as a snap too.
@@ -173,6 +175,7 @@ protocol OttoBackend: AnyObject {
     var todoLists: AsyncStream<[TodoItem]> { get }
     /// wireIDs of your messages Otto has just taken in.
     var reads: AsyncStream<[String]> { get }
+    var desktopSync: DesktopSync? { get }
     /// Whether Otto is working on something you sent, as the server sees it.
     var typing: AsyncStream<Bool> { get }
     /// Approval screens the server raised, and ones it settled or dropped.
@@ -189,7 +192,7 @@ protocol OttoBackend: AnyObject {
     /// True once the server has the message; false means try again later.
     func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool
     /// Same contract as `send`, for a button tap under its bubble's id.
-    func tap(_ button: ActionButton, id: String) async -> Bool
+    func tap(_ button: ActionButton, id: String, source: String?) async -> Bool
     func react(to id: String, emoji: String) async
     /// Same contract as `send`.
     func sendPhoto(_ jpeg: Data, caption: String, id: String, replyTo: String?, shared: Bool) async -> Bool
@@ -225,6 +228,7 @@ protocol OttoBackend: AnyObject {
 struct PipResponse { let status: Int; let data: Data }
 
 extension OttoBackend {
+    var desktopSync: DesktopSync? { nil }
     var voices: AsyncStream<(String, RemoteFile?)> { AsyncStream { _ in } }
     var edits: AsyncStream<(String, String)> { AsyncStream { _ in } }
     var notifies: AsyncStream<(String, String)> { AsyncStream { _ in } }
@@ -317,7 +321,7 @@ final class MockBackend: OttoBackend {
         return true
     }
 
-    func tap(_ button: ActionButton, id: String) async -> Bool {
+    func tap(_ button: ActionButton, id: String, source: String?) async -> Bool {
         Task {
             try? await Task.sleep(for: .milliseconds(600))
             out.yield(Message(from: .otto, text: "(mock) \(button.data ?? button.url ?? "") ✓"))

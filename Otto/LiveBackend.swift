@@ -5,7 +5,7 @@ import Foundation
 /// Wire protocol (documented in full at the "App transport" block in server.ts):
 ///   GET  <server>/app          websocket, `Authorization: Bearer <token>`
 ///     app -> otto  {"type":"message","id":"<uuid>","text":"...","reply_to":"<id>"?}
-///                  {"type":"tap","op":"<uuid>","data":"<button data>","label":"..."}
+///                  {"type":"tap","id":"<source wire ID>","op":"<uuid>","data":"<button data>","label":"..."}
 ///                  {"type":"react","op":"<uuid>","id":"<id>","emoji":"❤️"}
 ///                  {"type":"approval","op":"<uuid>","id":"<id>","decision":"approve"|"decline"}
 ///                  Each op is kept until {"type":"ack","id":"<op or message id>"} comes back and resent on the
@@ -47,6 +47,7 @@ final class LiveBackend: OttoBackend {
     let reactions: AsyncStream<(String, String)>
     let statuses: AsyncStream<String>
     let todoLists: AsyncStream<[TodoItem]>
+    let desktopSync: DesktopSync?
     let reads: AsyncStream<[String]>
     let typing: AsyncStream<Bool>
     let approvalUpdates: AsyncStream<ApprovalUpdate>
@@ -96,6 +97,7 @@ final class LiveBackend: OttoBackend {
         c.path = ""
         base = c.url!
         self.token = token
+        desktopSync = DesktopSync(key: "otto.desktopSync.\(base.absoluteString)")
         (incoming, out) = AsyncStream.makeStream()
         (reactions, reacted) = AsyncStream.makeStream()
         (statuses, status) = AsyncStream.makeStream()
@@ -135,9 +137,9 @@ final class LiveBackend: OttoBackend {
         return rows.filter { $0.dir != "in" || $0.id != nil || $0.kind == "terminal" }.map { r in
             var m = r.kind == "terminal" ? Self.terminal(r.text, ts: r.ts)
             : r.dir == "in"
-                // A dashboard message's id isn't a UUID: it rides as serverID so the merge still matches it.
+                // Preserve the exact wire ID, including UUID casing from other devices.
                 ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date(), shared: r.shared,
-                          serverID: r.id.flatMap { UUID(uuidString: $0) == nil ? $0 : nil }, read: r.read)
+                          serverID: r.id, read: r.read)
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
                           buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: r.voice != nil || r.voicePending == true, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
@@ -158,8 +160,8 @@ final class LiveBackend: OttoBackend {
     }
 
     /// A tap is kept in the thread like a message (its bubble is the label), under its own id.
-    func tap(_ button: ActionButton, id: String) async -> Bool {
-        await handOver(["type": "tap", "op": id, "data": button.data ?? "", "label": button.label], op: id)
+    func tap(_ button: ActionButton, id: String, source: String?) async -> Bool {
+        await handOver(DesktopSync.tapFrame(button, op: id, source: source), op: id)
     }
 
     /// A Wallet payment that couldn't go up over HTTP when it happened, kept in the thread until acked.
@@ -358,6 +360,7 @@ final class LiveBackend: OttoBackend {
         case .data(let d): data = d
         @unknown default: return
         }
+        if desktopSync?.receive(data) == true { return }
         // Before WireMessage: an approval's `files` aren't RemoteFiles, so it would fail that decode whole.
         struct Kind: Decodable { let type: String; let id: String?; let gone: Bool? }
         if let k = try? JSONDecoder().decode(Kind.self, from: data) {
@@ -381,7 +384,7 @@ final class LiveBackend: OttoBackend {
         }
         // Yours, sent from somewhere other than this thread (the share sheet, the dashboard). Same id as /app/history gives it.
         if f.type == "echo", let text = f.text {
-            out.yield(Message(id: f.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: text, date: Self.date(f.ts) ?? Date(), shared: f.shared))
+            out.yield(Message(id: f.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: text, date: Self.date(f.ts) ?? Date(), shared: f.shared, serverID: f.id))
             return
         }
         guard f.type == "message", let text = f.text else { return }
