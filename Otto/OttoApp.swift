@@ -92,7 +92,7 @@ private struct MainRoot: View {
             .onChange(of: phase, initial: true) { _, p in
                 if store.foreground && p != .active { store.pips.leftApp() }
                 store.foreground = p == .active
-                if p == .active { store.sendShared(); Notifier.clearAll() }
+                if p == .active { store.sendShared(); Notifier.clearAll(); store.resync() }
                 if p == .background { store.flush(); Notifier.scheduleRefresh() }
                 Grace.update(background: p == .background)
                 Keepalive.update(background: p == .background)
@@ -736,6 +736,10 @@ final class OttoStore {
     /// elsewhere (the share sheet, the dashboard). What is here gets what a lost frame carried:
     /// its edit, Otto's tapback, a voice clip, a read receipt, and for one still marked sending,
     /// the fact that the server has it after all.
+    /// Back in front: a socket iOS froze in the background looks alive but dropped what was sent into it
+    /// (a tapback, an edit, a reply), and no reconnect means no catch-up. One history read fills it in.
+    func resync() { Task { await catchUp(notify: false) } }
+
     private func catchUp(notify: Bool, background: Bool = false) async {
         guard !(backend is MockBackend) else { return }
         var all = await backend.history(background: background, limit: 50, since: nil)
