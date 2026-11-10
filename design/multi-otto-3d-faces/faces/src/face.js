@@ -1,0 +1,203 @@
+// One face, drawn with signed-distance solids raymarched in WebGL2, no libraries.
+// render.html uses it for the PNGs and live.js for the renderer on the page.
+const FACE_FS = `#version 300 es
+precision highp float;
+uniform int SHAPE, SHAPE2, ARC, N;   // ARC: 0 capsule eyes, 1 arcs up, -1 arcs down; N: samples per pixel side
+uniform vec3 ALBEDO, POSE;    // POSE: pitch, yaw, roll
+uniform vec4 E0, E1;          // eye: x, y, tilt, half length
+uniform vec2 ER;              // eye radii
+uniform vec2 EO;              // per-solid eye offset
+uniform float B, MORPH, RES, BEND;  // blink 0 open to 1 closed; SHAPE to SHAPE2; canvas size in pixels
+out vec4 o;
+
+const float HALF = 1.;        // canvas half width: the 100-unit face box is 2.0 wide
+const vec3 CENTRE = vec3(0., -.08, 0.), RO = vec3(0., 0., 6.5);
+const vec3 KEY = normalize(vec3(-.5, .78, .62)), RIM = normalize(vec3(.72, .5, -.5));
+const float PHI = 1.618034;
+mat3 ROT;
+
+float smax(float a, float b, float k) { float h = max(k - abs(a - b), 0.) / k; return max(a, b) + h * h * k * .25; }
+float smin(float a, float b, float k) { return -smax(-a, -b, k); }
+
+float solidOf(int S, vec3 p) {
+  if (S == 0) return length(p) - .88;                                      // Otto: sphere
+  if (S == 1) { vec3 q = abs(p) - .33; return length(max(q, 0.)) + min(max(q.x, max(q.y, q.z)), 0.) - .37; } // rounded cube
+  if (S == 2) { vec3 q = p; q.x -= clamp(q.x, -.33, .33); return length(q) - .55; } // capsule on its side
+  if (S == 3) {                                                            // gumdrop
+    vec2 q = vec2(length(p.xz), p.y + .62);
+    float r1 = .76, r2 = .42, h = .9, b = (r1 - r2) / h, a = sqrt(1. - b * b), k = dot(q, vec2(-b, a));
+    float d = k < 0. ? length(q) - r1 : k > a * h ? length(q - vec2(0., h)) - r2 : dot(q, vec2(a, b)) - r1;
+    return smax(d, -(p.y + .72), .36);
+  }
+  if (S == 4) {                                                            // soft faceted gem
+    float s = 0.;
+    vec3 n[6] = vec3[6](vec3(0., 1., PHI), vec3(0., -1., PHI), vec3(1., PHI, 0.), vec3(-1., PHI, 0.), vec3(PHI, 0., 1.), vec3(PHI, 0., -1.));
+    for (int i = 0; i < 6; i++) s += pow(abs(dot(p, normalize(n[i]))), 11.);
+    return pow(s, 1. / 11.) - .78;
+  }
+  if (S == 5) { vec2 d = vec2(length(p.xz) - .46, abs(p.y) - .2); return min(max(d.x, d.y), 0.) + length(max(d, 0.)) - .38; } // soft drum
+  float e = 5.5; vec3 q = abs(p) * .57735;                                     // soft diamond
+  return pow(pow(q.x + q.y + q.z, e) + pow(abs(q.x + q.y - q.z), e) + pow(abs(q.x - q.y + q.z), e) + pow(abs(-q.x + q.y + q.z), e), 1. / e) - .64;
+}
+float solid(vec3 p) { float a = solidOf(SHAPE, p); return MORPH > 0. ? mix(a, solidOf(SHAPE2, p), MORPH) : a; }
+
+float arc(vec2 q, float w, float s, float r) {
+  q.x = abs(q.x);
+  float rc = (w * w + s * s) / (2. * s);
+  vec2 cc = vec2(0., s - rc), a = q - cc, e = vec2(w, 0.) - cc;
+  float d = a.x * e.y < a.y * e.x ? abs(length(a) - rc) : length(q - vec2(w, 0.));
+  return d - r;
+}
+float eye1(vec2 p, vec4 e, float r) {
+  vec2 q = p - e.xy;
+  float a = e.z * (1. - B), c = cos(a), s = sin(a);   // a closing eye levels out, flattens and widens a little
+  q = vec2(c * q.x + s * q.y, -s * q.x + c * q.y);
+  if (ARC != 0) { q.y *= float(ARC); return arc(q, e.w, max(.075 * BEND, .001), r); }
+  vec2 h = mix(vec2(r, e.w + r), vec2(r * 1.25, (e.w + r) * .2), B);
+  float rc = min(h.x, h.y);
+  vec2 d = abs(q) - h + rc;
+  return length(max(d, 0.)) + min(max(d.x, d.y), 0.) - rc;
+}
+float eyes(vec2 p) { p -= EO; return min(eye1(p, E0, ER.x), eye1(p, E1, ER.y)); }
+
+vec2 scene(vec3 w) {          // x: distance, y: 1 on the eye glass
+  vec3 p = ROT * (w - CENTRE);
+  float b = solid(p), e = max(eyes(p.xy), -p.z);
+  float socket = max(e - .016, -(b + .07));
+  float body = smax(b, -socket, .05);
+  float glass = max(e, b + .03 - .022 * sqrt(clamp(-e / .1, 0., 1.)));
+  return glass < body ? vec2(glass, 1.) : vec2(body, 0.);
+}
+vec3 normal(vec3 p) {
+  vec2 e = vec2(.0012, -.0012);
+  return normalize(e.xyy * scene(p + e.xyy).x + e.yyx * scene(p + e.yyx).x + e.yxy * scene(p + e.yxy).x + e.xxx * scene(p + e.xxx).x);
+}
+float shadow(vec3 p, vec3 l, float k) {
+  float res = 1., t = .02;
+  for (int i = 0; i < 48 && t < 4.; i++) {
+    float h = scene(p + l * t).x;
+    res = min(res, k * h / t);
+    if (res < .001) break;
+    t += clamp(h * .8, .012, .25);
+  }
+  res = clamp(res, 0., 1.);
+  return res * res * (3. - 2. * res);
+}
+float occlusion(vec3 p, vec3 n) {
+  float a = 0., w = 1.;
+  for (float i = 1.; i < 6.; i++) { float d = i * .07; a += w * (d - scene(p + n * d).x); w *= .6; }
+  return clamp(1. - 1.5 * a, 0., 1.);
+}
+float ggx(float nh, float a) { float a2 = a * a, d = nh * nh * (a2 - 1.) + 1.; return a2 / (3.14159 * d * d); }
+
+vec3 matte(vec3 p, vec3 n, vec3 v) {
+  float ao = occlusion(p, n), ndl = dot(n, KEY), sh = shadow(p + n * .012, KEY, 9.);
+  float wrap = pow(clamp((ndl + .22) / 1.22, 0., 1.), 1.25);
+  vec3 h = normalize(KEY + v);
+  // light that bleeds past the terminator picks up the material's own colour, as soft plastic does
+  vec3 deep = pow(ALBEDO, vec3(1.5));
+  vec3 c = ALBEDO * vec3(1.02, .99, .94) * 1.95 * wrap * sh;
+  c += deep * vec3(.95, .6, .45) * .55 * smoothstep(-.35, .25, ndl) * (1. - smoothstep(.0, .55, ndl * sh));
+  c += ALBEDO * vec3(.72, .8, 1.) * .62 * (.55 + .45 * n.y) * ao;   // sky fill
+  c += deep * .38 * clamp(.5 - .5 * n.y, 0., 1.) * ao;              // page bounce
+  float f = pow(1. - clamp(dot(n, v), 0., 1.), 3.2);
+  c += vec3(1., .97, .93) * f * .85 * clamp(dot(n, RIM) * .75 + .4, 0., 1.) * ao;
+  c += vec3(1.) * ggx(clamp(dot(n, h), 0., 1.), .3) * .05 * sh * clamp(ndl, 0., 1.);
+  return c;
+}
+vec3 glossy(vec3 p, vec3 n, vec3 v) {
+  vec3 r = reflect(-v, n);
+  float f = .04 + .96 * pow(1. - clamp(dot(n, v), 0., 1.), 5.);
+  vec3 env = vec3(.03, .03, .036) + vec3(.14, .15, .18) * smoothstep(-.2, 1., r.y);
+  env += vec3(1.5) * smoothstep(.9, .97, dot(r, KEY));
+  return vec3(.006, .005, .005) + env * (f + .1) * occlusion(p, n);
+}
+
+vec4 trace(vec3 rd) {
+  float t = 4.;
+  for (int i = 0; i < 128 && t < 9.; i++) {
+    vec2 h = scene(RO + rd * t);
+    if (h.x < .0006) {
+      vec3 p = RO + rd * t, n = normal(p), v = -rd;
+      return vec4(h.y > .5 ? glossy(p, n, v) : matte(p, n, v), 1.);
+    }
+    t += h.x * .8;
+  }
+  return vec4(0.);
+}
+
+void main() {
+  vec3 s = sin(POSE), c0 = cos(POSE);
+  ROT = mat3(c0.z, s.z, 0., -s.z, c0.z, 0., 0., 0., 1.)
+      * mat3(c0.y, 0., -s.y, 0., 1., 0., s.y, 0., c0.y)
+      * mat3(1., 0., 0., 0., c0.x, s.x, 0., -s.x, c0.x);
+  vec4 sum = vec4(0.);
+  for (int y = 0; y < N; y++) for (int x = 0; x < N; x++) {
+    vec2 uv = (gl_FragCoord.xy - .5 + (vec2(x, y) + .5) / float(N)) / (RES * .5) - 1.;
+    vec4 c = trace(normalize(vec3(uv * HALF, 0.) - RO));
+    sum += vec4(c.rgb * c.a, c.a);
+  }
+  sum /= float(N * N);
+  if (sum.a < .0001) { o = vec4(0.); return; }
+  vec3 c = sum.rgb / sum.a;
+  c = c * (1. + c / 14.) / (1. + c / 3.2) * 1.28;   // soft shoulder that keeps the hue
+  c = pow(clamp(c, 0., 1.), vec3(1. / 2.2));
+  o = vec4(c * sum.a, sum.a);
+}`;
+
+const FACE_SOLIDS = {
+  //       shape  albedo (sRGB, 0-255)   pitch   yaw    roll  eye offset
+  otto:   [0, [255, 124,  26],  .05, -.10,  0,   [0, 0]],
+  inbox:  [1, [250, 186,  30],  .1,  -.12,  .02, [0, 0]],   // a flat face foreshortens the eyes, so it stays square to the viewer
+  code:   [2, [112, 188,  50],  .14, -.30, -.16, [0, -.02]],
+  school: [3, [240,  98, 132],  .16, -.20,  0,   [0, -.16]],
+  home:   [4, [ 78, 128, 236],  .18, -.2,   .08, [0, 0]],
+  fares:  [6, [ 26, 142, 156],  .08, -.16,  0,   [0, .12]],
+  stays:  [5, [150,  86, 196],  .34, -.24,  0,   [0, -.02]],
+};
+const u = (x, y) => [(x - 50) / 50, (54 - y) / 50];   // old 100-unit face box to solid space
+const eye = (x, y, tilt, half) => [...u(x, y), tilt * Math.PI / 180, half];
+const FACE_STATES = {
+  //        eyes                                                   radii          arc  pose nudge (pitch, yaw, roll)
+  rest:    [eye(37, 51, 0, .09),   eye(63, 51, 0, .09),            [.1, .1],      0, [0, 0, 0]],
+  working: [eye(39, 45, -8, .08),  eye(63, 45, -8, .08),           [.1, .1],      0, [.1, .1, 0]],
+  needs:   [eye(36, 51, 0, .17),   eye(64, 51, 0, .17),            [.12, .12],    0, [-.1, 0, 0]],
+  asleep:  [eye(37, 52, 0, .14),   eye(63, 52, 0, .14),            [.05, .05],   -1, [.14, 0, -.1]],
+  gpt:     [eye(37, 53, 0, .14),   eye(63, 53, 0, .14),            [.058, .058],  1, [0, -.14, .05]],
+  failed:  [eye(37, 60, -32, .09), eye(63, 60, 32, .09),           [.1, .1],      0, [.2, 0, 0]],
+};
+
+function faceParams(who, state) {
+  const [shape, albedo, pitch, yaw, roll, solidEyes] = FACE_SOLIDS[who];
+  const [e0, e1, er, arc, stateNudge] = FACE_STATES[state];
+  let nudge = stateNudge;
+  if (who === 'inbox') nudge = nudge.map(n => n * .4);
+  return { shape, albedo: albedo.map(v => Math.pow(v / 255, 2.2)), pose: [pitch + nudge[0], yaw + nudge[1], roll + nudge[2]], e0, e1, er, arc, eo: solidEyes };
+}
+
+function faceRenderer(canvas) {
+  const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, preserveDrawingBuffer: true, antialias: false });
+  if (!gl) throw new Error('WebGL2 unavailable');
+  const shader = (type, text) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, text); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  };
+  const program = gl.createProgram();
+  gl.attachShader(program, shader(gl.VERTEX_SHADER, `#version 300 es
+void main(){ gl_Position = vec4(vec2[3](vec2(-1,-1),vec2(3,-1),vec2(-1,3))[gl_VertexID],0,1); }`));
+  gl.attachShader(program, shader(gl.FRAGMENT_SHADER, FACE_FS));
+  gl.linkProgram(program); gl.useProgram(program);
+  const U = n => gl.getUniformLocation(program, n);
+  return p => {
+    gl.uniform1i(U('SHAPE'), p.shape); gl.uniform1i(U('SHAPE2'), p.shape2 ?? p.shape);
+    gl.uniform1i(U('ARC'), p.arc); gl.uniform1i(U('N'), p.N);
+    gl.uniform3f(U('ALBEDO'), ...p.albedo); gl.uniform3f(U('POSE'), ...p.pose);
+    gl.uniform4f(U('E0'), ...p.e0); gl.uniform4f(U('E1'), ...p.e1);
+    gl.uniform2f(U('ER'), ...p.er); gl.uniform2f(U('EO'), ...p.eo);
+    gl.uniform1f(U('B'), p.B || 0); gl.uniform1f(U('MORPH'), p.morph || 0); gl.uniform1f(U('RES'), canvas.width); gl.uniform1f(U('BEND'), p.bend ?? 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.finish();
+  };
+}

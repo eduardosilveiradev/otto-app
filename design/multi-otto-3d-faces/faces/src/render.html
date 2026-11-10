@@ -1,0 +1,12 @@
+<!doctype html>
+<!-- Renders one face to a transparent canvas: render.html?otto-rest, or ?otto-rest-b2 for a blink frame.
+     The shader lives in face.js. render.sh screenshots every face. -->
+<meta charset="utf-8">
+<style>html,body{margin:0;background:transparent}canvas{display:block}</style>
+<canvas id="c" width="288" height="288"></canvas>
+<script src="face.js"></script>
+<script>
+const [who, state, frame] = location.search.slice(1).split('-');
+faceRenderer(c)({ ...faceParams(who, state), B: { b1: .5, b2: .85, b3: 1 }[frame] || 0, N: 5 });
+document.title = 'done';
+</script>
