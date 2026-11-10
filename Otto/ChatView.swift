@@ -29,6 +29,8 @@ import VoiceGlowKit
     func tap(_ button: ActionButton, on id: Message.ID)
     /// One of yours marked "Not delivered", sent again now.
     func retry(_ id: Message.ID)
+    /// The server's id for this conversation; Otto's own is "app".
+    var conversationID: String { get }
 }
 
 extension OttoStore: ChatThread {
@@ -37,6 +39,7 @@ extension OttoStore: ChatThread {
     var typing: Bool { ottoTyping }
     var typingStatus: String? { ottoStatus }
     var typingTodos: [TodoItem] { ottoTodos }
+    var conversationID: String { "app" }
     func send(_ text: String) { send(text, shared: false) }
 }
 
@@ -61,7 +64,13 @@ struct ChatView: View {
     /// Shared with the composer, which lives in its own hosting controller (see KeyboardDock).
     let ui: ComposerUI
     let thread: any ChatThread
+    /// Back to the conversations; nil when Otto's is the only thread there is.
+    var onBack: (() -> Void)? = nil
     private var focused: Bool { ui.focused }
+    private var pipsOn: Bool { store.pips.active }
+    private var row: ConversationRow? { store.pips.row(thread.conversationID) }
+    private var isGroup: Bool { row?.isGroup == true }
+    private var callContext: String? { thread.isOtto ? nil : thread.name }
     @State private var scroll = ScrollPosition(edge: .bottom)
     /// The thread's bottom margin; follows ui.bottomInset, but lags it while the keyboard closes.
     @State private var margin: CGFloat = 0
@@ -117,14 +126,130 @@ struct ChatView: View {
     }
     @Environment(\.accessibilityReduceMotion) private var still
 
+    /// The space above a bubble. A group's always clears the name above it.
+    private func gap(group: Bool, runStarts: Bool, stamped: Bool, sameAuthor: Bool) -> CGFloat {
+        if group { return runStarts ? 10 : 4 }
+        return stamped ? 0 : sameAuthor ? 4 : 10
+    }
+
     /// "Read" once the server says Otto has taken the message in; until then it may be sitting
     /// in the queue behind a long turn, which is "Delivered". Not guessed from a later message of
     /// Otto's: that can be a proactive one, or an answer to something else.
-    private func receipt(for i: Int, in messages: [Message]) -> Bool {
-        messages[i].read == true
+    /// None in a group, and none once a handoff after your message has finished: the work has answered it.
+    private func receipt(for i: Int, in messages: [Message]) -> Bool? {
+        let finished = messages[(i + 1)...].contains { m in
+            m.handoffID.flatMap { store.pips.handoffs[$0]?.status }.map { $0 == "answered" || $0 == "failed" } ?? false
+        }
+        return isGroup || finished ? nil : messages[i].read == true
+    }
+
+    /// A tapped search result, once the thread has loaded: scroll to it and light it up.
+    private func jumpToMatch() async {
+        guard let w = store.pips.match else { return }
+        store.pips.match = nil
+        let hit = Message(w)
+        // Old-transport rows in Otto's thread carry other ids, so those match on their words and time.
+        func found() -> Message.ID? {
+            thread.messages.first { $0.wireID == hit.wireID }?.id
+                ?? thread.messages.filter { $0.text == hit.text }
+                    .min { abs($0.date.timeIntervalSince(hit.date)) < abs($1.date.timeIntervalSince(hit.date)) }?.id
+        }
+        // ponytail: older than the 200 a thread loads, it lands alone in date order; history has no `before` to page with.
+        if found() == nil { (thread as? PipThread)?.upsert(w) }
+        guard let id = found() else { return }
+        try? await Task.sleep(for: .seconds(0.45))   // the push finishing, and the rows that just loaded
+        jump(to: id)
     }
 
     var body: some View {
+        let messages = thread.messages
+        threadList
+        // An empty thread has no width of its own; without this the line wrapped a letter at a time.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            if thread.isOtto && messages.isEmpty && !store.ottoTyping {
+                EmptyChat(asleep: store.asleep, connected: store.connected, lookingAtCursor: focused)
+            }
+        }
+        .background(Color(.systemBackground))
+        .safeAreaBar(edge: .top, spacing: 0) {
+            ottoTop
+        }
+        .scrollEdgeEffectStyle(.soft, for: .top)
+        .task { await calls.run(store.backend) }
+        .task(id: seenDate) {
+            guard let date = seenDate, let live = store.backend as? LiveBackend else { return }
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+            await live.seen(date)
+        }
+        .modifier(ThreadSeen(pips: store.pips, thread: thread) { await jumpToMatch() })
+        .task { if thread.isOtto { await gate.run(store.backend) } }
+        .sheet(isPresented: $showGate) { GateSheet(watch: gate) }
+        // `-openGate`: open the boarding pass as soon as there is one, for screenshots.
+        .onChange(of: gate.card?.key, initial: true) {
+            if ProcessInfo.processInfo.arguments.contains("-openGate"), gate.card != nil { showGate = true }
+        }
+        // `-openCall`: open the live call as soon as there is one, for screenshots.
+        .onChange(of: calls.live?.id) {
+            if ProcessInfo.processInfo.arguments.contains("-openCall"), let live = calls.live { openCall = live }
+        }
+        .sheet(item: $openCall) { CallSheet(call: $0) }
+        .sheet(item: Binding(get: { thread.isOtto ? store.otpDrawer : nil }, set: { store.otpDrawer = $0 })) {
+            if let otp = $0.otp { OTPDrawer(otp: otp) }
+        }
+        // Closed only by its own buttons (Later hides it), so the setter has nothing to do.
+        .sheet(item: Binding(get: { thread.isOtto ? store.shownApproval : nil }, set: { _ in })) {
+            ApprovalSheet(request: $0)
+        }
+        // The header's fade, mirrored behind the composer: bubbles dissolve into the
+        // edge instead of meeting a solid strip.
+        .overlay(alignment: .bottom) {
+            LinearGradient(colors: [Color(.systemBackground).opacity(0), Color(.systemBackground)],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: ui.bottomInset + 24)
+                .ignoresSafeArea(edges: .bottom)
+                .allowsHitTesting(false)
+        }
+        // Back to the newest message, once you've scrolled well away from it.
+        .overlay(alignment: .bottomTrailing) {
+            if scrolledUp {
+                Button { withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) } } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 40, height: 40)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .tint(.primary)
+                .accessibilityLabel("Scroll to bottom")
+                .padding(.trailing, 16)
+                .padding(.bottom, ui.bottomInset + 12)
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy, value: scrolledUp)
+        // Messages opens the contact card by zooming it out of the header, glass over the blurred
+        // thread, edge to edge (measured off a screen recording), and closes it back into the header.
+        .fullScreenCover(isPresented: $showDetails) {
+            DetailsView()
+                .navigationTransition(.zoom(sourceID: "card", in: card))
+                .presentationBackground {
+                    // Light mode frosts over the thread, so its dark bubbles don't show through as smudges.
+                    Rectangle().fill(.ultraThinMaterial)
+                        .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? .clear : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
+                        .ignoresSafeArea()
+                }
+        }
+        .fullScreenCover(isPresented: $webCall) { CallView(context: callContext) }
+        .fullScreenCover(isPresented: Binding(get: { WalkieLauncher.shared.open }, set: { WalkieLauncher.shared.open = $0 })) { WalkieView() }
+        .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
+            MediaViewerView(store: store).presentationBackground(.clear)
+        }
+        .alert("Calling Otto", isPresented: $showCall) {
+            Button("OK", role: .cancel) {}
+        } message: { Text("Add Otto's phone number in details (tap Otto's name).") }
+    }
+
+    @ViewBuilder private var threadList: some View {
         let messages = thread.messages
         let byWire = Dictionary(messages.map { ($0.wireID, $0) }, uniquingKeysWith: { a, _ in a })
         ScrollView {
@@ -135,14 +260,19 @@ struct ChatView: View {
                         let prev = i > 0 ? messages[i - 1] : nil
                         let next = i + 1 < messages.count ? messages[i + 1] : nil
                         let newBlock = prev.map { m.date.timeIntervalSince($0.date) > 3600 } ?? true
-                        if newBlock { Stamp(date: m.date) }
-                        if m.from == .terminal {
+                        if newBlock { Stamp(date: m.date, yesterday: pipsOn) }
+                        if m.isPipLine {
+                            PipLine(message: m, afterLine: !newBlock && prev?.isPipLine == true, highlighted: flashed == m.id).id(m.id).transition(.opacity)
+                        } else if m.from == .terminal {
                             TerminalLine(message: m, afterStamp: newBlock).id(m.id).transition(.opacity)
                         } else {
                             let quote = m.replyTo.flatMap { byWire[$0] }
+                            let runEnds = next?.author != m.author || next.map { $0.date.timeIntervalSince(m.date) > 3600 } ?? true
+                            let runStarts = newBlock || prev?.author != m.author
+                            GroupChrome(on: isGroup && m.from != .me, author: m.author, member: row?.memberStates.first { $0.id == m.author }, showName: runStarts, showFace: runEnds) {
                             Row(thread: thread, message: m,
                                 quote: quote,
-                                tail: next?.from != m.from || next.map { $0.date.timeIntervalSince(m.date) > 3600 } ?? true,
+                                tail: runEnds,
                                 receipt: m.id == lastMine && m.pending != true && m.failed != true ? receipt(for: i, in: messages) : nil,
                                 fresh: m.from == .me && m.pending == true && Date.now.timeIntervalSince(m.date) < 1,
                                 lift: ui.height + 12,   // the bubble starts on the field (tuned against recordings)
@@ -155,8 +285,11 @@ struct ChatView: View {
                                     // for a reader who was at the bottom; anyone reading higher stays put.
                                     if !on, pinnedAtSwipe, !atBottom { withAnimation(still ? nil : .snappy) { scroll.scrollTo(edge: .bottom) } }
                                 },
-                                onTap: { thread.tap($0, on: m.id) })
-                                .padding(.top, newBlock || prev?.from == .terminal ? 0 : (prev?.from == m.from ? 4 : 10))
+                                onTap: { thread.tap($0, on: m.id) },
+                                plainReceipt: pipsOn,
+                                inset: isGroup && m.from != .me ? 41 : 89)
+                            }
+                                .padding(.top, gap(group: isGroup && m.from != .me, runStarts: runStarts, stamped: newBlock || prev?.from == .terminal, sameAuthor: prev?.author == m.author))
                                 .id(m.id)
                                 .onScrollVisibilityChange(threshold: 0.01) { visible in
                                     guard m.id == newestOtto?.id else { return }
@@ -180,6 +313,13 @@ struct ChatView: View {
                             .transition(.asymmetric(insertion: .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity),
                                                     removal: .opacity))
                     }
+                    if !thread.isOtto {
+                        ForEach(row?.activity ?? []) { a in
+                            ActivityLine(member: a, withFace: isGroup) { store.pips.press($0, in: thread.conversationID) }
+                                .id("activity-\(a.id)")
+                                .transition(.scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity))
+                        }
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 6)
@@ -190,6 +330,7 @@ struct ChatView: View {
         // it slid back (measured frame by frame with -shiftLab).
         .animation(thread.animated ? .spring(response: 0.42, dampingFraction: 0.82) : nil, value: messages.count)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typing)
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: row?.activity.map(\.id))
         // The thinking bubble's to-do list and a tapback's room above a bubble change heights too.
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typingTodos)
         // A new step's line can wrap to two, or back to one: the bubble's height follows smoothly.
@@ -270,88 +411,6 @@ struct ChatView: View {
             print("SCROLL bottom shown=\(shown) scrolledUp=\(scrolledUp)")
         }
         #endif
-        // An empty thread has no width of its own; without this the line wrapped a letter at a time.
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay {
-            if messages.isEmpty && !store.ottoTyping {
-                EmptyChat(asleep: store.asleep, connected: store.connected, lookingAtCursor: focused)
-            }
-        }
-        .background(Color(.systemBackground))
-        .safeAreaBar(edge: .top, spacing: 0) {
-            ottoTop
-        }
-        .scrollEdgeEffectStyle(.soft, for: .top)
-        .task(id: seenDate) {
-            guard let date = seenDate, let live = store.backend as? LiveBackend else { return }
-            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
-            await live.seen(date)
-        }
-        .task { await calls.run(store.backend) }
-        .task { if thread.isOtto { await gate.run(store.backend) } }
-        .sheet(isPresented: $showGate) { GateSheet(watch: gate) }
-        // `-openGate`: open the boarding pass as soon as there is one, for screenshots.
-        .onChange(of: gate.card?.key, initial: true) {
-            if ProcessInfo.processInfo.arguments.contains("-openGate"), gate.card != nil { showGate = true }
-        }
-        // `-openCall`: open the live call as soon as there is one, for screenshots.
-        .onChange(of: calls.live?.id) {
-            if ProcessInfo.processInfo.arguments.contains("-openCall"), let live = calls.live { openCall = live }
-        }
-        .sheet(item: $openCall) { CallSheet(call: $0) }
-        .sheet(item: Binding(get: { thread.isOtto ? store.otpDrawer : nil }, set: { store.otpDrawer = $0 })) {
-            if let otp = $0.otp { OTPDrawer(otp: otp) }
-        }
-        // Closed only by its own buttons (Later hides it), so the setter has nothing to do.
-        .sheet(item: Binding(get: { thread.isOtto ? store.shownApproval : nil }, set: { _ in })) {
-            ApprovalSheet(request: $0)
-        }
-        // The header's fade, mirrored behind the composer: bubbles dissolve into the
-        // edge instead of meeting a solid strip.
-        .overlay(alignment: .bottom) {
-            LinearGradient(colors: [Color(.systemBackground).opacity(0), Color(.systemBackground)],
-                           startPoint: .top, endPoint: .bottom)
-                .frame(height: ui.bottomInset + 24)
-                .ignoresSafeArea(edges: .bottom)
-                .allowsHitTesting(false)
-        }
-        // Back to the newest message, once you've scrolled well away from it.
-        .overlay(alignment: .bottomTrailing) {
-            if scrolledUp {
-                Button { withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) } } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 40, height: 40)
-                        .glassEffect(.regular.interactive(), in: .circle)
-                }
-                .tint(.primary)
-                .accessibilityLabel("Scroll to bottom")
-                .padding(.trailing, 16)
-                .padding(.bottom, ui.bottomInset + 12)
-                .transition(.scale(scale: 0.6).combined(with: .opacity))
-            }
-        }
-        .animation(.snappy, value: scrolledUp)
-        // Messages opens the contact card by zooming it out of the header, glass over the blurred
-        // thread, edge to edge (measured off a screen recording), and closes it back into the header.
-        .fullScreenCover(isPresented: $showDetails) {
-            DetailsView()
-                .navigationTransition(.zoom(sourceID: "card", in: card))
-                .presentationBackground {
-                    // Light mode frosts over the thread, so its dark bubbles don't show through as smudges.
-                    Rectangle().fill(.ultraThinMaterial)
-                        .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? .clear : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
-                        .ignoresSafeArea()
-                }
-        }
-        .fullScreenCover(isPresented: $webCall) { CallView() }
-        .fullScreenCover(isPresented: Binding(get: { WalkieLauncher.shared.open }, set: { WalkieLauncher.shared.open = $0 })) { WalkieView() }
-        .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
-            MediaViewerView(store: store).presentationBackground(.clear)
-        }
-        .alert("Calling Otto", isPresented: $showCall) {
-            Button("OK", role: .cancel) {}
-        } message: { Text("Add Otto's phone number in details (tap Otto's name).") }
     }
 
     static func sideStoreInstall(_ ipa: String) -> URL? {
@@ -365,11 +424,11 @@ struct ChatView: View {
     private var ottoTop: some View {
         VStack(spacing: 8) {
             header
-            if let live = calls.live {
+            if thread.isOtto, let live = calls.live {
                 CallBanner(call: live) { openCall = live }
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            if let card = gate.visible() {
+            if thread.isOtto, let card = gate.visible() {
                 GateBanner(card: card) { showGate = true }
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -380,9 +439,59 @@ struct ChatView: View {
         // the whole bar, banner included. A systemBackground fill here is the solid black band.
     }
 
+    /// With only Otto, today's picture. With pips, everyone is a solid, Otto included.
+    @ViewBuilder private var title: some View {
+        if let row, row.isGroup {
+            Button { store.pips.sheet = .group(row.id) } label: {
+                HeaderTitle(name: row.name) { GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 68) }
+            }
+            .padding(.top, -7)
+        } else if let row, row.kind == "pip", let pip = row.pips.first {
+            Button { store.pips.sheet = .pip(pip.id) } label: {
+                HeaderTitle(name: row.name) { FaceView(look: pip.look, size: 68, live: true).frame(width: 68, height: 68) }
+            }
+            .padding(.top, -7)
+        } else if pipsOn {
+            Button { showDetails = true } label: {
+                HeaderTitle(name: "Otto") { FaceView(look: ottoLook, size: 68, live: true).frame(width: 68, height: 68) }
+            }
+            .padding(.top, -7)
+            .matchedTransitionSource(id: "card", in: card)
+        } else {
+            Button { showDetails = true } label: {
+                VStack(spacing: -6) {
+                    OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, lookingAtCursor: focused)
+                    HStack(spacing: 4) {
+                        Text("Otto").font(.system(size: 15, weight: .semibold))
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                }
+            }
+            .matchedTransitionSource(id: "card", in: card)
+        }
+    }
+
+    private var ottoLook: FaceLook {
+        let base = row?.otto?.look ?? .otto
+        if store.asleep { return base.with(.asleep) }
+        return store.ottoTyping ? base.with(.working) : base
+    }
+
     private var header: some View {
         ZStack {
             HStack {
+                if let onBack {
+                    Button(action: onBack) {
+                        Image(systemName: "chevron.left").font(.system(size: 18, weight: .medium))
+                            .frame(width: 44, height: 44)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                    }
+                    .tint(.primary)
+                    .accessibilityLabel("Conversations")
+                }
                 if let u = store.update, let link = Self.sideStoreInstall(u.ipa) {
                     // SideStore downloads, re-signs and installs; it asks before replacing the app.
                     Button { openURL(link) } label: {
@@ -429,20 +538,7 @@ struct ChatView: View {
                     walkieHint = false
                 }
             }
-            Button { showDetails = true } label: {
-                VStack(spacing: -6) {
-                    OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, lookingAtCursor: focused)
-                    HStack(spacing: 4) {
-                        Text("Otto").font(.system(size: 15, weight: .semibold))
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                }
-            }
-            .tint(.primary)
-            .matchedTransitionSource(id: "card", in: card)
+            title.tint(.primary)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 6)
@@ -472,8 +568,31 @@ struct Composer: View {
 
     private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty }
 
+    /// Who a group's composer can @mention.
+    private var members: [PipMember] {
+        guard let row = store.pips.row(thread.conversationID), row.isGroup else { return [] }
+        return row.memberStates
+    }
+    /// The `@Fa` being typed at the end of the draft.
+    private var mentioning: Substring? {
+        guard let word = draft.split(separator: " ", omittingEmptySubsequences: false).last, word.first == "@" else { return nil }
+        return word.dropFirst()
+    }
+    private var mentionMatches: [PipMember] {
+        guard let q = mentioning else { return [] }
+        return members.filter { q.isEmpty || $0.name.localizedCaseInsensitiveContains(q) }
+    }
+    private func mention(_ m: PipMember) {
+        guard let q = mentioning else { return }
+        draft = draft.dropLast(q.count + 1) + "@\(m.name) "
+    }
+
     var body: some View {
         GlassEffectContainer(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+        if !mentionMatches.isEmpty {
+            MentionBar(members: mentionMatches, pick: mention).transition(.opacity)
+        }
         HStack(alignment: .bottom, spacing: 12) {
             if thread.isOtto {
             Menu {
@@ -515,7 +634,9 @@ struct Composer: View {
                                 .frame(width: 36, height: 36)
                         }
                     } else {
-                        ComposerTextView(text: $draft, focused: $focused, placeholder: "Message") { images in
+                        ComposerTextView(text: $draft, focused: $focused, placeholder: "Message", mentions: members.map(\.name)) { images in
+                            // Group and pip threads have no photos on the server.
+                            guard thread.isOtto else { return }
                             withAnimation(.snappy) { attachments += images.map { Attachment(image: $0) } }
                         }
                         .transition(.opacity)
@@ -548,6 +669,8 @@ struct Composer: View {
             .background(Color.outgoingBubble.opacity(flash ? 0.9 : 0), in: .rect(cornerRadius: 20, style: .continuous))
             .glassEffect(.regular, in: .rect(cornerRadius: 20, style: .continuous))
         }
+        }
+        .animation(.snappy(duration: 0.22), value: mentionMatches.map(\.id))
         }
         // Messages pulls the bar in toward the edges while the keyboard is up.
         .padding(.horizontal, focused ? 15 : 27)
@@ -686,6 +809,8 @@ struct ComposerTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var focused: Bool
     let placeholder: String
+    /// Names to set in bold after an @; empty everywhere but a group.
+    var mentions: [String] = []
     let onImages: ([UIImage]) -> Void
     private static let maxLines: CGFloat = 6
 
@@ -705,7 +830,7 @@ struct ComposerTextView: UIViewRepresentable {
 
     func updateUIView(_ v: PastingTextView, context: Context) {
         v.onImages = onImages
-        if v.text != text { v.text = text }
+        if v.text != text { v.text = text; Self.boldMentions(v, mentions) }
         v.placeholder.isHidden = !text.isEmpty
         if focused && !v.isFirstResponder { DispatchQueue.main.async { v.becomeFirstResponder() } }
         if !focused && v.isFirstResponder { DispatchQueue.main.async { v.resignFirstResponder() } }
@@ -722,11 +847,27 @@ struct ComposerTextView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
+    /// Attributes only, so the caret stays put; nothing mid-composition, where they'd break the input method.
+    static func boldMentions(_ v: UITextView, _ names: [String]) {
+        guard !names.isEmpty, v.markedTextRange == nil,
+              let re = try? NSRegularExpression(pattern: "(?<![\\w@])@(" + names.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|") + ")\\b", options: .caseInsensitive) else { return }
+        let body = UIFont.preferredFont(forTextStyle: .body)
+        let whole = NSRange(location: 0, length: v.textStorage.length)
+        v.textStorage.beginEditing()
+        v.textStorage.addAttribute(.font, value: body, range: whole)
+        for m in re.matches(in: v.text, range: whole) {
+            v.textStorage.addAttribute(.font, value: UIFont.systemFont(ofSize: body.pointSize, weight: .semibold), range: m.range)
+        }
+        v.textStorage.endEditing()
+        v.typingAttributes[.font] = body
+    }
+
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: ComposerTextView
         init(_ p: ComposerTextView) { parent = p }
         func textViewDidChange(_ v: UITextView) {
             parent.text = v.text
+            ComposerTextView.boldMentions(v, parent.mentions)
             (v as? PastingTextView)?.placeholder.isHidden = !v.text.isEmpty
             if v.isScrollEnabled { v.scrollRangeToVisible(v.selectedRange) }   // past six lines, follow the caret
         }
@@ -775,8 +916,10 @@ final class PastingTextView: UITextView {
 
 struct Stamp: View {
     let date: Date
+    /// The pips mockup says "Yesterday"; the one-thread app keeps its weekday.
+    var yesterday = false
     var body: some View {
-        let day = Calendar.current.isDateInToday(date) ? "Today" : date.formatted(.dateTime.weekday(.wide))
+        let day = Calendar.current.isDateInToday(date) ? "Today" : yesterday && Calendar.current.isDateInYesterday(date) ? "Yesterday" : date.formatted(.dateTime.weekday(.wide))
         (Text(day).fontWeight(.semibold) + Text(" " + date.formatted(date: .omitted, time: .shortened)))
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
@@ -822,9 +965,15 @@ private struct Row: View {
     var onQuote: () -> Void = {}
     var onSwiping: (Bool) -> Void = { _ in }
     let onTap: (ActionButton) -> Void
+    @Environment(OttoStore.self) private var store
+    /// The mockup's plain "Read", once there are pips; today's "Read 8:06" with only Otto.
+    var plainReceipt = false
+    /// The empty space beside the bubble. A group's bubble starts further in, past the face.
+    var inset: CGFloat = 89
     @GestureState private var dragging = false
     @State private var morph: Double = 1
     @State private var swipe: CGFloat = 0
+    @State private var rowWidth: CGFloat = 0
     /// Decided on a drag's first move: sideways is a reply swipe, anything else belongs to the scroll.
     @State private var sideways: Bool?
     @State private var reacted = 0
@@ -908,9 +1057,10 @@ private struct Row: View {
         return t == url.absoluteString || URL(string: t)?.absoluteString == url.absoluteString
     }
     /// A photo or file with no words is only itself: no empty bubble under it. A voice note is its bubble.
+    /// A group link is only itself even with words: the server's "I started…" says what the card says.
     private var textShown: Bool {
         let attached = message.isPhoto || !(message.files ?? []).isEmpty || !(message.card?.shown.isEmpty ?? true)
-        return (!attached || !message.text.isEmpty || message.isVoice || message.audio != nil) && !hidesText
+        return (!attached || !message.text.isEmpty || message.isVoice || message.audio != nil) && !hidesText && message.groupLink == nil
     }
     private var hidesText: Bool { preview != nil && Self.previewURL(message).map { Self.isOnlyLink(message, $0) } == true }
 
@@ -936,7 +1086,7 @@ private struct Row: View {
     @ViewBuilder static func palette(_ m: Message, react: @escaping (String) -> Void) -> some View {
         // Palette: one row of emoji, like Messages. A plain ControlGroup caps at three
         // across and stacks the rest down the menu.
-        if m.from == .otto { ControlGroup {
+        if m.from == .otto && !m.isConversation { ControlGroup {
             ForEach(tapbacks, id: \.self) { e in
                 Toggle(isOn: Binding(get: { m.reaction == e }, set: { _ in react(e) })) { Text(e) }
                     .accessibilityLabel(tapbackNames[e] ?? e)
@@ -968,11 +1118,13 @@ private struct Row: View {
         guard swipe != 0 else { return }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { swipe = 0 }
     }
+    /// Otto's transport has tapbacks and quoted replies; the conversation API has neither.
+    private var canAnswer: Bool { thread.isOtto && !message.isConversation }
     private func react(_ e: String) {
-        guard !mine else { return }
+        guard !mine, canAnswer else { return }
         thread.react(e, on: message.id); reacted += 1
     }
-    private func reply() { withAnimation(.snappy) { thread.replyingTo = message.id } }
+    private func reply() { guard canAnswer else { return }; withAnimation(.snappy) { thread.replyingTo = message.id } }
     /// A button under the bubble or on its card: copy, open, or go back to Otto as a tap.
     private func press(_ b: ActionButton) {
         if let c = b.copy { UIPasteboard.general.string = c; UINotificationFeedbackGenerator().notificationOccurred(.success) }
@@ -1006,7 +1158,7 @@ private struct Row: View {
 
     @ViewBuilder private var bubbleMenu: some View {
         Self.palette(message, react: react)
-        Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
+        if canAnswer { Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply) }
         Button("Copy", systemImage: "doc.on.doc", action: copyText)
         Button("Select Text", systemImage: "selection.pin.in.out") { selecting = true }
         if !mine, message.why != nil {
@@ -1123,6 +1275,7 @@ private struct Row: View {
                     Button("OK", role: .cancel) {}
                 } message: { Text($0) }
             }
+            if let g = message.groupLink { GroupLinkBubble(group: g) { store.pips.open(g.id) } }
             if !mine, let card = message.card, !card.shown.isEmpty {
                 CardView(card: card, press: press)
             }
@@ -1183,6 +1336,9 @@ private struct Row: View {
             } else if message.pending == true {
                 Text("Sending…").font(.system(size: 11)).foregroundStyle(.secondary)
                     .padding(.trailing, 4)
+            } else if let receipt, plainReceipt {
+                Text(receipt ? "Read" : "Delivered").font(.system(size: 11)).foregroundStyle(.secondary)
+                    .padding(.trailing, 2).padding(.top, -2)
             } else if let receipt {
                 Group {
                     if receipt { Text("Read ").fontWeight(.semibold) + Text(message.date.formatted(date: .omitted, time: .shortened)) }
@@ -1202,7 +1358,7 @@ private struct Row: View {
             if preview == nil { preview = await LinkMeta.load(u) }
         }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
-        .padding(mine ? .leading : .trailing, 89)
+        .padding(mine ? .leading : .trailing, inset)
         .scaleEffect(highlighted && !still ? 1.03 : 1, anchor: mine ? .trailing : .leading)
         .brightness(highlighted ? 0.12 : 0)
         // Swipe right to reply, as in Messages: the row follows the finger, an arrow
@@ -1221,14 +1377,17 @@ private struct Row: View {
         }
         // The whole row takes the swipe, not just the bubble: yours start 105pt in from the edge.
         .contentShape(.rect)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
+        .background { if !mine { LeftRowMarker() } }
         .simultaneousGesture(
-            DragGesture(minimumDistance: 20)
+            canAnswer ? DragGesture(minimumDistance: 20)
                 .updating($dragging) { _, d, _ in d = true }
                 .onChanged { g in
                     let t = g.translation
                     // Locked on the first move, so a drag that drifts diagonally keeps doing one thing.
                     if sideways == nil {
-                        sideways = t.width > 0 && t.width > abs(t.height) * 1.5
+                        // The left fifth of a left-aligned row is the back swipe's (see LeftRowMarker).
+                        sideways = t.width > 0 && t.width > abs(t.height) * 1.5 && (mine || g.startLocation.x >= rowWidth / 5)
                         if sideways == true { onSwiping(true) }
                     }
                     guard sideways == true else { return }
@@ -1243,7 +1402,7 @@ private struct Row: View {
                         reply()
                     }
                     settle()
-                }
+                } : nil
         )
         // A drag the system took away (the menu opening, a call) never ends: put the row back anyway.
         .onChange(of: dragging) { _, on in if !on { settle() } }
@@ -1252,6 +1411,59 @@ private struct Row: View {
         .sensoryFeedback(.impact(weight: .light), trigger: flicked)
         .sensoryFeedback(.impact(weight: .light), trigger: swipe >= Self.replyAt) { _, new in new }
         .sensoryFeedback(.impact(weight: .light), trigger: reacted)
+    }
+}
+
+/// Clears a conversation's unread dot on every device, and fetches a pip thread's history.
+private struct ThreadSeen: ViewModifier {
+    let pips: PipStore
+    let thread: any ChatThread
+    let loaded: @MainActor () async -> Void
+    func body(content: Content) -> some View {
+        content
+            .task {
+                guard pips.active else { return }
+                pips.visible = thread.conversationID
+                pips.markRead(thread.conversationID)
+                await (thread as? PipThread)?.load()
+                await loaded()
+            }
+            .onDisappear { if pips.visible == thread.conversationID { pips.visible = nil } }
+    }
+}
+
+/// A group's bubble: the sender's name above it and a small face beside its run's last one.
+private struct GroupChrome<Content: View>: View {
+    let on: Bool
+    let author: String
+    let member: PipMember?
+    let showName: Bool
+    let showFace: Bool
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        if on {
+            let otto = author == "otto"
+            HStack(alignment: .bottom, spacing: 8) {
+                Group {
+                    if showFace, let member {
+                        FaceView(look: member.look.with(.rest), size: otto ? 44 : 34).frame(width: otto ? 44 : 34, height: otto ? 44 : 34)
+                    } else {
+                        Color.clear.frame(height: 1)
+                    }
+                }
+                .frame(width: 40)
+                .padding(.bottom, -2)
+                VStack(alignment: .leading, spacing: 3) {
+                    if showName, let member {
+                        Text(member.name).font(.system(size: 11)).foregroundStyle(.secondary).padding(.leading, 14)
+                    }
+                    content()
+                }
+            }
+        } else {
+            content()
+        }
     }
 }
 
@@ -1632,7 +1844,7 @@ private struct SpokenActions: ViewModifier {
                 .accessibilityValue(message.reaction.map { "\(Row.tapbackNames[$0] ?? $0) from \(reactor)" } ?? "")
                 .accessibilityAction(named: "Reply", reply)
                 .accessibilityActions {
-                    if message.from == .otto {
+                    if message.from == .otto && !message.isConversation {
                         ForEach(Row.tapbacks, id: \.self) { e in
                             let name = Row.tapbackNames[e] ?? e
                             Button(message.reaction == e ? "Remove \(name)" : name) { react(e) }
@@ -2019,8 +2231,11 @@ private struct ScreenGlow: View {
 /// drag-to-dismiss — SwiftUI's keyboard safe area jumps there instead.
 struct ChatScreen: UIViewControllerRepresentable {
     let store: OttoStore
+    /// Otto's own when nil.
+    var thread: (any ChatThread)? = nil
+    var onBack: (() -> Void)? = nil
     func makeUIViewController(context: Context) -> KeyboardDock {
-        KeyboardDock(store: store, thread: store)
+        KeyboardDock(store: store, thread: thread ?? store, onBack: onBack)
     }
     func updateUIViewController(_ vc: KeyboardDock, context: Context) {}
 }
@@ -2033,10 +2248,10 @@ final class KeyboardDock: UIViewController {
     private var composerHeight: NSLayoutConstraint!
     private var glowBottom: NSLayoutConstraint!
 
-    init(store: OttoStore, thread chat: any ChatThread) {
+    init(store: OttoStore, thread chat: any ChatThread, onBack: (() -> Void)? = nil) {
         let ui = ComposerUI()
         self.ui = ui
-        thread = UIHostingController(rootView: AnyView(ChatView(ui: ui, thread: chat).environment(store)))
+        thread = UIHostingController(rootView: AnyView(ChatView(ui: ui, thread: chat, onBack: onBack).environment(store)))
         composer = UIHostingController(rootView: AnyView(Composer(ui: ui, thread: chat).environment(store)))
         glow = UIHostingController(rootView: AnyView(ScreenGlow(ui: ui)))
         super.init(nibName: nil, bundle: nil)

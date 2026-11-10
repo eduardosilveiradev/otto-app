@@ -33,6 +33,14 @@ struct OttoApp: App {
     }
 }
 
+private enum PipRootSwitch {
+    #if DEBUG
+    static let faces = PipFixture.on && PipFixture.screen == "faces"
+    #else
+    static let faces = false
+    #endif
+}
+
 private struct MainRoot: View {
     @State private var store = OttoStore.shared
     @Environment(\.scenePhase) private var phase
@@ -53,7 +61,15 @@ private struct MainRoot: View {
             } else {
                 // Up under the status bar: the header's scroll-edge blur then fades the thread out at the
                 // screen's edge. Stopped at the safe area, the blurred bubbles were cut off there in a band.
-                ChatScreen(store: store).ignoresSafeArea(.keyboard).ignoresSafeArea(.container, edges: .top)
+                if PipRootSwitch.faces {
+                    #if DEBUG
+                    FaceGrid()
+                    #endif
+                } else if store.pips.active {
+                    PipRoot(store: store)
+                } else {
+                    ChatScreen(store: store).ignoresSafeArea(.keyboard).ignoresSafeArea(.container, edges: .top)
+                }
             }
         }
             // Over the content, so it is already laid out underneath when the splash fades.
@@ -74,6 +90,7 @@ private struct MainRoot: View {
             .environment(store)
             .task { Notifier.shared.requestPermission(); await store.start() }
             .onChange(of: phase, initial: true) { _, p in
+                if store.foreground && p != .active { store.pips.leftApp() }
                 store.foreground = p == .active
                 if p == .active { store.sendShared(); Notifier.clearAll() }
                 if p == .background { store.flush(); Notifier.scheduleRefresh() }
@@ -107,6 +124,8 @@ final class OttoStore {
     static let shared = OttoStore(backend: LiveBackend.fromDefaults() ?? MockBackend())
 
     let backend: OttoBackend
+    /// Pips and groups. Empty until the server says there's a second conversation.
+    let pips: PipStore
     /// While false, Otto's messages also go out as local notifications.
     var foreground = true
     var messages: [Message] = [] { didSet { save() } }
@@ -164,6 +183,7 @@ final class OttoStore {
 
     init(backend: OttoBackend) {
         self.backend = backend
+        pips = PipStore(name: backend.name)
         let dir = URL.applicationSupportDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         file = dir.appending(path: "chat-\(backend.name.lowercased().replacing(" ", with: "-")).json")
@@ -172,6 +192,7 @@ final class OttoStore {
             // Unreadable (a bad row, a schema it doesn't know): kept aside, not overwritten by the next save.
             else { try? FileManager.default.moveItem(at: file, to: file.appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970))")) }
         }
+        pips.store = self   // a background wake or a notification reply can come before start()
     }
 
     private func checkForUpdate() async {
@@ -267,6 +288,7 @@ final class OttoStore {
                 if animated { Task { await catchUp(notify: !foreground) } }
                 Task { await resendPending() }
                 Task { await reportHealth("connect") }
+                Task { await pips.reconnected() }
             }
             expireVoiceWaits()
             markUndelivered()
@@ -283,11 +305,13 @@ final class OttoStore {
 
     func start() async {
         Task { await tick() }
+        Task { await pips.run() }
         reconcileDesktop()
         if let sync = backend.desktopSync {
             Task { for await _ in sync.updates { reconcileDesktop(); saveNow() } }
         }
         #if DEBUG
+        PipFixture.seed(self)
         // `-seedThread`: a thread with long bubbles (and a link), for checking layout without a server.
         if ProcessInfo.processInfo.arguments.contains("-seedThread") {
             let long = String(repeating: "this is a long message that should wrap onto several lines. ", count: 6)
@@ -687,6 +711,7 @@ final class OttoStore {
     func backgroundSync() async {
         UserDefaults.standard.set(Date(), forKey: "lastRefresh")
         await catchUp(notify: true, background: true)
+        await pips.backgroundCatchUp()
         await reportHealth("refresh")
     }
 
@@ -967,6 +992,11 @@ final class OttoStore {
     }
 
     func tap(_ button: ActionButton, on id: Message.ID) {
+        if button.data?.hasPrefix(PipStore.buttonPrefix) == true {   // a pip's: goes back to the pip
+            if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].buttons = [] }
+            pips.press(button, in: "app")
+            return
+        }
         // Buttons are one-shot, same as Telegram: strip them once tapped.
         guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
         let source = messages[i].wireID

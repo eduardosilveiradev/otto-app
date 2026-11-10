@@ -14,6 +14,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
     static let refreshTask = "dev.otto.app.refresh"
     private static let category = "OTTO_MESSAGE"
+    private static let pipCategory = "OTTO_PIP_MESSAGE"
     private static let replyAction = "OTTO_REPLY"
 
     /// Before launch finishes: notification delegate + reply action, background task handler.
@@ -23,7 +24,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // Unlock first: a "yes" typed on a locked phone can approve a draft or an install.
         let reply = UNTextInputNotificationAction(identifier: Self.replyAction, title: "Reply", options: [.authenticationRequired],
                                                   textInputButtonTitle: "Send", textInputPlaceholder: "Message Otto")
-        center.setNotificationCategories([UNNotificationCategory(identifier: Self.category, actions: [reply], intentIdentifiers: [], options: [])])
+        let pipReply = UNTextInputNotificationAction(identifier: Self.replyAction, title: "Reply", options: [.authenticationRequired],
+                                                     textInputButtonTitle: "Send", textInputPlaceholder: "Message")
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: Self.category, actions: [reply], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: Self.pipCategory, actions: [pipReply], intentIdentifiers: [], options: []),
+        ])
 
         BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.refreshTask, using: nil) { task in
             Self.scheduleRefresh()   // chain the next wake-up first
@@ -82,12 +88,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
              relevance: m.level == "timeSensitive" ? 1 : m.thread == "chat" ? 0.8 : 0.5)
     }
 
-    func post(title: String, body: String, thread: String, id: String, relevance: Double = 0.7) {
+    func post(title: String, body: String, thread: String, id: String, relevance: Double = 0.7, conversation: String? = nil) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
-        content.categoryIdentifier = Self.category
+        content.categoryIdentifier = conversation == nil ? Self.category : Self.pipCategory
+        if let conversation { content.userInfo["conversation"] = conversation }
         content.threadIdentifier = thread
         content.relevanceScore = relevance
         // The icon counts what came in while the app was away; opening it clears both (see clearAll).
@@ -124,11 +131,19 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Inline reply from the notification goes out like any typed message.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler done: @escaping () -> Void) {
+        let conversation = response.notification.request.content.userInfo["conversation"] as? String
+        if let conversation, response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            Task { @MainActor in OttoStore.shared.pips.open(conversation); done() }
+            return
+        }
         if response.actionIdentifier == Self.replyAction,
            let text = (response as? UNTextInputNotificationResponse)?.userText.trimmingCharacters(in: .whitespacesAndNewlines),
            !text.isEmpty {
             // On disk before iOS is told we're done: it may suspend the app the moment it hears that.
-            Task { @MainActor in OttoStore.shared.send(text); OttoStore.shared.saveNow(); done() }
+            Task { @MainActor in
+                if let conversation { await OttoStore.shared.pips.thread(conversation).sendNow(text) } else { OttoStore.shared.send(text); OttoStore.shared.saveNow() }
+                done()
+            }
             return
         }
         done()
