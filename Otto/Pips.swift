@@ -48,6 +48,7 @@ struct ConversationMessage: Codable, Sendable {
     var buttons: [PipButton]? = nil
     var read: Bool? = nil
     var readAt: String? = nil
+    var quiet: Bool? = nil
     /// Only on rows `app` history adapted from the old transport, which already delivers them.
     var dir: String? = nil
 }
@@ -571,7 +572,8 @@ enum PipSheet: Identifiable, Hashable {
     func leftApp() { notifiedThrough = .now }
 
     private func notify(_ m: ConversationMessage) {
-        guard m.kind == "text", m.sender != "user", m.dir == nil, !m.text.isEmpty,
+        guard (m.kind == "text" || m.kind == "system"), m.sender != "user", m.dir == nil, !m.text.isEmpty,
+              m.quiet != true, store?.backend.desktopSync?.snapshot.read.contains(m.id) != true,
               let date = LiveBackend.date(m.ts), date > notifiedThrough else { return }
         notifiedThrough = date
         let id = m.conversation_id, r = row(id)
