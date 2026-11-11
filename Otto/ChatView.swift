@@ -681,7 +681,7 @@ struct Composer: View {
         .padding(.bottom, focused ? 12 : 0)
         .offset(y: focused ? 0 : 10)
         .animation(.snappy, value: focused)
-        .padding(.top, 6)
+        .padding(.top, 6)   // this 6 and the offset's 10: the empty strip KeyboardDock.loadView passes to the thread
         .padding(.bottom, 4)
         .onChange(of: focused) { ui.focused = focused }
         .onChange(of: draft) { ui.relayout() }
@@ -1906,7 +1906,7 @@ extension View {
     /// and 8pt each side, half the 16pt between suggested replies. Down, it stops where the
     /// next row starts (4–10pt on); on the newest message it runs into the composer's empty
     /// top strip, which DockView hands back to the thread: the full 44 with the keyboard down,
-    /// about 36 with it up (the strip is then only the 6pt padding).
+    /// about 30 while typing (the composer keeps its strip then).
     func hitSlop() -> some View {
         background(alignment: .top) {
             Color.clear.contentShape(.rect).frame(minHeight: 44)
@@ -2301,7 +2301,9 @@ final class KeyboardDock: UIViewController {
         let dock = DockView()
         dock.thread = thread.view
         dock.composer = composer.view
-        dock.emptyTop = { [ui] in ui.focused ? 6 : 16 }   // Composer's .padding(.top, 6), and its .offset(y: 10) while unfocused
+        // Composer's .padding(.top, 6) plus its .offset(y: 10), while the keyboard is down. Not while
+        // typing: a tap just above the field would land on the thread and close the keyboard.
+        dock.emptyTop = { [ui] in ui.focused ? 0 : 16 }
         view = dock
     }
 
