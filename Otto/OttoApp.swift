@@ -618,11 +618,12 @@ final class OttoStore {
         print("PERF late=\(frames.late) of \(frames.count) frames, worst \(Int(frames.worst * 1000))ms, lost \(Int(frames.lost * 1000))ms")
     }
 
-    /// `-perfConnect`: the frames from the first connect to 10s after it, the window of the launch hitch.
+    /// `-perfConnect`: the frames from launch to 10s after the first connect, the window of the launch hitch.
+    /// Counted from launch, not reset at the connect: this check runs on the main thread, so it only
+    /// sees the connect after whatever stall the connect caused, and a reset there would drop it.
     private func perfConnect() async {
         let frames = FrameClock()
         while backend.connections == 0 { try? await Task.sleep(for: .milliseconds(20)) }
-        frames.reset()
         try? await Task.sleep(for: .seconds(10))
         print("CONNECT late=\(frames.late) of \(frames.count) frames, worst \(Int(frames.worst * 1000))ms, lost \(Int(frames.lost * 1000))ms, hangs \(frames.hangs)")
     }
