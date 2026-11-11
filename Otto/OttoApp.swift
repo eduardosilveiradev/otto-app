@@ -742,14 +742,14 @@ final class OttoStore {
 
     private func catchUp(notify: Bool, background: Bool = false) async {
         guard !(backend is MockBackend) else { return }
-        var all = await backend.history(background: background, limit: 50, since: nil)
+        var all = await backend.history(background: background, limit: 50, since: nil) ?? []
         // Continuous with the last sync only if the page reaches back to it. If even the oldest of the 50
         // is newer, more came in than the page holds (a long time offline): go further back. Anything
         // local in the page (a message just sent) says nothing about what's missing before it.
         let synced = syncCursor ?? UserDefaults.standard.object(forKey: "otto.syncedThrough") as? Date ?? .distantPast
         if let oldest = all.first(where: { $0.patch == nil }), oldest.date > synced, !messages.isEmpty {
             // Everything since the last sync, as far back as the server's history goes; the first sync ever takes 500.
-            all = await backend.history(background: background, limit: 500, since: synced == .distantPast ? nil : synced)
+            all = await backend.history(background: background, limit: 500, since: synced == .distantPast ? nil : synced) ?? []
         }
         // Stored with the save that writes these messages (see write), never ahead of them.
         if let newest = all.map(\.date).max() { syncCursor = max(newest, synced); save() }

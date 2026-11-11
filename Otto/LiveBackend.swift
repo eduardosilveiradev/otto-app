@@ -128,10 +128,10 @@ final class LiveBackend: OttoBackend {
 
     // MARK: OttoBackend
 
-    func history(background: Bool, limit: Int, since: Date?) async -> [Message] {
+    func history(background: Bool, limit: Int, since: Date?) async -> [Message]? {
         let q = since.map { [URLQueryItem(name: "since", value: $0.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: true)))] }
             ?? [URLQueryItem(name: "limit", value: String(limit))]
-        guard let rows: [WireHistory] = await get("app/history", background: background, query: q) else { return [] }
+        guard let rows: [WireHistory] = await get("app/history", background: background, query: q) else { return nil }
         // Ids make the merge exact: yours come back under the UUID this phone sent them with.
         // One of yours without an id (written before they had one) can't be matched, so it's left out.
         return rows.filter { $0.dir != "in" || $0.id != nil || $0.kind == "terminal" }.map { r in
