@@ -681,7 +681,7 @@ struct Composer: View {
         .padding(.bottom, focused ? 12 : 0)
         .offset(y: focused ? 0 : 10)
         .animation(.snappy, value: focused)
-        .padding(.top, 6)   // this 6 and the offset's 10: the empty strip KeyboardDock.loadView passes to the thread
+        .padding(.top, 6)   // this 6 and the offset's 10: the empty strip KeyboardDock.loadView passes to the thread (keyboard down)
         .padding(.bottom, 4)
         .onChange(of: focused) { ui.focused = focused }
         .onChange(of: draft) { ui.relayout() }
@@ -2371,9 +2371,9 @@ final class KeyboardDock: UIViewController {
     }
 }
 
-/// The dock's own view. The composer's host takes every touch in its frame, but its top strip
-/// is empty, so a tap there goes to the thread behind: the newest message's suggested replies
-/// and "Try again" reach into it for their 44pt (see hitSlop).
+/// The dock's own view. The composer's host takes every touch in its frame, but with the keyboard
+/// down its top strip is empty, so a tap there goes to the thread behind: the newest message's
+/// suggested replies and "Try again" reach into it for their 44pt (see hitSlop).
 private final class DockView: UIView {
     weak var thread: UIView?
     weak var composer: UIView?
