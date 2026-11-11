@@ -188,7 +188,8 @@ final class OttoStore {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         file = dir.appending(path: "chat-\(backend.name.lowercased().replacing(" ", with: "-")).json")
         if let data = try? Data(contentsOf: file) {
-            if let saved = try? JSONDecoder().decode([Message].self, from: data) { messages = saved }
+            // A code never outlives the launch it came in: a live one comes back from the server on connect.
+            if let saved = try? JSONDecoder().decode([Message].self, from: data) { messages = saved.map { var m = $0; m.otp = nil; return m } }
             // Unreadable (a bad row, a schema it doesn't know): kept aside, not overwritten by the next save.
             else { try? FileManager.default.moveItem(at: file, to: file.appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970))")) }
         }
@@ -587,7 +588,11 @@ final class OttoStore {
             if !serverTyping && m.from == .otto { ottoTyping = false }
             // A reply held for a closed app is in /app/history too: a fresh launch reads
             // history first, then the socket flushes the held copy.
-            guard !messages.contains(where: { $0.wireID == m.wireID }) else { continue }
+            if let i = messages.firstIndex(where: { $0.wireID == m.wireID }) {
+                // History already brought a code's masked line; the live copy carries the code.
+                if let otp = m.otp, messages[i].otp == nil { messages[i].otp = otp; otpDrawer = messages[i] }
+                continue
+            }
             messages.append(m)
             reconcileDesktop()
             if m.otp != nil { otpDrawer = m }
