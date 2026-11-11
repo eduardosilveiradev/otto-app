@@ -133,7 +133,7 @@ struct DetailsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(tl.date, format: .dateTime.hour().minute())
-                            .font(.system(size: 44, weight: .light).monospacedDigit())
+                            .monospacedDigit().font(size: 44, weight: .light, relativeTo: .largeTitle)
                         Spacer()
                         Text("Snoozed until \(until.formatted(date: .omitted, time: .shortened))")
                             .font(.caption.weight(.medium)).foregroundStyle(.secondary)

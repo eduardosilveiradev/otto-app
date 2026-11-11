@@ -45,11 +45,11 @@ struct RecordedChip: View {
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(.blue)
                     .frame(width: 30, height: 30).background(Color.blue.opacity(0.12), in: .circle)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(card.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary).lineLimit(1)
-                    Text(card.detail ?? card.heading).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(card.title).font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(1)
+                    Text(card.detail ?? card.heading).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right").font(size: 12, weight: .semibold, relativeTo: .caption).foregroundStyle(.tertiary)
             }
             .padding(10)
             .background(Color(.systemBackground).opacity(0.7), in: .rect(cornerRadius: 12, style: .continuous))

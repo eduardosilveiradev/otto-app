@@ -462,8 +462,8 @@ struct ChatView: View {
                 VStack(spacing: -6) {
                     OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, lookingAtCursor: focused)
                     HStack(spacing: 4) {
-                        Text("Otto").font(.system(size: 15, weight: .semibold))
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
+                        Text("Otto").font(size: 15, weight: .semibold, relativeTo: .subheadline)
+                        Image(systemName: "chevron.right").font(size: 11, weight: .semibold, relativeTo: .caption2)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 12).padding(.vertical, 6)
@@ -496,7 +496,7 @@ struct ChatView: View {
                     // SideStore downloads, re-signs and installs; it asks before replacing the app.
                     Button { openURL(link) } label: {
                         Label("Update", systemImage: "arrow.down.circle.fill")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(size: 13, weight: .semibold, relativeTo: .footnote)
                             .padding(.horizontal, 12).frame(height: 40)
                             .glassEffect(.regular.interactive(), in: .capsule)
                     }
@@ -521,7 +521,7 @@ struct ChatView: View {
                 }
                 .popover(isPresented: $walkieHint, arrowEdge: .top) {
                     Label("Hold for walkie-talkie", systemImage: "waveform")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(size: 14, weight: .medium, relativeTo: .subheadline)
                         .padding(.horizontal, 14).padding(.vertical, 10)
                         .presentationCompactAdaptation(.popover)
                 }
@@ -542,6 +542,8 @@ struct ChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 6)
+        // Bar text grows only so far, as in Messages' own bar: past this, a name would run into the buttons.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 
 }
@@ -679,7 +681,7 @@ struct Composer: View {
         .padding(.bottom, focused ? 12 : 0)
         .offset(y: focused ? 0 : 10)
         .animation(.snappy, value: focused)
-        .padding(.top, 6)
+        .padding(.top, 6)   // this 6 and the offset's 10: the empty strip KeyboardDock.loadView passes to the thread (keyboard down)
         .padding(.bottom, 4)
         .onChange(of: focused) { ui.focused = focused }
         .onChange(of: draft) { ui.relayout() }
@@ -744,13 +746,13 @@ struct Composer: View {
     private func replyBar(_ m: Message) -> some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(m.from == .me ? "Replying to yourself" : "Replying to \(thread.name)").font(.system(size: 12, weight: .semibold))
+                Text(m.from == .me ? "Replying to yourself" : "Replying to \(thread.name)").font(size: 12, weight: .semibold, relativeTo: .caption)
                 Text(Row.summary(m))
-                    .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                    .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
             Button { withAnimation(.snappy) { thread.replyingTo = nil } } label: {
-                Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(.secondary)
+                Image(systemName: "xmark.circle.fill").font(size: 18, relativeTo: .body).foregroundStyle(.secondary)
                     // A 44pt-wide target without growing the bar; not so tall it takes taps meant for the field below.
                     .padding(.horizontal, 13).padding(.vertical, 6).contentShape(.rect).padding(.horizontal, -13).padding(.vertical, -6)
             }
@@ -921,7 +923,7 @@ struct Stamp: View {
     var body: some View {
         let day = Calendar.current.isDateInToday(date) ? "Today" : yesterday && Calendar.current.isDateInYesterday(date) ? "Yesterday" : date.formatted(.dateTime.weekday(.wide))
         (Text(day).fontWeight(.semibold) + Text(" " + date.formatted(date: .omitted, time: .shortened)))
-            .font(.system(size: 11))
+            .font(size: 11, relativeTo: .caption2)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
             .padding(.top, 14).padding(.bottom, 8)
@@ -933,12 +935,15 @@ private struct TerminalLine: View {
     let message: Message
     /// Right under a Stamp, which already has the spacing above.
     let afterStamp: Bool
+    @Environment(\.dynamicTypeSize) private var type
     var body: some View {
         (Text(Image(systemName: "terminal")) + Text(" " + message.date.formatted(date: .omitted, time: .shortened)).fontWeight(.semibold)
             + Text(" \u{201C}\(message.text)\u{201D}"))
-            .font(.system(size: 11))
+            .font(size: 11, relativeTo: .caption2)
             .foregroundStyle(.secondary)
-            .lineLimit(1).truncationMode(.tail)
+            // One line, until the text is so large that one line would hold only the time.
+            .lineLimit(type.isAccessibilitySize ? 3 : 1).truncationMode(.tail)
+            .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 24)
             .padding(.top, afterStamp ? 0 : 14).padding(.bottom, 8)
@@ -1025,7 +1030,7 @@ private struct Row: View {
     @ViewBuilder private var content: some View {
         if let d = Self.draft(message) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(d.head).font(.system(size: 15, weight: .semibold))
+                Text(d.head).font(size: 15, weight: .semibold, relativeTo: .subheadline)
                 Text(Self.linked(d.body))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
@@ -1035,7 +1040,7 @@ private struct Row: View {
         } else if message.isVoice || message.audio != nil {
             VStack(alignment: .leading, spacing: 6) {
                 VoiceRow(message: message, mine: mine)
-                if !mine, !message.text.isEmpty { Text(Self.linked(message.text)).font(.system(size: 13)).foregroundStyle(.secondary) }
+                if !mine, !message.text.isEmpty { Text(Self.linked(message.text)).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary) }
             }
         } else {
             Text(text)
@@ -1194,7 +1199,7 @@ private struct Row: View {
                     // Narrower and fainter than a bubble, so it reads as a quote and not a second copy.
                     Label(Self.summary(quote), systemImage: "arrowshape.turn.up.left.fill")
                         .labelStyle(QuoteLabel())
-                        .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
+                        .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .frame(maxWidth: 240, alignment: .leading)
@@ -1308,7 +1313,7 @@ private struct Row: View {
             }
             // What you said, under your voice note; Otto's sits inside its bubble.
             if mine, message.isVoice, !message.text.isEmpty {
-                Text(message.text).font(.system(size: 13)).foregroundStyle(.secondary)
+                Text(message.text).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing).padding(.trailing, 4)
             }
 
@@ -1316,7 +1321,7 @@ private struct Row: View {
             if !message.buttons.isEmpty {
                 HStack(spacing: 16) {
                     ForEach(message.buttons) { b in
-                        Button(b.label) { press(b) }.font(.system(size: 15)).tint(.blue)
+                        Button { press(b) } label: { Text(b.label).hitSlop() }.font(size: 15, relativeTo: .subheadline).tint(.blue)
                     }
                 }
                 .padding(.leading, 12)
@@ -1325,26 +1330,27 @@ private struct Row: View {
             if message.failed == true && message.pending == true {
                 // Still retried on its own at the next connection; the tap just doesn't wait for one.
                 Button { thread.retry(message.id) } label: {
-                    Text("Not delivered · ").foregroundStyle(.red) + Text("Try again").foregroundStyle(.blue)
+                    (Text("Not delivered · ").foregroundStyle(.red) + Text("Try again").foregroundStyle(.blue)).hitSlop()
                 }
-                .font(.system(size: 11)).buttonStyle(.plain)
+                .font(size: 11, relativeTo: .caption2).buttonStyle(.plain)
+                .multilineTextAlignment(.trailing)
                 .padding(.trailing, 4)
             } else if message.failed == true {
                 // Nothing left to send (a voice note whose audio is gone).
-                Text("Not delivered").font(.system(size: 11)).foregroundStyle(.red)
+                Text("Not delivered").font(size: 11, relativeTo: .caption2).foregroundStyle(.red)
                     .padding(.trailing, 4)
             } else if message.pending == true {
-                Text("Sending…").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("Sending…").font(size: 11, relativeTo: .caption2).foregroundStyle(.secondary)
                     .padding(.trailing, 4)
             } else if let receipt, plainReceipt {
-                Text(receipt ? "Read" : "Delivered").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(receipt ? "Read" : "Delivered").font(size: 11, relativeTo: .caption2).foregroundStyle(.secondary)
                     .padding(.trailing, 2).padding(.top, -2)
             } else if let receipt {
                 Group {
                     if receipt { Text("Read ").fontWeight(.semibold) + Text(message.date.formatted(date: .omitted, time: .shortened)) }
                     else { Text("Delivered").fontWeight(.semibold) }
                 }
-                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .font(size: 12, relativeTo: .caption).foregroundStyle(.secondary)
                 .padding(.trailing, 4)
                 .contentTransition(.opacity)
                 .animation(.snappy, value: receipt)
@@ -1376,7 +1382,8 @@ private struct Row: View {
                 .accessibilityHidden(true)
         }
         // The whole row takes the swipe, not just the bubble: yours start 105pt in from the edge.
-        .contentShape(.rect)
+        // Behind the row rather than its contentShape, which would cut off the replies' hitSlop below it.
+        .background { Color.clear.contentShape(.rect) }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
         .background { if !mine { LeftRowMarker() } }
         .simultaneousGesture(
@@ -1456,7 +1463,7 @@ private struct GroupChrome<Content: View>: View {
                 .padding(.bottom, -2)
                 VStack(alignment: .leading, spacing: 3) {
                     if showName, let member {
-                        Text(member.name).font(.system(size: 11)).foregroundStyle(.secondary).padding(.leading, 14)
+                        Text(member.name).font(size: 11, relativeTo: .caption2).foregroundStyle(.secondary).padding(.leading, 14)
                     }
                     content()
                 }
@@ -1471,7 +1478,7 @@ private struct GroupChrome<Content: View>: View {
 private struct QuoteLabel: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
-            configuration.icon.font(.system(size: 9, weight: .semibold))
+            configuration.icon.font(size: 9, weight: .semibold, relativeTo: .footnote)
             configuration.title
         }
     }
@@ -1519,7 +1526,7 @@ private struct RemoteFileView: View {
                     .overlay {
                         VStack(spacing: 8) {
                             ProgressView()
-                            Text(file.kind == "video" ? "Loading video" : "Loading photo").font(.system(size: 13)).foregroundStyle(.secondary)
+                            Text(file.kind == "video" ? "Loading video" : "Loading photo").font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary)
                         }
                     }
                     .accessibilityElement(children: .combine)
@@ -1530,7 +1537,7 @@ private struct RemoteFileView: View {
                         else { Image(systemName: missing ? "exclamationmark.triangle" : isPass ? "wallet.pass" : "doc") }
                         Text(missing ? "\(file.name) — no longer available" : isPass ? "Add to Apple Wallet" : file.name).lineLimit(1)
                     }
-                    .font(.system(size: 15))
+                    .font(size: 15, relativeTo: .subheadline)
                     .padding(.horizontal, 12).padding(.vertical, 9)
                     .background(.incomingBubble, in: .rect(cornerRadius: 18, style: .continuous))
                 }
@@ -1646,7 +1653,7 @@ private struct VoiceRow: View {
             }
             if let duration {
                 Text(Duration.seconds(duration.rounded()).formatted(.time(pattern: .minuteSecond)))
-                    .font(.system(size: 14, weight: .medium).monospacedDigit())
+                    .monospacedDigit().font(size: 14, weight: .medium, relativeTo: .subheadline)
                     .foregroundStyle(ink)
             }
         }
@@ -1886,6 +1893,38 @@ extension View {
     @ViewBuilder func bubbleMenu<M: View, P: View>(long: Bool, @ViewBuilder _ menu: () -> M, @ViewBuilder preview: () -> P) -> some View {
         if long { contextMenu(menuItems: menu, preview: preview) } else { contextMenu(menuItems: menu) }
     }
+
+    /// `.system(size:)` that follows the reader's text size, scaling the way `style` does.
+    /// Exactly `size` at the default text size, so the metrics measured off Messages hold there.
+    /// (A text style itself would bring its own line spacing, taller than Messages' when text wraps.)
+    func font(size: CGFloat, weight: Font.Weight? = nil, design: Font.Design? = nil, relativeTo style: Font.TextStyle) -> some View {
+        modifier(ScaledFont(size: size, weight: weight, design: design, style: style))
+    }
+
+    /// A 44pt-tall tap target for a line of text under a bubble, without moving the text.
+    /// It reaches up only across the 6pt gap, never onto the bubble (its double-tap and menu),
+    /// and 8pt each side, half the 16pt between suggested replies. Down, it stops where the
+    /// next row starts (4–10pt on); on the newest message it runs into the composer's empty
+    /// top strip, which DockView hands back to the thread: the full 44 with the keyboard down,
+    /// about 30 while typing (the composer keeps its strip then).
+    func hitSlop() -> some View {
+        background(alignment: .top) {
+            Color.clear.contentShape(.rect).frame(minHeight: 44)
+                .padding(EdgeInsets(top: -6, leading: -8, bottom: 0, trailing: -8))
+        }
+    }
+}
+
+private struct ScaledFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    let weight: Font.Weight?
+    let design: Font.Design?
+    init(size: CGFloat, weight: Font.Weight?, design: Font.Design?, style: Font.TextStyle) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: style)
+        self.weight = weight
+        self.design = design
+    }
+    func body(content: Content) -> some View { content.font(.system(size: size, weight: weight, design: design)) }
 }
 
 struct Typing: View {
@@ -1919,7 +1958,7 @@ struct Typing: View {
                     // The same view, re-texted: each step rolls into the next letter by letter,
                     // the way the chat list's busy line does.
                     Text(status)
-                        .font(.system(size: 14))
+                        .font(size: 14, relativeTo: .subheadline)
                         .fixedSize(horizontal: false, vertical: true)
                         .contentTransition(.numericText())
                         .transition(.opacity.combined(with: .offset(y: 6)))
@@ -1950,12 +1989,12 @@ struct TodoList: View {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Image(systemName: icon(item.status))
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(size: 12, weight: .semibold, relativeTo: .caption)
                         .foregroundStyle(item.status == .in_progress ? Color.accentColor : .secondary)
                         .symbolEffect(.pulse, isActive: item.status == .in_progress)
-                        .frame(width: 14)
+                        .frame(minWidth: 14)
                     Text(item.text)
-                        .font(.system(size: 13, weight: item.status == .in_progress ? .medium : .regular))
+                        .font(size: 13, weight: item.status == .in_progress ? .medium : .regular, relativeTo: .footnote)
                         .foregroundStyle(item.status == .in_progress ? .primary : .secondary)
                         .strikethrough(item.status == .completed, color: .secondary)
                         .opacity(item.status == .completed ? 0.7 : 1)
@@ -2258,6 +2297,16 @@ final class KeyboardDock: UIViewController {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    override func loadView() {
+        let dock = DockView()
+        dock.thread = thread.view
+        dock.composer = composer.view
+        // Composer's .padding(.top, 6) plus its .offset(y: 10), while the keyboard is down. Not while
+        // typing: a tap just above the field would land on the thread and close the keyboard.
+        dock.emptyTop = { [ui] in ui.focused ? 0 : 16 }
+        view = dock
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
@@ -2319,6 +2368,21 @@ final class KeyboardDock: UIViewController {
         // drag-to-dismiss calls it every frame outside any block. ChatView animates the former.
         ui.insetAnimated = UIView.inheritedAnimationDuration > 0
         ui.bottomInset = covered
+    }
+}
+
+/// The dock's own view. The composer's host takes every touch in its frame, but with the keyboard
+/// down its top strip is empty, so a tap there goes to the thread behind: the newest message's
+/// suggested replies and "Try again" reach into it for their 44pt (see hitSlop).
+private final class DockView: UIView {
+    weak var thread: UIView?
+    weak var composer: UIView?
+    var emptyTop: () -> CGFloat = { 0 }
+    override func hitTest(_ p: CGPoint, with event: UIEvent?) -> UIView? {
+        if let thread, let composer, p.y >= composer.frame.minY, p.y < composer.frame.minY + emptyTop() {
+            return thread.hitTest(convert(p, to: thread), with: event)
+        }
+        return super.hitTest(p, with: event)
     }
 }
 
