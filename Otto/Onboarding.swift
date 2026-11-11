@@ -134,7 +134,7 @@ private struct Glyph: View {
     var body: some View {
         Image(systemName: name)
             .font(.system(size: 52, weight: .regular))
-            .foregroundStyle(.orange)
+            .foregroundStyle(.primary)   // white in dark, black in light; the circle keeps the orange
             .frame(width: 128, height: 128)
             .background(Color.orange.opacity(0.12), in: .circle)
             .symbolEffect(.bounce, options: .nonRepeating)
