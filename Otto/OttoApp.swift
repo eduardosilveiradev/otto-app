@@ -304,11 +304,16 @@ final class OttoStore {
     }
 
     func start() async {
+        #if PERFDEMO
+        if ProcessInfo.processInfo.arguments.contains("-perfConnect") { Task { await perfConnect() } }
+        #endif
         Task { await tick() }
         Task { await pips.run() }
         reconcileDesktop()
         if let sync = backend.desktopSync {
-            Task { for await _ in sync.updates { reconcileDesktop(); saveNow() } }
+            // No saveNow: that encoded the whole thread on the main thread, once per replayed frame. The change
+            // goes out with the thread's debounced save, and the journal itself is already on disk for the next launch.
+            Task { for await _ in sync.updates { reconcileDesktop() } }
         }
         #if DEBUG
         PipFixture.seed(self)
@@ -611,6 +616,15 @@ final class OttoStore {
             try? await Task.sleep(for: .milliseconds(500))
         }
         print("PERF late=\(frames.late) of \(frames.count) frames, worst \(Int(frames.worst * 1000))ms, lost \(Int(frames.lost * 1000))ms")
+    }
+
+    /// `-perfConnect`: the frames from the first connect to 10s after it, the window of the launch hitch.
+    private func perfConnect() async {
+        let frames = FrameClock()
+        while backend.connections == 0 { try? await Task.sleep(for: .milliseconds(20)) }
+        frames.reset()
+        try? await Task.sleep(for: .seconds(10))
+        print("CONNECT late=\(frames.late) of \(frames.count) frames, worst \(Int(frames.worst * 1000))ms, lost \(Int(frames.lost * 1000))ms, hangs \(frames.hangs)")
     }
     #endif
 
@@ -1039,7 +1053,7 @@ final class OttoStore {
 @MainActor final class FrameClock: NSObject {
     private var link: CADisplayLink?
     private var last: CFTimeInterval = 0
-    private(set) var count = 0, late = 0
+    private(set) var count = 0, late = 0, hangs = 0   // hangs: the main thread stuck 250ms or more
     private(set) var worst: CFTimeInterval = 0, lost: CFTimeInterval = 0
 
     override init() {
@@ -1047,13 +1061,14 @@ final class OttoStore {
         link = CADisplayLink(target: self, selector: #selector(tick))
         link?.add(to: .main, forMode: .common)
     }
-    func reset() { count = 0; late = 0; worst = 0; lost = 0; last = 0 }
+    func reset() { count = 0; late = 0; hangs = 0; worst = 0; lost = 0; last = 0 }
     @objc private func tick(_ l: CADisplayLink) {
         defer { last = l.timestamp }
         guard last > 0 else { return }
         let gap = l.timestamp - last, budget = l.targetTimestamp - l.timestamp
         count += 1
         if gap > budget * 1.5 { late += 1; lost += gap - budget; worst = max(worst, gap) }
+        if gap >= 0.25 { hangs += 1 }
     }
 }
 #endif

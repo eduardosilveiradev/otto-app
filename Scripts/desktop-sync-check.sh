@@ -14,6 +14,7 @@ trap 'rm -rf "$T"' EXIT
 struct DashTrigger: Codable {}
 struct RecordedCard: Codable {}
 struct OTPCode: Codable {}
+struct GroupLink: Codable {}
 enum ImageStore { static func data(_ id: UUID) -> Data? { nil } }
 let key = "desktop-sync-check-" + UUID().uuidString
 UserDefaults.standard.removeObject(forKey: key)
@@ -37,7 +38,23 @@ assert(messages.last!.buttons.isEmpty && messages.last!.card!.actions!.isEmpty)
 let ids = Set(restored.snapshot.notificationIDs(in: messages))
 assert(ids == [source, local.uuidString])
 assert(!ids.contains("unrelated"))
+// The server replays its whole journal on every connect: what's already applied wakes nothing, a new read does.
+func woke(_ s: DesktopSync) async -> Bool {
+    await withTaskGroup(of: Bool.self) { g in
+        g.addTask { var it = s.updates.makeAsyncIterator(); return await it.next() != nil }
+        g.addTask { try? await Task.sleep(for: .milliseconds(200)); return false }
+        let first = await g.next()!
+        g.cancelAll()
+        return first
+    }
+}
 assert(restored.receive(tap) && restored.receive(read))
+let replayWoke = await woke(restored)
+assert(!replayWoke)
+let next = DesktopSync(key: key)
+assert(next.receive(Data(#"{"type":"notifications_read","ids":["newer-wire-id"]}"#.utf8)))
+let newWoke = await woke(next)
+assert(newWoke)
 restored.snapshot.apply(to: &messages)
 assert(messages.count == 2 && messages.filter { $0.wireID == op }.count == 1)
 // History-first ordering also upserts the same lowercase UUID op.
