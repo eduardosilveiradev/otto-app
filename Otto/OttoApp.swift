@@ -587,7 +587,11 @@ final class OttoStore {
             if !serverTyping && m.from == .otto { ottoTyping = false }
             // A reply held for a closed app is in /app/history too: a fresh launch reads
             // history first, then the socket flushes the held copy.
-            guard !messages.contains(where: { $0.wireID == m.wireID }) else { continue }
+            if let i = messages.firstIndex(where: { $0.wireID == m.wireID }) {
+                // History already brought a code's masked line; the live copy carries the code.
+                if let otp = m.otp, messages[i].otp == nil { messages[i].otp = otp; otpDrawer = messages[i] }
+                continue
+            }
             messages.append(m)
             reconcileDesktop()
             if m.otp != nil { otpDrawer = m }
