@@ -340,8 +340,9 @@ struct ChatView: View {
             DetailsView()
                 .navigationTransition(.zoom(sourceID: "card", in: card))
                 .presentationBackground {
-                    // Light mode frosts over the thread, so its dark bubbles don't show through as smudges.
-                    Rectangle().fill(.ultraThinMaterial)
+                    // Liquid Glass over the thread, as Messages does. Light mode adds a wash, so the
+                    // thread's dark bubbles don't show through as smudges.
+                    Color.clear.glassEffect(.regular, in: .rect)
                         .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? .clear : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
                         .ignoresSafeArea()
                 }
@@ -1171,6 +1172,8 @@ private struct Row: View {
     @State private var morph: Double = 1
     @State private var swipe: CGFloat = 0
     @State private var rowWidth: CGFloat = 0
+    /// The message itself, so a swipe on the empty side of the row does nothing.
+    @State private var bubbleWidth: CGFloat = 0
     /// Decided on a drag's first move: sideways is a reply swipe, anything else belongs to the scroll.
     @State private var sideways: Bool?
     @State private var reacted = 0
@@ -1559,6 +1562,7 @@ private struct Row: View {
             preview = LinkMeta.cached(u)
             if preview == nil { preview = await LinkMeta.load(u) }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { bubbleWidth = $0 }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
         .padding(mine ? .leading : .trailing, inset)
         .scaleEffect(highlighted && !still ? 1.03 : 1, anchor: mine ? .trailing : .leading)
@@ -1590,7 +1594,10 @@ private struct Row: View {
                     // Locked on the first move, so a drag that drifts diagonally keeps doing one thing.
                     if sideways == nil {
                         // The left fifth of a left-aligned row is the back swipe's (see LeftRowMarker).
-                        sideways = t.width > 0 && t.width > abs(t.height) * 1.5 && (mine || g.startLocation.x >= rowWidth / 5)
+                        // And only on the message: the empty side of the row is the thread's, not a reply.
+                        let x0 = g.startLocation.x
+                        let onBubble = !mine || x0 >= rowWidth - bubbleWidth - 8   // Otto's side keeps the whole row: a short bubble sits inside the back swipe's fifth
+                        sideways = t.width > 0 && t.width > abs(t.height) * 1.5 && onBubble && (mine || x0 >= rowWidth / 5)
                         if sideways == true { onSwiping(true) }
                     }
                     guard sideways == true else { return }
