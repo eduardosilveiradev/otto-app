@@ -959,14 +959,15 @@ final class OttoStore {
     /// The bubble shows up at once; the transcript fills it in when the server has it.
     /// Pending until the upload lands, so a dropped one (a weak hotspot) is retried on the
     /// next connection instead of vanishing.
-    func sendVoice(_ file: URL, replyTo: String? = nil) {
+    @discardableResult func sendVoice(_ file: URL, replyTo: String? = nil) -> Message.ID? {
         let m = Message(from: .me, text: "", isVoice: true, pending: true, replyTo: replyTo)
         // Kept so the note plays back from the thread, and so a retry has the audio.
         try? FileManager.default.removeItem(at: VoiceStore.url(m.id))
-        guard (try? FileManager.default.moveItem(at: file, to: VoiceStore.url(m.id))) != nil else { return }
+        guard (try? FileManager.default.moveItem(at: file, to: VoiceStore.url(m.id))) != nil else { return nil }
         messages.append(m)
         ottoTyping = true
         Task { await deliver(m.id) }
+        return m.id
     }
 
     private func deliverVoice(_ m: Message) async {

@@ -37,6 +37,10 @@ struct WalkieView: View {
     @State private var recorder = VoiceRecorder()
     @State private var holding = false
     @State private var sentAt: Date?
+    /// The last note sent, offered again if it gets nowhere.
+    @State private var note: Message.ID?
+    /// A minute went by with no answer.
+    @State private var gaveUp = false
     @State private var reply: Message?
     /// The reply already played or read out, so a later change doesn't start it again.
     @State private var heard: UUID?
@@ -49,9 +53,13 @@ struct WalkieView: View {
         if recorder.started != nil { return .listening }
         if let r = reply, let a = r.audio, player.playing == a.id { return .speaking }
         if speech.isSpeaking { return .speaking }
-        if sentAt != nil && reply == nil { return .thinking }
+        if sentAt != nil && reply == nil && !stuck { return .thinking }
         return .idle
     }
+
+    private var sent: Message? { note.flatMap { id in store.messages.last { $0.id == id } } }
+    /// Going nowhere: the note didn't get through, or nothing came back in a minute.
+    private var stuck: Bool { reply == nil && note != nil && (gaveUp || sent?.failed == true) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -86,19 +94,56 @@ struct WalkieView: View {
             Spacer(minLength: 24)
 
             // The last answer, one line: enough to glance at a crossing, no more.
-            Text(reply.map { $0.text.isEmpty ? "…" : $0.text } ?? "Hold Otto and talk. Let go to send.")
-                .font(size: 16, relativeTo: .callout)
-                .foregroundStyle(reply == nil ? .secondary : .primary)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-                .padding(.bottom, 32)
-                .frame(minHeight: 72, alignment: .top)
-                .contentTransition(.opacity)
-                .animation(.easeInOut, value: reply?.text)
+            Group {
+                if stuck {
+                    // The thread's own words for an unsent message, and the same way on.
+                    Button(action: retry) {
+                        (Text(sent?.pending == true ? "Not delivered · " : "Otto didn't answer · ").foregroundStyle(.red)
+                         + Text("Try again").foregroundStyle(.blue)).hitSlop()
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(reply.map { $0.text.isEmpty ? "…" : $0.text } ?? "Hold Otto and talk. Let go to send.")
+                        .foregroundStyle(reply == nil ? .secondary : .primary)
+                }
+            }
+            .font(size: 16, relativeTo: .callout)
+            .lineLimit(2)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 32)
+            .padding(.bottom, 32)
+            .frame(minHeight: 72, alignment: .top)
+            .contentTransition(.opacity)
+            .animation(.easeInOut, value: reply?.text)
+            .animation(.easeInOut(duration: 0.2), value: stuck)   // cross-fades: nothing for Reduce Motion to stop
         }
         .background(Color(.systemBackground))
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
+            #if DEBUG
+            // `-walkieNote` (with `-walkie`): a stand-in note goes out on open, as if held and let go,
+            // to test what happens when no answer comes (a dead server, or one that never replies).
+            if ProcessInfo.processInfo.arguments.contains("-walkieNote") {
+                let url = URL.temporaryDirectory.appending(path: "walkie-note.m4a")
+                try? Data(count: 1024).write(to: url)
+                send(url)
+            }
+            #endif
+        }
+        // "Thinking" gives up after a minute, and the note is offered again.
+        .task(id: sentAt) {
+            guard sentAt != nil else { return }
+            try? await Task.sleep(for: .seconds(60))
+            if !Task.isCancelled && reply == nil { sentAt = nil; gaveUp = true }
+        }
+        #if DEBUG
+        .task(id: stuck) {
+            guard stuck, labTryAgain else { return }
+            labTryAgain = false
+            try? await Task.sleep(for: .seconds(3))
+            retry()
+        }
+        #endif
         .onDisappear {
             _ = recorder.stop()
             player.stop(); speech.stopSpeaking(at: .immediate)
@@ -110,6 +155,7 @@ struct WalkieView: View {
         .onChange(of: store.messages.last?.isVoice) { pickUpReply() }
         .sensoryFeedback(.impact(weight: .medium), trigger: holding)
         .sensoryFeedback(.success, trigger: reply?.id)
+        .sensoryFeedback(.error, trigger: stuck) { _, now in now }   // eyes on the street: felt, not just shown
     }
 
     // MARK: Talk button: Otto, with a ring that breathes with your voice
@@ -166,9 +212,29 @@ struct WalkieView: View {
         guard let url = recorder.stop() else { return }
         UIApplication.shared.isIdleTimerDisabled = true   // stop() hands the timer back
         if short { try? FileManager.default.removeItem(at: url); return }   // a brush, not a sentence
+        send(url)
+    }
+
+    private func send(_ url: URL) {
         reply = nil
+        gaveUp = false
         sentAt = .now
-        store.sendVoice(url)
+        note = store.sendVoice(url)
+    }
+
+    /// The same note while it's still unsent (the thread's retry, so no second copy); said again
+    /// once it got there and nothing came back.
+    private func retry() {
+        guard let m = sent else { return }
+        if m.pending == true {
+            store.retry(m.id)
+            gaveUp = false
+            sentAt = .now
+        } else {
+            let copy = URL.temporaryDirectory.appending(path: "\(UUID().uuidString).m4a")
+            guard (try? FileManager.default.copyItem(at: VoiceStore.url(m.id), to: copy)) != nil else { return }
+            send(copy)
+        }
     }
 
     /// The first thing Otto says after the note went up. Plays its voice when it has one;

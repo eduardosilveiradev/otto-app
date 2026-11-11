@@ -23,6 +23,8 @@ final class CallManager {
 
     private var vapi: Vapi?
     private var bag = Set<AnyCancellable>()
+    /// The request that sets the call up; cancelled when it's given up on, so it can't connect later.
+    private var attempt: Task<Void, Never>?
 
     static var configured: Bool {
         let d = UserDefaults.standard
@@ -37,8 +39,14 @@ final class CallManager {
     func start(context: String? = nil) {
         let d = UserDefaults.standard
         guard let key = d.string(forKey: "vapiPublicKey"), let assistant = d.string(forKey: "vapiAssistantId") else { return }
+        #if DEBUG
+        // `-vapiHost localhost`: Vapi's API at localhost:3001, a dead or stalling stand-in, to test how calls fail.
+        let vapi = Vapi(publicKey: key, host: d.string(forKey: "vapiHost"))
+        #else
         let vapi = Vapi(publicKey: key)
+        #endif
         self.vapi = vapi
+        error = nil
         phase = .connecting
         vapi.eventPublisher.receive(on: DispatchQueue.main).sink { [weak self] event in
             guard let self else { return }
@@ -50,12 +58,18 @@ final class CallManager {
                     try? await vapi.startRemoteParticipantsAudioLevelObserver()
                     try? await vapi.startLocalAudioLevelObserver()
                 }
-            case .callDidEnd: phase = .ended
+            // Ended before it started: a room that can't be joined says "left" before its error.
+            case .callDidEnd: if phase == .connecting { fail("Couldn't connect.") } else { phase = .ended }
             case .speechUpdate(let s): if s.role == .assistant { ottoSpeaking = s.status == .started }
-            case .error(let e): error = e.localizedDescription; phase = .ended
+            case .error(let e): fail(e.localizedDescription)
             default: break
             }
         }.store(in: &bag)
+        // "calling…" doesn't wait forever: a call that hasn't connected in 20 seconds won't.
+        Task {
+            try? await Task.sleep(for: .seconds(20))
+            if self.vapi === vapi && phase == .connecting { fail("Couldn't connect.") }
+        }
 
         var overrides: [String: Any] = [:]
         var values: [String: Any] = [:]
@@ -63,13 +77,14 @@ final class CallManager {
         // Which conversation the call came from; the assistant's prompt reads it as {{conversation}}.
         if let context { values["conversation"] = context }
         if !values.isEmpty { overrides["variableValues"] = values }
-        Task {
-            do { _ = try await vapi.start(assistantId: assistant, assistantOverrides: overrides) }
-            catch { self.error = error.localizedDescription; self.phase = .ended }
-        }
+        // A failure comes back as an `.error` event (Vapi sends one before it throws); the timeout covers the rest.
+        attempt = Task { _ = try? await vapi.start(assistantId: assistant, assistantOverrides: overrides) }
     }
 
-    func hangUp() { vapi?.stop(); phase = .ended }
+    /// Ends this attempt for good: nothing it sends later (a late answer, an event) changes the screen.
+    func hangUp() { attempt?.cancel(); bag = []; vapi?.stop(); phase = .ended }
+
+    private func fail(_ message: String) { error = message; hangUp() }
 
     /// Loudspeaker vs earpiece. The call's audio session is Vapi's; this only reroutes it.
     func toggleSpeaker() {
@@ -126,22 +141,37 @@ struct CallView: View {
                 Spacer()
 
                 HStack(spacing: 40) {
-                    RoundButton(symbol: call.speaker ? "speaker.wave.3.fill" : "speaker.fill",
-                                fill: call.speaker ? .white : .white.opacity(0.18),
-                                tint: call.speaker ? .black : .white,
-                                label: "speaker") { call.toggleSpeaker() }
-                    RoundButton(symbol: call.muted ? "mic.slash.fill" : "mic.fill",
-                                fill: call.muted ? .white : .white.opacity(0.18),
-                                tint: call.muted ? .black : .white,
-                                label: "mute") { call.toggleMute() }
-                    RoundButton(symbol: "phone.down.fill", fill: .red, tint: .white, label: "end") {
-                        call.hangUp(); dismiss()
+                    if call.error != nil {
+                        // A failed call keeps its screen with the two ways on, as FaceTime does.
+                        RoundButton(symbol: "xmark", fill: .white.opacity(0.18), tint: .white, label: "close") { dismiss() }
+                        RoundButton(symbol: "phone.fill", fill: .green, tint: .white, label: "try again") { call.start(context: context) }
+                    } else {
+                        RoundButton(symbol: call.speaker ? "speaker.wave.3.fill" : "speaker.fill",
+                                    fill: call.speaker ? .white : .white.opacity(0.18),
+                                    tint: call.speaker ? .black : .white,
+                                    label: "speaker") { call.toggleSpeaker() }
+                        RoundButton(symbol: call.muted ? "mic.slash.fill" : "mic.fill",
+                                    fill: call.muted ? .white : .white.opacity(0.18),
+                                    tint: call.muted ? .black : .white,
+                                    label: "mute") { call.toggleMute() }
+                        RoundButton(symbol: "phone.down.fill", fill: .red, tint: .white, label: "end") {
+                            call.hangUp(); dismiss()
+                        }
                     }
                 }
+                .animation(.easeOut(duration: 0.2), value: call.error != nil)   // a cross-fade, so Reduce Motion needs nothing else
                 .padding(.bottom, 50)
             }
         }
         .onAppear { call.start(context: context) }
+        #if DEBUG
+        .task(id: call.error) {
+            guard call.error != nil, labTryAgain else { return }
+            labTryAgain = false
+            try? await Task.sleep(for: .seconds(3))
+            call.start(context: context)
+        }
+        #endif
         .onChange(of: call.phase) { _, p in
             if p == .ended && call.error == nil { dismiss() }
         }
@@ -151,7 +181,7 @@ struct CallView: View {
     @ViewBuilder private var status: some View {
         switch call.phase {
         case .idle, .connecting: Text("calling…")
-        case .ended: Text("call ended")
+        case .ended: Text(call.error == nil ? "call ended" : "call failed")
         case .live:
             if let start = call.startedAt {
                 Text(start, style: .timer).monospacedDigit()
@@ -159,6 +189,12 @@ struct CallView: View {
         }
     }
 }
+
+#if DEBUG
+/// `-tryAgainOnce`: the first "try again" (a call's or the walkie's) presses itself three seconds after
+/// it shows, through the tap's own action, to test the retry where nothing can tap (a headless simulator).
+var labTryAgain = ProcessInfo.processInfo.arguments.contains("-tryAgainOnce")
+#endif
 
 private struct RoundButton: View {
     let symbol: String
@@ -174,7 +210,9 @@ private struct RoundButton: View {
                     .background(fill, in: .circle)
                     .foregroundStyle(tint)
             }
-            Text(label).font(.footnote).foregroundStyle(.white.opacity(0.7))
+            .accessibilityLabel(label)   // what the caption says, not the symbol's name
+            .accessibilityAddTraits(fill == .white ? .isSelected : [])   // a white fill is a toggle that's on
+            Text(label).font(.footnote).foregroundStyle(.white.opacity(0.7)).accessibilityHidden(true)
         }
     }
 }
