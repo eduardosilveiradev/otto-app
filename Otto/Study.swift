@@ -107,6 +107,8 @@ struct CardsRun {
 private struct CardsPane: View {
     let cards: [StudySet.Card]
     @Binding var run: CardsRun
+    /// Reduce Motion: the card cross-fades to its other side instead of turning over.
+    @Environment(\.accessibilityReduceMotion) private var still
 
     var body: some View {
         let queue = run.queue ?? Array(cards.indices)
@@ -119,9 +121,9 @@ private struct CardsPane: View {
                     .multilineTextAlignment(.center).padding(24)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 24, style: .continuous))
-                    .rotation3DEffect(.degrees(run.flipped ? 180 : 0), axis: (0, 1, 0)).scaleEffect(x: run.flipped ? -1 : 1)
+                    .rotation3DEffect(.degrees(run.flipped && !still ? 180 : 0), axis: (0, 1, 0)).scaleEffect(x: run.flipped && !still ? -1 : 1)
                     .contentShape(.rect)
-                    .onTapGesture { withAnimation(.snappy) { run.flipped.toggle() } }
+                    .onTapGesture { withAnimation(still ? .easeInOut(duration: 0.2) : .snappy) { run.flipped.toggle() } }
                     .padding(.horizontal)
                 if run.flipped {
                     HStack(spacing: 12) {

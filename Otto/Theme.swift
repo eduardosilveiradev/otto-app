@@ -13,24 +13,26 @@ struct OttoAvatar: View {
     @State private var blink = false
     @State private var bob = false
     @State private var breathe = false
+    /// Reduce Motion: no sway, bob, breathing or drifting Zs. He still blinks and looks down.
+    @Environment(\.accessibilityReduceMotion) private var still
 
     var body: some View {
         // Paused while he isn't looking, so an idle avatar costs nothing.
-        TimelineView(.animation(paused: !movingEyes)) { tl in
-            let sway = movingEyes ? 3 * sin(tl.date.timeIntervalSinceReferenceDate * 1.5) : 0
+        TimelineView(.animation(paused: !movingEyes || still)) { tl in
+            let sway = movingEyes && !still ? 3 * sin(tl.date.timeIntervalSinceReferenceDate * 1.5) : 0
             face(sway: sway)
                 .rotation3DEffect(.degrees(sway), axis: (x: 0, y: 0.1, z: 0))
         }
         .animation(.spring(response: 0.5, dampingFraction: 0.8), value: lookingAtCursor)
-        .scaleEffect(asleep && breathe ? 1.04 : 1)
-        .offset(y: bob ? -2 : 0)
+        .scaleEffect(asleep && breathe && !still ? 1.04 : 1)
+        .offset(y: bob && !still ? -2 : 0)
         .overlay(alignment: .topTrailing) {
             if asleep { Zzz(size: size).offset(x: size * 0.3, y: -size * 0.35).transition(.opacity) }
         }
         .overlay(alignment: .bottom) {
             if thinking && !asleep {
                 Typist(size: size).offset(y: -size * 0.04)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(still ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: thinking && !asleep)
@@ -79,9 +81,11 @@ struct OttoAvatar: View {
 /// While Otto is replying: a little keyboard in front of him, two fingers tapping away.
 private struct Typist: View {
     let size: CGFloat
+    /// Reduce Motion: the fingers rest on the keys.
+    @Environment(\.accessibilityReduceMotion) private var still
     var body: some View {
-        TimelineView(.animation) { tl in
-            let t = tl.date.timeIntervalSinceReferenceDate
+        TimelineView(.animation(paused: still)) { tl in
+            let t = still ? 0 : tl.date.timeIntervalSinceReferenceDate
             ZStack(alignment: .top) {
                 // The keyboard: a slab with three rows of keys.
                 RoundedRectangle(cornerRadius: size * 0.05, style: .continuous)
@@ -132,9 +136,11 @@ private struct ClosedEye: Shape {
 /// Three Zs that rise, drift right, grow and fade, one after another, forever.
 private struct Zzz: View {
     let size: CGFloat
+    /// Reduce Motion: the three hold still, one moment of the drift.
+    @Environment(\.accessibilityReduceMotion) private var still
     var body: some View {
-        TimelineView(.animation) { tl in
-            let t = tl.date.timeIntervalSinceReferenceDate
+        TimelineView(.animation(paused: still)) { tl in
+            let t = still ? 0.48 : tl.date.timeIntervalSinceReferenceDate
             ZStack(alignment: .bottomLeading) {
                 ForEach(0..<3, id: \.self) { i in
                     let p = (t / 2.4 + Double(i) / 3).truncatingRemainder(dividingBy: 1) // 0→1 per Z

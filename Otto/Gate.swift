@@ -502,13 +502,16 @@ private struct Grain: View {
 
 private struct Spinner: View {
     @State private var spin = false
+    /// Reduce Motion: the ring pulses in place instead of turning.
+    @Environment(\.accessibilityReduceMotion) private var still
     var body: some View {
         Circle()
             .trim(from: 0.1, to: 1)
             .stroke(AngularGradient(colors: [.clear, .primary], center: .center), style: StrokeStyle(lineWidth: 2, lineCap: .round))
             .frame(width: 13, height: 13)
-            .rotationEffect(.degrees(spin ? 360 : 0))
-            .animation(.linear(duration: 0.8).repeatForever(autoreverses: false), value: spin)
+            .rotationEffect(.degrees(spin && !still ? 360 : 0))
+            .opacity(spin && still ? 0.35 : 1)
+            .animation(still ? .easeInOut(duration: 0.8).repeatForever() : .linear(duration: 0.8).repeatForever(autoreverses: false), value: spin)
             .onAppear { spin = true }
     }
 }
