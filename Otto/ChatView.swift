@@ -850,8 +850,9 @@ struct Composer: View {
         .animation(.snappy, value: focused)
         .padding(.top, 6)   // this 6 and the offset's 10: the empty strip KeyboardDock.loadView passes to the thread (keyboard down)
         .padding(.bottom, 4)
-        // Folded away, not removed, while the thread is searched: a draft stays as it was.
-        .frame(height: ui.searching ? 0 : nil, alignment: .top).clipped()
+        // Folded away, not removed, while the thread is searched: a draft stays as it was. Not clipped:
+        // the offset above sinks the bar 10pt past its frame with the keyboard down, and opacity hides it here.
+        .frame(height: ui.searching ? 0 : nil, alignment: .top)
         .opacity(ui.searching ? 0 : 1)
         .allowsHitTesting(!ui.searching)
         .accessibilityHidden(ui.searching)
