@@ -268,6 +268,7 @@ private struct ConversationCell: View {
                 }
             }
             .padding(.leading, 20).padding(.trailing, 16)
+            .padding(.vertical, type.isAccessibilitySize ? 8 : 0)   // off the separators once text outgrows 72pt
             .frame(minHeight: 72)
             .contentShape(.rect)
         }
@@ -330,6 +331,7 @@ struct PipLine: View {
     @Environment(OttoStore.self) private var store
     /// The icon's size inside the line's text, which only takes a Font.
     @ScaledMetric(relativeTo: .caption2) private var glyph: CGFloat = 9
+    @Environment(\.dynamicTypeSize) private var type
 
     private var pips: PipStore { store.pips }
     private var handoff: PipHandoff? { message.handoffID.flatMap { pips.handoffs[$0] } }
@@ -353,7 +355,8 @@ struct PipLine: View {
         return (Text(Image(systemName: icon)).font(.system(size: glyph, weight: .semibold)) + Text(" " + t).fontWeight(.semibold) + Text(" " + message.text))
             .font(size: 11, relativeTo: .caption2)
             .foregroundStyle(.secondary)
-            .lineLimit(1).truncationMode(.tail)
+            .lineLimit(type.isAccessibilitySize ? 3 : 1).truncationMode(.tail)   // as TerminalLine
+            .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 8)
             .padding(.top, afterLine ? 0 : 14).padding(.bottom, 8)

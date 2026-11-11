@@ -226,6 +226,9 @@ struct PrintedReceipt: View {
         }
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
+        // Printed: its longest row ("Paid with … 6983") is already the paper's width at the default
+        // size, so the receipt shrinks with smaller text but doesn't grow. VoiceOver reads it whole.
+        .dynamicTypeSize(...DynamicTypeSize.large)
         .task { await run() }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Receipt for \(payment.money(payment.total)) to \(payment.merchant)")

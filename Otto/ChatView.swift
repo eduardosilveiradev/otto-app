@@ -935,12 +935,15 @@ private struct TerminalLine: View {
     let message: Message
     /// Right under a Stamp, which already has the spacing above.
     let afterStamp: Bool
+    @Environment(\.dynamicTypeSize) private var type
     var body: some View {
         (Text(Image(systemName: "terminal")) + Text(" " + message.date.formatted(date: .omitted, time: .shortened)).fontWeight(.semibold)
             + Text(" \u{201C}\(message.text)\u{201D}"))
             .font(size: 11, relativeTo: .caption2)
             .foregroundStyle(.secondary)
-            .lineLimit(1).truncationMode(.tail)
+            // One line, until the text is so large that one line would hold only the time.
+            .lineLimit(type.isAccessibilitySize ? 3 : 1).truncationMode(.tail)
+            .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 24)
             .padding(.top, afterStamp ? 0 : 14).padding(.bottom, 8)
@@ -1330,6 +1333,7 @@ private struct Row: View {
                     (Text("Not delivered · ").foregroundStyle(.red) + Text("Try again").foregroundStyle(.blue)).hitSlop()
                 }
                 .font(size: 11, relativeTo: .caption2).buttonStyle(.plain)
+                .multilineTextAlignment(.trailing)
                 .padding(.trailing, 4)
             } else if message.failed == true {
                 // Nothing left to send (a voice note whose audio is gone).
@@ -1378,7 +1382,8 @@ private struct Row: View {
                 .accessibilityHidden(true)
         }
         // The whole row takes the swipe, not just the bubble: yours start 105pt in from the edge.
-        .contentShape(.rect)
+        // Behind the row rather than its contentShape, which would cut off the replies' hitSlop below it.
+        .background { Color.clear.contentShape(.rect) }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
         .background { if !mine { LeftRowMarker() } }
         .simultaneousGesture(
@@ -1898,7 +1903,8 @@ extension View {
 
     /// A 44pt-tall tap target for a line of text under a bubble, without moving the text.
     /// It reaches up only across the 6pt gap, never onto the bubble (its double-tap and menu),
-    /// and 8pt each side, half the 16pt between suggested replies.
+    /// and 8pt each side, half the 16pt between suggested replies. Down, it stops where the
+    /// next row starts (4–10pt on), so it's the full 44 on the newest message.
     func hitSlop() -> some View {
         background(alignment: .top) {
             Color.clear.contentShape(.rect).frame(minHeight: 44)
