@@ -1904,7 +1904,9 @@ extension View {
     /// A 44pt-tall tap target for a line of text under a bubble, without moving the text.
     /// It reaches up only across the 6pt gap, never onto the bubble (its double-tap and menu),
     /// and 8pt each side, half the 16pt between suggested replies. Down, it stops where the
-    /// next row starts (4–10pt on), so it's the full 44 on the newest message.
+    /// next row starts (4–10pt on); on the newest message it runs into the composer's empty
+    /// top strip, which DockView hands back to the thread: the full 44 with the keyboard down,
+    /// about 36 with it up (the strip is then only the 6pt padding).
     func hitSlop() -> some View {
         background(alignment: .top) {
             Color.clear.contentShape(.rect).frame(minHeight: 44)
@@ -2295,6 +2297,14 @@ final class KeyboardDock: UIViewController {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    override func loadView() {
+        let dock = DockView()
+        dock.thread = thread.view
+        dock.composer = composer.view
+        dock.emptyTop = { [ui] in ui.focused ? 6 : 16 }   // Composer's .padding(.top, 6), and its .offset(y: 10) while unfocused
+        view = dock
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
@@ -2356,6 +2366,21 @@ final class KeyboardDock: UIViewController {
         // drag-to-dismiss calls it every frame outside any block. ChatView animates the former.
         ui.insetAnimated = UIView.inheritedAnimationDuration > 0
         ui.bottomInset = covered
+    }
+}
+
+/// The dock's own view. The composer's host takes every touch in its frame, but its top strip
+/// is empty, so a tap there goes to the thread behind: the newest message's suggested replies
+/// and "Try again" reach into it for their 44pt (see hitSlop).
+private final class DockView: UIView {
+    weak var thread: UIView?
+    weak var composer: UIView?
+    var emptyTop: () -> CGFloat = { 0 }
+    override func hitTest(_ p: CGPoint, with event: UIEvent?) -> UIView? {
+        if let thread, let composer, p.y >= composer.frame.minY, p.y < composer.frame.minY + emptyTop() {
+            return thread.hitTest(convert(p, to: thread), with: event)
+        }
+        return super.hitTest(p, with: event)
     }
 }
 
