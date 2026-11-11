@@ -102,8 +102,9 @@ let count = center.requests.count
 pips.notifiedThrough = .distantPast
 pips.notify(message("pip-message"))
 assert(center.requests.count == count, "read-before-message must stay cleared")
+let before = center.requests.count
 pips.notify(message("system-message", kind: "system"))
-assert(center.requests.last!.identifier == "system-message")
+assert(center.requests.count == before, "status lines never notify")
 Notifier.shared.post(Message())
 assert(center.requests.last!.identifier == "otto-id")
 assert(center.requests.last!.content.userInfo.isEmpty)

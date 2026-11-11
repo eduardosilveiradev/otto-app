@@ -572,7 +572,7 @@ enum PipSheet: Identifiable, Hashable {
     func leftApp() { notifiedThrough = .now }
 
     private func notify(_ m: ConversationMessage) {
-        guard (m.kind == "text" || m.kind == "system"), m.sender != "user", m.dir == nil, !m.text.isEmpty,
+        guard m.kind == "text", m.sender != "user", m.dir == nil, !m.text.isEmpty,
               m.quiet != true, store?.backend.desktopSync?.snapshot.read.contains(m.id) != true,
               let date = LiveBackend.date(m.ts), date > notifiedThrough else { return }
         notifiedThrough = date
