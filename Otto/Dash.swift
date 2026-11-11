@@ -143,7 +143,12 @@ struct Loaded<T: Decodable, Content: View>: View {
                 } actions: {
                     Button("Try Again") { failed = false; Task { await load() } }
                 }
-            } else { ProgressView() }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemGroupedBackground))
+            } else {
+                // The grouped grey the list lands on, so light mode doesn't flash white first.
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(.systemGroupedBackground))
+            }
         }
         .task(id: query) { await load() }
     }
@@ -157,7 +162,12 @@ extension View {
     /// A screen with nothing in it, drawn the way the system draws one (as "Can't reach your Mac" is), over
     /// the empty list so pull to refresh still works.
     func emptyState(_ empty: Bool, _ title: String, systemImage: String, _ description: String? = nil) -> some View {
-        overlay { if empty { ContentUnavailableView(title, systemImage: systemImage, description: description.map(Text.init)) } }
+        overlay {
+            if empty {
+                ContentUnavailableView(title, systemImage: systemImage, description: description.map(Text.init))
+                    .background(Color(.systemGroupedBackground))   // the list's own grey, not white, in light mode
+            }
+        }
     }
 }
 

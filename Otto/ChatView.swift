@@ -327,7 +327,7 @@ struct ChatView: View {
                         .contentTransition(.interpolate)
                         .animation(.snappy, value: step)
                 }
-                .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                .font(size: 12, design: .monospaced, relativeTo: .caption).foregroundStyle(.secondary)
                 .accessibilityElement(children: .ignore).accessibilityLabel("Otto: \(step)")
                 .padding(.leading, 20).padding(.trailing, 72)
                 .padding(.bottom, ui.bottomInset + 6)
@@ -615,8 +615,8 @@ struct ChatView: View {
         .animation(.snappy, value: calls.live?.id)
         .animation(.snappy, value: gate.card?.key)
         // The thread fades out under the bar, as in Messages: the soft scroll edge alone blurs only up by the
-        // status bar, so bubbles read sharp behind the face and the banners. Solid under the bar, then a 24pt
-        // fade below it (the composer's, mirrored), so there is no band where a hard-edged fill would be.
+        // status bar, so bubbles read sharp behind the face and the banners. Solid under the bar, then a 40pt
+        // fade below it, longer than a line of text so the line there fades instead of looking sliced.
         // A pull down on the bar's empty space opens search too: the top of a long thread is a long way up.
         // Behind the buttons, so they keep their own touches.
         .background {
@@ -625,9 +625,9 @@ struct ChatView: View {
                     Color(.systemBackground)
                     LinearGradient(colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
                                    startPoint: .top, endPoint: .bottom)
-                        .frame(height: 24)
+                        .frame(height: 40)
                 }
-                .padding(.bottom, -24)
+                .padding(.bottom, -40)
                 .ignoresSafeArea(edges: .top)
                 .allowsHitTesting(false)
                 Color.clear.contentShape(.rect)
@@ -753,6 +753,8 @@ struct ChatView: View {
 /// until you send, like Messages.
 struct Composer: View {
     @Environment(OttoStore.self) private var store
+    /// Reduce Motion: the buttons cross-fade instead of scaling in.
+    @Environment(\.accessibilityReduceMotion) private var still
     let ui: ComposerUI
     let thread: any ChatThread
     @State private var draft = ""
@@ -806,6 +808,7 @@ struct Composer: View {
                     .glassEffect(.regular.interactive(), in: .circle)
             }
             .tint(.secondary)
+            .accessibilityLabel("Add photo")
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -817,6 +820,7 @@ struct Composer: View {
                             Image(systemName: "xmark").frame(width: 36, height: 36)
                         }
                         .tint(.secondary)
+                        .accessibilityLabel("Cancel recording")
                         TimelineView(.periodic(from: started, by: 1)) { tl in
                             let s = Int(tl.date.timeIntervalSince(started))
                             HStack(spacing: 8) {
@@ -834,6 +838,7 @@ struct Composer: View {
                                 .foregroundStyle(.white, Color.red)
                                 .frame(width: 36, height: 36)
                         }
+                        .accessibilityLabel("Send voice message")
                     } else {
                         ComposerTextView(text: $draft, focused: $focused, placeholder: "Message", mentions: members.map(\.name)) { images in
                             // Group and pip threads have no photos on the server.
@@ -847,7 +852,8 @@ struct Composer: View {
                                 Image(systemName: "waveform").frame(width: 36, height: 36)
                             }
                             .tint(.secondary)
-                            .transition(.scale(scale: 0.6).combined(with: .opacity))
+                            .accessibilityLabel("Record voice message")
+                            .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                             }
                         } else {
                             // Messages' send: a 37×27 pill, 6.5pt in from the field's corner (measured off a screenshot).
@@ -859,7 +865,8 @@ struct Composer: View {
                                     .background(Color(red: 0.525, green: 0.553, blue: 0.592), in: .capsule)
                             }
                             .padding(.trailing, 6.5).padding(.bottom, 4.5)   // centred in a one-line field (measured), like Messages
-                            .transition(.scale(scale: 0.6).combined(with: .opacity))
+                            .accessibilityLabel("Send")
+                            .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                         }
                     }
                 }
@@ -905,6 +912,9 @@ struct Composer: View {
         // `-recordDemo` starts a voice note.
         .task {
             let args = ProcessInfo.processInfo.arguments
+            // The seeds land once the thread has settled at the bottom, as typing would, so the
+            // composer growing keeps the newest bubble in view the way it does for real.
+            if args.contains("-seedAttachments") || args.contains("-seedDraft") { try? await Task.sleep(for: .seconds(1)) }
             if args.contains("-seedAttachments") {
                 attachments = [UIColor.systemOrange, .systemTeal].map { c in
                     Attachment(image: UIGraphicsImageRenderer(size: CGSize(width: 300, height: 200)).image { ctx in c.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 300, height: 200)) })
@@ -2667,11 +2677,32 @@ private struct AddPassSheet: UIViewControllerRepresentable {
 extension ShapeStyle where Self == Color {
     /// Yours: the slate grey of the user's side in the reference (sampled #60656B in dark mode).
     /// Light mode is a shade darker than a straight lift, so white text clears 4.5:1.
+    /// Increase Contrast pushes both a step further from the background, as the system greys do.
     static var outgoingBubble: Color {
-        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.376, green: 0.396, blue: 0.420, alpha: 1) : UIColor(red: 0.420, green: 0.443, blue: 0.471, alpha: 1) })
+        Color(UIColor { t in
+            let high = t.accessibilityContrast == .high
+            return t.userInterfaceStyle == .dark
+                ? UIColor(red: 0.376, green: 0.396, blue: 0.420, alpha: 1).adjusted(by: high ? 0.08 : 0)
+                : UIColor(red: 0.420, green: 0.443, blue: 0.471, alpha: 1).adjusted(by: high ? -0.08 : 0)
+        })
     }
     /// Messages' grey for the other side, a shade darker than systemGray5 in dark mode.
     static var incomingBubble: Color {
-        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.149, green: 0.145, blue: 0.165, alpha: 1) : UIColor(red: 0.914, green: 0.914, blue: 0.922, alpha: 1) })
+        Color(UIColor { t in
+            let high = t.accessibilityContrast == .high
+            return t.userInterfaceStyle == .dark
+                ? UIColor(red: 0.149, green: 0.145, blue: 0.165, alpha: 1).adjusted(by: high ? 0.08 : 0)
+                : UIColor(red: 0.914, green: 0.914, blue: 0.922, alpha: 1).adjusted(by: high ? -0.08 : 0)
+        })
+    }
+}
+
+private extension UIColor {
+    /// The same grey, lighter (+) or darker (−) by `d` on each channel.
+    func adjusted(by d: CGFloat) -> UIColor {
+        guard d != 0 else { return self }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        getRed(&r, green: &g, blue: &b, alpha: &a)
+        return UIColor(red: r + d, green: g + d, blue: b + d, alpha: a)
     }
 }

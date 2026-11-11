@@ -957,14 +957,15 @@ struct GroupDetailSheet: View {
                     VStack(alignment: .leading, spacing: 0) {
                         Text(m.name).lineLimit(1)
                         if let job = m.isOtto ? String(localized: "Always in the group") : pips.details[m.id]?.job {
-                            Text(job).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
+                            Text(job).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(2)
                         }
                     }
                     Spacer(minLength: 8)
-                    Text(Self.state(m.state)).font(size: 15, relativeTo: .subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .contentShape(.rect)
             }
+            // The face shows the state; VoiceOver hears it.
+            .accessibilityValue(Self.state(m.state))
             .buttonStyle(.plain)
             .allowsHitTesting(!m.isOtto)   // Otto has no pip page
             if !m.isOtto {

@@ -670,7 +670,7 @@ enum PipSheet: Identifiable, Hashable {
         let data = body.flatMap { try? JSONEncoder().encode($0) }
         guard let r = await request(method, path, body: data) else { return String(localized: "Couldn’t reach Otto. Nothing changed.") }
         guard (200..<300).contains(r.status) else {
-            return r.status == 404 ? String(localized: "This server can’t do that yet. Nothing changed.") : String(localized: "That didn’t go through. Nothing changed.")
+            return r.status == 404 ? String(localized: "Otto on your Mac doesn’t do this yet. Update it there, then try again. Nothing changed.") : String(localized: "That didn’t go through. Nothing changed.")
         }
         took(r.data)
         return nil

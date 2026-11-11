@@ -267,7 +267,7 @@ struct DetailsView: View {
                 LabeledContent(e.title, value: e.start.formatted(date: .omitted, time: .shortened))
             }
         } header: { Text("Today") } footer: {
-            Text("as of \(b.asOf.formatted(date: .omitted, time: .shortened)) \(TimeZone.current.abbreviation() ?? "")")
+            Text("as of \(b.asOf.formatted(date: .omitted, time: .shortened))")
         }
 
         if !b.inbox.isEmpty || b.bulk > 0 {

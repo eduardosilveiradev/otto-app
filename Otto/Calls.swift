@@ -211,11 +211,13 @@ struct CallSheet: View {
                 .accessibilityLabel("Say it. Hold for more.")
             }
             HStack(spacing: 10) {
-                Button { confirmTakeover = true } label: {
-                    Label("Take Over", systemImage: "phone.arrow.right").frame(maxWidth: .infinity)
+                // Only when the line can be handed over; a disabled one read as a broken button.
+                if call.takeover {
+                    Button { confirmTakeover = true } label: {
+                        Label("Take Over", systemImage: "phone.arrow.right").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
                 }
-                .buttonStyle(.glass)
-                .disabled(!call.takeover)
                 Button(role: .destructive) { confirmEnd = true } label: {
                     Label("End", systemImage: "phone.down.fill").frame(maxWidth: .infinity)
                 }

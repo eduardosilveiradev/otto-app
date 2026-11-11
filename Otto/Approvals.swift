@@ -168,9 +168,8 @@ struct ApprovalSheet: View {
 
         if let stat = request.stat {
             Section {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(stat).font(.system(.caption, design: .monospaced)).fixedSize()
-                }
+                // Wrapped, not a sideways scroll nothing hinted at.
+                Text(stat).font(.system(.caption, design: .monospaced))
             } header: { Text(request.branch.map { "Diff against main · \($0)" } ?? "Diff") }
         }
     }
