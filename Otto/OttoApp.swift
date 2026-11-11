@@ -536,6 +536,8 @@ final class OttoStore {
         }
         // `-scriptDemo`: a scripted session for the launch film; see scriptDemo().
         if ProcessInfo.processInfo.arguments.contains("-scriptDemo") { Task { await scriptDemo() } }
+        // `-emptyThread`: Otto's thread with nothing in it, over whatever a fixture seeded.
+        if ProcessInfo.processInfo.arguments.contains("-emptyThread") { messages = [] }
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
         if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift"
             if ProcessInfo.processInfo.arguments.contains("-todos") {

@@ -366,7 +366,7 @@ final class MockBackend: OttoBackend {
     func gate() async -> GateReply? {
         #if DEBUG
         // `-mockGate`: the flight-day card; off otherwise, so the other screenshots have a plain header.
-        if PipFixture.on || !CommandLine.arguments.contains("-mockGate") { return nil }
+        if !CommandLine.arguments.contains("-mockGate") { return nil }
         #endif
         let dep = Date().addingTimeInterval(3 * 3600)
         return GateReply(card: GateCard(

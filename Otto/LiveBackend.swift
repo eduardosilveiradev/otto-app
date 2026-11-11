@@ -497,6 +497,10 @@ final class LiveBackend: OttoBackend {
     }
 
     func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse? {
+        #if DEBUG
+        // `-pipsFixture` against a dead server: the list a returning user has saved, for screenshots.
+        if let r = PipFixture.respond(method, path, query: query, body: body) { return r }
+        #endif
         var c = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         c.percentEncodedPath = "/" + path   // ids are already escaped: they're opaque and may hold a slash
         if !query.isEmpty { c.queryItems = query }
