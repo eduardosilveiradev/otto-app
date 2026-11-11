@@ -134,9 +134,9 @@ struct MediaViewerView: View {
                 Spacer()
                 if let i {
                     VStack(spacing: 1) {
-                        Text("\(i + 1) of \(items.count)").font(.system(size: 15, weight: .semibold))
+                        Text("\(i + 1) of \(items.count)").font(size: 15, weight: .semibold, relativeTo: .subheadline)
                         Text("\(items[i].mine ? "You" : "Otto") · \(items[i].date.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.system(size: 12)).foregroundStyle(.secondary)
+                            .font(size: 12, relativeTo: .caption).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 14).padding(.vertical, 6)
                     .glassEffect(.regular, in: .capsule)
@@ -239,7 +239,7 @@ private struct VideoPage: View {
             } else {
                 VStack(spacing: 12) {
                     ProgressView().tint(.white).controlSize(.large)
-                    Text("Loading video").font(.system(size: 15)).foregroundStyle(.white.opacity(0.7))
+                    Text("Loading video").font(size: 15, relativeTo: .subheadline).foregroundStyle(.white.opacity(0.7))
                 }
             }
         }

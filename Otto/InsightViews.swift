@@ -140,7 +140,7 @@ private struct MoneyList: View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(money(m.byCurrency.first { $0.currency == cur }?.total ?? 0, cur))
-                        .font(.system(size: 40, weight: .semibold).monospacedDigit())
+                        .monospacedDigit().font(size: 40, weight: .semibold, relativeTo: .largeTitle)
                     Text("\(month.map(monthName) ?? "All time")\(category.map { " · \($0)" } ?? "")")
                         .font(.subheadline).foregroundStyle(.secondary)
                     let others = m.byCurrency.filter { $0.currency != cur }

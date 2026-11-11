@@ -101,7 +101,7 @@ struct ApprovalSheet: View {
     @ViewBuilder private func paymentRows(_ p: ApprovalRequest.Payment) -> some View {
         Section {
             VStack(alignment: .leading, spacing: 4) {
-                Text(p.money(p.total)).font(.system(size: 34, weight: .semibold)).monospacedDigit()
+                Text(p.money(p.total)).monospacedDigit().font(size: 34, weight: .semibold, relativeTo: .largeTitle)
                 Text(p.merchant).font(.headline)
                 if let site = p.site { Text(site).font(.subheadline).foregroundStyle(.secondary) }
             }
@@ -253,21 +253,21 @@ struct PrintedReceipt: View {
                 Image(systemName: "creditcard.fill").font(.system(size: 13)).foregroundStyle(Color(white: 0.55))
                     .frame(width: 22, height: 22).background(Color(white: 0.22), in: .rect(cornerRadius: 5))
                 Spacer()
-                Text(payment.test == true ? "Test" : "Approved").font(.system(size: 12, weight: .medium))
+                Text(payment.test == true ? "Test" : "Approved").font(size: 12, weight: .medium, relativeTo: .caption)
                     .foregroundStyle(Color(white: 0.75))
-                    .padding(.horizontal, 10).frame(height: 24).background(Color(white: 0.22), in: .capsule)
+                    .padding(.horizontal, 10).frame(minHeight: 24).background(Color(white: 0.22), in: .capsule)
             }
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(payment.merchant).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                        Text(payment.merchant).font(size: 14, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.white).lineLimit(1)
                         Text(payment.items.count == 1 ? payment.items[0].name : "\(payment.items.count) items")
-                            .font(.system(size: 12)).foregroundStyle(Color(white: 0.6)).lineLimit(1)
+                            .font(size: 12, relativeTo: .caption).foregroundStyle(Color(white: 0.6)).lineLimit(1)
                     }
                     Spacer(minLength: 12)
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("Total").font(.system(size: 11)).foregroundStyle(Color(white: 0.6))
-                        Text(payment.money(payment.total)).font(.system(size: 17, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
+                        Text("Total").font(size: 11, relativeTo: .caption2).foregroundStyle(Color(white: 0.6))
+                        Text(payment.money(payment.total)).monospacedDigit().font(size: 17, weight: .semibold, relativeTo: .headline).foregroundStyle(.white)
                     }
                 }
                 status
@@ -305,7 +305,7 @@ struct PrintedReceipt: View {
                 Text(label).id(stage)
                     .transition(.asymmetric(insertion: .offset(y: 4).combined(with: .opacity), removal: .offset(y: -4).combined(with: .opacity)))
             }
-            .font(.system(size: 12, weight: .medium)).foregroundStyle(Color(white: 0.7))
+            .font(size: 12, weight: .medium, relativeTo: .caption).foregroundStyle(Color(white: 0.7))
         }
         .clipped()
     }
@@ -333,8 +333,7 @@ struct PrintedReceipt: View {
     }
 
     private var paper: some View {
-        let mono = Font.system(size: 11, weight: .medium, design: .monospaced)
-        return VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             Image(systemName: "sparkle").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
                 .frame(width: 32, height: 32).background(Color(white: 0.12), in: .rect(cornerRadius: 6))
                 .frame(maxWidth: .infinity).padding(.bottom, 14)
@@ -347,7 +346,7 @@ struct PrintedReceipt: View {
                 .padding(.vertical, 4)
             }
             dashed
-            row("TOTAL", payment.money(payment.total)).font(.system(size: 13, weight: .bold, design: .monospaced)).padding(.vertical, 6)
+            row("TOTAL", payment.money(payment.total)).font(size: 13, weight: .bold, design: .monospaced, relativeTo: .footnote).padding(.vertical, 6)
             dashed
             VStack(alignment: .leading, spacing: 3) {
                 row("Merchant", payment.site ?? payment.merchant)
@@ -357,10 +356,10 @@ struct PrintedReceipt: View {
             .foregroundStyle(Color(white: 0.35))
             .padding(.vertical, 6)
             Barcode(seed: payment.merchant + payment.money(payment.total)).frame(height: 34).padding(.top, 10).padding(.horizontal, 30)
-            Text(payment.test == true ? "TEST · NOTHING CHARGED" : "THANK YOU").font(.system(size: 9, design: .monospaced))
+            Text(payment.test == true ? "TEST · NOTHING CHARGED" : "THANK YOU").font(size: 9, design: .monospaced, relativeTo: .caption2)
                 .foregroundStyle(Color(white: 0.5)).frame(maxWidth: .infinity).padding(.top, 4)
         }
-        .font(mono).monospacedDigit()
+        .font(size: 11, weight: .medium, design: .monospaced, relativeTo: .caption2)
         .foregroundStyle(Color(white: 0.12))
         .padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 26)
         .background(Color(white: 0.985))

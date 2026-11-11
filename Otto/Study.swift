@@ -26,12 +26,12 @@ struct StudyBubble: View {
         Button { open = true } label: {
             VStack(alignment: .leading, spacing: 3) {
                 Text(set?.title ?? (missing ? "Study set — no longer available" : "Study set"))
-                    .font(.system(size: 16, weight: .semibold)).lineLimit(2)
+                    .font(size: 16, weight: .semibold, relativeTo: .callout).lineLimit(2)
                 if let set {
                     Text([set.source, count(set)].compactMap { $0 }.joined(separator: " · "))
-                        .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                        .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Text("Study").font(.system(size: 15, weight: .medium)).foregroundStyle(.blue).padding(.top, 6)
+                Text("Study").font(size: 15, weight: .medium, relativeTo: .subheadline).foregroundStyle(.blue).padding(.top, 6)
             }
             .frame(width: 230, alignment: .leading)
             .padding(.horizontal, 14).padding(.vertical, 11)
@@ -115,7 +115,7 @@ private struct CardsPane: View {
             if let i = queue.first {
                 let c = cards[i]
                 Text(run.flipped ? c.back : c.front)
-                    .font(.system(size: run.flipped ? 20 : 26, weight: run.flipped ? .regular : .semibold))
+                    .font(size: run.flipped ? 20 : 26, weight: run.flipped ? .regular : .semibold, relativeTo: .title2)
                     .multilineTextAlignment(.center).padding(24)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 24, style: .continuous))
@@ -171,7 +171,7 @@ private struct QuizPane: View {
                 if run.at < quiz.count {
                     let q = quiz[run.at], picked = run.answered[run.at]
                     Text("\(run.at + 1) of \(quiz.count)").font(.footnote).foregroundStyle(.secondary).monospacedDigit()
-                    Text(q.q).font(.system(size: 22, weight: .semibold))
+                    Text(q.q).font(size: 22, weight: .semibold, relativeTo: .title2)
                     ForEach(q.options.indices, id: \.self) { o in
                         Button { if picked == nil { withAnimation(.snappy) { run.answered[run.at] = o } } } label: {
                             Text(q.options[o]).frame(maxWidth: .infinity, alignment: .leading)

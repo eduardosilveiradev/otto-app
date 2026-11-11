@@ -72,7 +72,7 @@ struct WalkieView: View {
             talkButton
 
             Text(caption)
-                .font(.system(size: 17, weight: .semibold))
+                .font(size: 17, weight: .semibold, relativeTo: .headline)
                 .contentTransition(.opacity)
                 .animation(.easeInOut(duration: 0.2), value: caption)
                 .padding(.top, 28)
@@ -87,7 +87,7 @@ struct WalkieView: View {
 
             // The last answer, one line: enough to glance at a crossing, no more.
             Text(reply.map { $0.text.isEmpty ? "…" : $0.text } ?? "Hold Otto and talk. Let go to send.")
-                .font(.system(size: 16))
+                .font(size: 16, relativeTo: .callout)
                 .foregroundStyle(reply == nil ? .secondary : .primary)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)

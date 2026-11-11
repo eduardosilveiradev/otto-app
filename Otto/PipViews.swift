@@ -195,7 +195,7 @@ struct ConversationsView: View {
                 .frame(height: 104)
                 .allowsHitTesting(false)
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").font(.system(size: 17)).foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").font(size: 17, relativeTo: .body).foregroundStyle(.secondary)
                 TextField("Search", text: $query)
                     .focused($searching)
                     .submitLabel(.search)
@@ -227,13 +227,15 @@ struct HeaderTitle<Face: View>: View {
         VStack(spacing: -6) {
             face()
             HStack(spacing: 4) {
-                Text(name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                Text(name).font(size: 15, weight: .semibold, relativeTo: .subheadline).lineLimit(1)
+                Image(systemName: "chevron.right").font(size: 11, weight: .semibold, relativeTo: .caption2).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
             .glassEffect(.regular.interactive(), in: .capsule)
             .frame(maxWidth: 240)
         }
+        // Bar text, so it grows only so far (see ChatView's header).
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 }
 
@@ -243,6 +245,7 @@ private struct ConversationCell: View {
     let match: ConversationMessage?
     let divided: Bool
     let store: OttoStore
+    @Environment(\.dynamicTypeSize) private var type
 
     private var pips: PipStore { store.pips }
 
@@ -251,18 +254,21 @@ private struct ConversationCell: View {
             HStack(spacing: 12) {
                 picture
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(row.name).font(.system(size: 17, weight: .semibold)).lineLimit(1)
-                        Spacer(minLength: 8)
+                    // At the accessibility sizes the time goes under the name, rather than leaving it a few letters.
+                    let stacked = type.isAccessibilitySize
+                    let line = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
+                    line {
+                        Text(row.name).font(size: 17, weight: .semibold, relativeTo: .headline).lineLimit(1)
+                        if !stacked { Spacer(minLength: 8) }
                         Text(row.lastMessage.flatMap { LiveBackend.date($0.ts) }.map(PipClock.listTime) ?? "")
-                            .font(.system(size: 15)).monospacedDigit().foregroundStyle(.secondary)
+                            .monospacedDigit().font(size: 15, relativeTo: .subheadline).foregroundStyle(.secondary)
                     }
-                    .frame(height: 22)
-                    preview.font(.system(size: 15)).lineLimit(1).frame(height: 20)
+                    .frame(minHeight: 22)
+                    preview.font(size: 15, relativeTo: .subheadline).lineLimit(1).frame(minHeight: 20)
                 }
             }
             .padding(.leading, 20).padding(.trailing, 16)
-            .frame(height: 72)
+            .frame(minHeight: 72)
             .contentShape(.rect)
         }
         .buttonStyle(CellPress())
@@ -322,6 +328,8 @@ struct PipLine: View {
     let afterLine: Bool
     var highlighted = false
     @Environment(OttoStore.self) private var store
+    /// The icon's size inside the line's text, which only takes a Font.
+    @ScaledMetric(relativeTo: .caption2) private var glyph: CGFloat = 9
 
     private var pips: PipStore { store.pips }
     private var handoff: PipHandoff? { message.handoffID.flatMap { pips.handoffs[$0] } }
@@ -342,8 +350,8 @@ struct PipLine: View {
 
     private var label: some View {
         let t = message.date.formatted(date: .omitted, time: .shortened)
-        return (Text(Image(systemName: icon)).font(.system(size: 9, weight: .semibold)) + Text(" " + t).fontWeight(.semibold) + Text(" " + message.text))
-            .font(.system(size: 11))
+        return (Text(Image(systemName: icon)).font(.system(size: glyph, weight: .semibold)) + Text(" " + t).fontWeight(.semibold) + Text(" " + message.text))
+            .font(size: 11, relativeTo: .caption2)
             .foregroundStyle(.secondary)
             .lineLimit(1).truncationMode(.tail)
             .frame(maxWidth: .infinity)
@@ -392,8 +400,8 @@ struct GroupLinkBubble: View {
                 GroupFace(id: group.id, members: group.members.filter { !$0.isOtto }.map(\.look), otto: group.members.first(where: \.isOtto)?.look,
                           size: 44, ring: UIColor(Color.incomingBubble))
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(group.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary).lineLimit(1)
-                    Text(names).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(group.name).font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(1)
+                    Text(names).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             .padding(.leading, 10).padding(.trailing, 14).padding(.vertical, 8)
@@ -422,7 +430,7 @@ struct ActivityLine: View {
                 HStack(spacing: 8) {
                     TypingDots().frame(width: 29, height: 7)
                     Text(member.activity ?? "")
-                        .font(.system(size: 14))
+                        .font(size: 14, relativeTo: .subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .contentTransition(.numericText())
@@ -432,7 +440,7 @@ struct ActivityLine: View {
                 let buttons = Message.actionButtons(member.buttons)
                 if !buttons.isEmpty {
                     HStack(spacing: 16) {
-                        ForEach(buttons) { b in Button(b.label) { press(b) }.font(.system(size: 15)).tint(.blue) }
+                        ForEach(buttons) { b in Button { press(b) } label: { Text(b.label).hitSlop() }.font(size: 15, relativeTo: .subheadline).tint(.blue) }
                     }
                     .padding(.leading, 12)
                 }
@@ -457,9 +465,9 @@ struct MentionBar: View {
                     Button { pick(m) } label: {
                         HStack(spacing: 4) {
                             FaceView(look: m.look.with(.rest), size: 24).frame(width: 24, height: 24)
-                            Text(m.name).font(.system(size: 15, weight: .semibold))
+                            Text(m.name).font(size: 15, weight: .semibold, relativeTo: .subheadline)
                         }
-                        .padding(.leading, 6).padding(.trailing, 12).frame(height: 36)
+                        .padding(.leading, 6).padding(.trailing, 12).frame(minHeight: 36)
                         .glassEffect(.regular.interactive(), in: .capsule)
                     }
                     .tint(.primary)
@@ -504,7 +512,7 @@ struct HandoffSheet: View {
         let toLook = to.look.with(failed ? .asleep : .rest)
         return VStack(spacing: 0) {
             Text("\(from.name) to \(to.name)")
-                .font(.system(size: 17, weight: .semibold))
+                .font(size: 17, weight: .semibold, relativeTo: .headline)
                 .lineLimit(1)
                 .padding(.top, 26).padding(.horizontal, 56)
             ScrollView {
@@ -517,7 +525,7 @@ struct HandoffSheet: View {
                     }
                     .padding(.horizontal, 16)
                     Text(result(h, from: from, to: to))
-                        .font(.system(size: 15))
+                        .font(size: 15, relativeTo: .subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.top, 16).padding(.horizontal, 16)
@@ -537,7 +545,7 @@ struct HandoffSheet: View {
         HStack(alignment: .bottom, spacing: 8) {
             if let look { FaceView(look: look, size: 34, ring: sheetColour).frame(width: 34, height: 34) } else { OwnerFace(size: 34) }
             Text(text)
-                .font(.system(size: 15))
+                .font(size: 15, relativeTo: .subheadline)
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(Color.incomingBubble, in: .rect(cornerRadius: 17, style: .continuous))
             Spacer(minLength: 10)   // the mockup's 86% wide bubble
@@ -549,7 +557,7 @@ struct HandoffSheet: View {
             if let d = LiveBackend.date(h.askedAt) {
                 let day = Calendar.current.isDateInToday(d) ? "Today" : Calendar.current.isDateInYesterday(d) ? "Yesterday" : d.formatted(.dateTime.weekday(.wide))
                 (Text(day).fontWeight(.semibold) + Text(" " + d.formatted(date: .omitted, time: .shortened)))
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .font(size: 11, relativeTo: .caption2).foregroundStyle(.secondary)
                     .padding(.top, 2)
             }
         }
@@ -675,15 +683,15 @@ struct PipDetailSheet: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(spacing: 0) {
                     FaceView(look: p.look, size: 88, live: true, ring: UIColor.systemGroupedBackground).frame(width: 88, height: 88)
-                    Text(p.name).font(.system(size: 22, weight: .semibold)).padding(.top, 4)
-                    Text(p.job).font(.system(size: 15)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Text(p.name).font(size: 22, weight: .semibold, relativeTo: .title2).padding(.top, 4)
+                    Text(p.job).font(size: 15, relativeTo: .subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 20)
 
                 if !p.description.isEmpty {
                     card {
-                        Text(p.description).font(.system(size: 15)).frame(maxWidth: .infinity, alignment: .leading)
+                        Text(p.description).font(size: 15, relativeTo: .subheadline).frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16).padding(.vertical, 12)
                     }
                 }
@@ -716,7 +724,7 @@ struct PipDetailSheet: View {
                         tile("arrow.left.arrow.right", Color(UIColor(rgb: 0x46526B)))
                         VStack(alignment: .leading, spacing: 0) {
                             Text(Self.model(p.runsOn))
-                            if let note = Self.note(p.runsOn) { Text(note).font(.system(size: 13)).foregroundStyle(.secondary) }
+                            if let note = Self.note(p.runsOn) { Text(note).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary) }
                         }
                     }
                 }
@@ -793,7 +801,7 @@ private struct DetailChrome: ViewModifier {
             .overlay(alignment: .topLeading) {
                 if let action {
                     Button(LocalizedStringKey(action), action: tap)
-                        .font(.system(size: 17, weight: .medium))
+                        .font(size: 17, weight: .medium, relativeTo: .body)
                         .frame(minWidth: 44, minHeight: 44).padding(.horizontal, 8)
                         .glassEffect(.regular.interactive(), in: .capsule)
                         .tint(.primary)
@@ -810,7 +818,7 @@ private struct FailureLine: ViewModifier {
         content
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if let text {
-                    Text(text).font(.system(size: 13)).foregroundStyle(Color(.systemRed))
+                    Text(text).font(size: 13, relativeTo: .footnote).foregroundStyle(Color(.systemRed))
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 32).padding(.vertical, 10)
@@ -881,7 +889,7 @@ struct GroupDetailSheet: View {
                 VStack(spacing: 0) {
                     GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 88, ring: UIColor.systemGroupedBackground)
                         .frame(width: 88, height: 88)
-                    Text(row.name).font(.system(size: 22, weight: .semibold)).multilineTextAlignment(.center).padding(.top, 4).padding(.horizontal, 72)
+                    Text(row.name).font(size: 22, weight: .semibold, relativeTo: .title2).multilineTextAlignment(.center).padding(.top, 4).padding(.horizontal, 72)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 20)
@@ -924,11 +932,11 @@ struct GroupDetailSheet: View {
                     VStack(alignment: .leading, spacing: 0) {
                         Text(m.name).lineLimit(1)
                         if let job = m.isOtto ? String(localized: "Always in the group") : pips.details[m.id]?.job {
-                            Text(job).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                            Text(job).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
                     Spacer(minLength: 8)
-                    Text(Self.state(m.state)).font(.system(size: 15)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(Self.state(m.state)).font(size: 15, relativeTo: .subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .contentShape(.rect)
             }
@@ -1329,7 +1337,7 @@ private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
 
 private func section<C: View>(_ title: String, bottom: CGFloat = 24, @ViewBuilder _ c: () -> C) -> some View {
     VStack(alignment: .leading, spacing: 6) {
-        Text(title).font(.system(size: 13)).foregroundStyle(.secondary).padding(.horizontal, 32)
+        Text(title).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).padding(.horizontal, 32)
         VStack(spacing: 0) { c() }
             .background(Color(sheetColour), in: .rect(cornerRadius: 26, style: .continuous))
             .padding(.horizontal, 16)
@@ -1339,7 +1347,7 @@ private func section<C: View>(_ title: String, bottom: CGFloat = 24, @ViewBuilde
 
 private func line<C: View>(divided: Bool, @ViewBuilder _ c: () -> C) -> some View {
     HStack(spacing: 12) { c() }
-        .font(.system(size: 17))
+        .font(size: 17, relativeTo: .body)
         .padding(.horizontal, 16).padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
         .overlay(alignment: .top) { if divided { Rectangle().fill(Color(.separator)).frame(height: 0.5).padding(.leading, 16) } }
@@ -1379,8 +1387,8 @@ private struct PillButton: View {
                 if let systemImage { Image(systemName: systemImage) }
                 Text(title)
             }
-            .font(.system(size: 17, weight: .semibold))
-            .frame(maxWidth: .infinity).frame(height: 50)
+            .font(size: 17, weight: .semibold, relativeTo: .headline)
+            .frame(maxWidth: .infinity).frame(minHeight: 50)
             .foregroundStyle(primary ? Color(.systemBackground) : destructive ? Color(.systemRed) : .primary)
             .background(primary ? Color.primary : Color(.secondarySystemFill), in: .capsule)
             .contentShape(.capsule)

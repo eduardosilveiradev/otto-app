@@ -74,18 +74,25 @@ private struct Page<Content: View, Footer: View>: View {
     @ViewBuilder let footer: Footer
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 24)
-            content
-            VStack(spacing: 10) {
-                Text(title).font(.system(size: 28, weight: .bold)).multilineTextAlignment(.center)
-                Text(line).font(.system(size: 16)).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+        // Fills the page as before; scrolls only once large text no longer fits on it.
+        GeometryReader { g in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 24)
+                    content
+                    VStack(spacing: 10) {
+                        Text(title).font(size: 28, weight: .bold, relativeTo: .title).multilineTextAlignment(.center)
+                        Text(line).font(size: 16, relativeTo: .callout).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 32)
+                    Spacer(minLength: 32)
+                    VStack(spacing: 6) { footer }
+                        .padding(.bottom, 8)
+                }
+                .frame(maxWidth: .infinity, minHeight: g.size.height)
             }
-            .padding(.top, 32)
-            Spacer(minLength: 32)
-            VStack(spacing: 6) { footer }
-                .padding(.bottom, 8)
+            .scrollBounceBehavior(.basedOnSize)
         }
     }
 }
@@ -100,9 +107,9 @@ private struct Primary: View {
                 Text(label).opacity(busy ? 0 : 1)
                 if busy { ProgressView().tint(Color(white: 0.12)) }
             }
-            .font(.system(size: 17, weight: .semibold))
+            .font(size: 17, weight: .semibold, relativeTo: .headline)
             .foregroundStyle(Color(white: 0.12))   // white on this orange is ~2:1
-            .frame(maxWidth: .infinity).frame(height: 52)
+            .frame(maxWidth: .infinity).frame(minHeight: 52)
         }
         .buttonStyle(.glassProminent)
         .tint(.orange)
@@ -115,9 +122,9 @@ private struct Secondary: View {
     let action: () -> Void
     var body: some View {
         Button(label, action: action)
-            .font(.system(size: 15, weight: .medium))
+            .font(size: 15, weight: .medium, relativeTo: .subheadline)
             .foregroundStyle(.secondary)
-            .frame(height: 40)
+            .frame(minHeight: 40)
     }
 }
 
@@ -194,7 +201,7 @@ private struct ConnectPage: View {
                 Secondary(label: "Scan a code instead") { withAnimation { manual = false; problem = nil } }
             } else {
                 Text("bun otto/apptokens.ts new iPhone --server https://your-mac…")
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(size: 13, design: .monospaced, relativeTo: .footnote)
                     .textSelection(.enabled)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 14).padding(.vertical, 10)
@@ -330,8 +337,8 @@ private struct TalkPage: View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: icon).font(.system(size: 18)).foregroundStyle(.orange).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 16, weight: .semibold))
-                Text(detail).font(.system(size: 14)).foregroundStyle(.secondary)
+                Text(title).font(size: 16, weight: .semibold, relativeTo: .callout)
+                Text(detail).font(size: 14, relativeTo: .subheadline).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
         }

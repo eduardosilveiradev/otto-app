@@ -267,6 +267,9 @@ struct BoardingPass: View {
             bottom
         }
         .frame(maxWidth: 340)
+        // A printed pass, like Wallet's: four cells across 340pt hold their words up to this size.
+        // The banner over the chat, and VoiceOver, carry the larger sizes.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
         .background {
             let shape = TicketShape(notchY: topHeight + 12)
             shape.cutFill(Color(.secondarySystemGroupedBackground))
@@ -298,13 +301,13 @@ struct BoardingPass: View {
         VStack(spacing: 16) {
             HStack(spacing: 12) {
                 Text("\(card.flightLabel) · \(Self.day(card.date))")
-                    .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    .font(size: 12, relativeTo: .caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 0)
                 Text(status.label)
                     .id(status.label)
                     .transition(.blurReplace(.upUp))   // exits up, the new word rises in from below
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 6).frame(height: 18)
+                    .font(size: 11, weight: .medium, relativeTo: .caption2)
+                    .padding(.horizontal, 6).frame(minHeight: 18)
                     .foregroundStyle(status.ink)
                     .background(status.fill, in: .capsule)
                     .overlay { Capsule().strokeBorder(status.ink.opacity(0.14), lineWidth: 1) }
@@ -321,11 +324,11 @@ struct BoardingPass: View {
 
     private func end(code: String?, city: String?, time: String?, leading: Bool) -> some View {
         VStack(alignment: leading ? .leading : .trailing, spacing: 0) {
-            Text(code ?? "—").font(.system(size: 40, weight: .medium)).frame(height: 48)
-            Text(city ?? " ").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+            Text(code ?? "—").font(size: 40, weight: .medium, relativeTo: .largeTitle).frame(minHeight: 48)
+            Text(city ?? " ").font(size: 12, relativeTo: .caption).foregroundStyle(.secondary).lineLimit(1)
             if let time {
                 Text(time)
-                    .font(.system(size: 13)).monospacedDigit()
+                    .monospacedDigit().font(size: 13, relativeTo: .footnote)
                     .contentTransition(.numericText())
                     .animation(.spring(response: 0.5, dampingFraction: 0.62), value: time)
                     .padding(.top, 8)
@@ -339,12 +342,12 @@ struct BoardingPass: View {
             HStack(spacing: 4) {
                 Circle().strokeBorder(Color.secondary.opacity(0.7), lineWidth: 1.5).frame(width: 6, height: 6)
                 Dashes(on: 3, off: 3).dashed(Color.secondary.opacity(0.45), lineWidth: 1).frame(height: 1)
-                Image(systemName: "airplane").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+                Image(systemName: "airplane").font(size: 13, weight: .semibold, relativeTo: .footnote).foregroundStyle(.secondary)
                 Dashes(on: 3, off: 3).dashed(Color.secondary.opacity(0.45), lineWidth: 1).frame(height: 1)
                 Circle().strokeBorder(Color.secondary.opacity(0.7), lineWidth: 1.5).frame(width: 6, height: 6)
             }
             if let m = card.durationMinutes {
-                Text("\(m / 60)h \(m % 60)m").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("\(m / 60)h \(m % 60)m").font(size: 12, relativeTo: .caption).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity)
@@ -381,9 +384,9 @@ struct BoardingPass: View {
                     .frame(width: 32, height: 32)
                     .background(Color(light: 0xD8E8F3, dark: 0x2C3352), in: .circle)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(card.booking.map { "Booking \($0)" } ?? card.flightLabel).font(.system(size: 13)).lineLimit(1)
+                    Text(card.booking.map { "Booking \($0)" } ?? card.flightLabel).font(size: 13, relativeTo: .footnote).lineLimit(1)
                     Text(watch.pass == nil ? "No pass saved" : "Pass saved on this phone")
-                        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                        .font(size: 12, relativeTo: .caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 cta
@@ -394,9 +397,9 @@ struct BoardingPass: View {
 
     private func cell(_ title: String, _ value: String?) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title).font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(title).font(size: 12, relativeTo: .caption).foregroundStyle(.secondary)
             Text(value ?? "—")
-                .font(.system(size: 13)).monospacedDigit().lineLimit(1)
+                .monospacedDigit().font(size: 13, relativeTo: .footnote).lineLimit(1)
                 .contentTransition(.numericText())
                 .animation(.spring(response: 0.5, dampingFraction: 0.62), value: value)
         }
@@ -426,10 +429,10 @@ struct BoardingPass: View {
                     .id(label)
                     .transition(.blurReplace)
             }
-            .font(.system(size: 13, weight: .medium))
+            .font(size: 13, weight: .medium, relativeTo: .footnote)
             .lineLimit(1)
             .padding(.leading, action == .add ? 12 : 10).padding(.trailing, 12)
-            .frame(height: 36)
+            .frame(minHeight: 36)
             .foregroundStyle(action == .show ? Color.primary : Color(.systemBackground))
             .background(action == .show ? Color(uiColor: .label).opacity(scheme == .dark ? 0.07 : 0.04) : Color(uiColor: .label), in: .capsule)
             .shadow(color: .black.opacity(action == .show ? 0 : (scheme == .dark ? 0.4 : 0.2)), radius: 1, y: 1)

@@ -21,9 +21,9 @@ struct OTPChip: View {
                         .font(.system(size: 14, weight: .semibold)).foregroundStyle(.blue)
                         .frame(width: 30, height: 30).background(Color.blue.opacity(0.12), in: .circle)
                     Text(String(repeating: "•", count: otp.code.count))
-                        .font(.system(size: 17, weight: .semibold, design: .rounded)).foregroundStyle(.primary)
+                        .font(size: 17, weight: .semibold, design: .rounded, relativeTo: .headline).foregroundStyle(.primary)
                     Spacer(minLength: 4)
-                    Text("Show").font(.system(size: 15)).foregroundStyle(.blue)
+                    Text("Show").font(size: 15, relativeTo: .subheadline).foregroundStyle(.blue)
                 }
                 .padding(10)
                 .background(Color(.systemBackground).opacity(0.7), in: .rect(cornerRadius: 12, style: .continuous))
