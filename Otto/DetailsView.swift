@@ -38,7 +38,7 @@ struct DetailsView: View {
                         Text("Otto").font(.title2.weight(.semibold))
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
-                            Text(store.backend is MockBackend ? "mock data"
+                            Text(store.backend is MockBackend ? "sample data"
                                  : !store.connected ? "asleep — can't reach the server" : "connected")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
@@ -78,13 +78,15 @@ struct DetailsView: View {
                             }
                         }
                     }
-                    Toggle("Speak replies when I speak", isOn: Binding(
-                        get: { speakReplies ?? true },
-                        set: { on in
-                            speakReplies = on
-                            Task { speakReplies = await store.backend.speakReplies(set: on) ?? !on }
-                        }))
-                        .disabled(speakReplies == nil)
+                    // Only once the server has said: a guessed "on" that can't be changed is worse than no row.
+                    if let speak = speakReplies {
+                        Toggle("Speak replies when I speak", isOn: Binding(
+                            get: { speak },
+                            set: { on in
+                                speakReplies = on
+                                Task { speakReplies = await store.backend.speakReplies(set: on) ?? !on }
+                            }))
+                    }
                     Toggle("Stay connected in background", isOn: $stayAwake)
                     NavigationLink("Settings") { SettingsView() }
                 }
@@ -152,6 +154,8 @@ struct DetailsView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            // Rows scrolled up stop at the bar instead of running under the clock and the back button.
+            .scrollEdgeEffectStyle(.hard, for: .top)
             .scrollContentBackground(.hidden)
             .task {
                 guard checkOnOpen else { return }
@@ -216,29 +220,23 @@ struct DetailsView: View {
         else { AccessibilityNotification.Announcement("Connected").post() }
     }
 
-    /// The clock while Otto is holding things back, how far through the hold, and what's waiting.
+    /// How long Otto is holding things back, how far through the hold, and what's waiting.
     @ViewBuilder private func snoozed(_ s: Snooze, until: Date) -> some View {
         Section {
             TimelineView(.periodic(from: .now, by: 1)) { tl in
                 let start = s.since ?? tl.date
                 let span = until.timeIntervalSince(start)
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(tl.date, format: .dateTime.hour().minute())
-                            .monospacedDigit().font(size: 44, weight: .light, relativeTo: .largeTitle)
-                        Spacer()
-                        Text("Snoozed until \(until.formatted(date: .omitted, time: .shortened))")
-                            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                            .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(Color(.tertiarySystemFill), in: .capsule)
-                    }
+                    // No clock of its own: the status bar has one.
+                    Text("Snoozed until \(until.formatted(date: .omitted, time: .shortened))")
+                        .font(.title3.weight(.semibold))
                     ProgressView(value: span > 0 ? min(1, max(0, tl.date.timeIntervalSince(start) / span)) : 1)
                         .tint(.orange)
                     HStack(spacing: 10) {
                         Button { Task { await store.setSnooze(.clear) } } label: {
                             Text("Hand them over now").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent).tint(Color(.label)).foregroundStyle(Color(.systemBackground))
+                        .buttonStyle(.borderedProminent)
                         Button { Task { await store.setSnooze(.minutes(60)) } } label: {
                             Text("Another hour").frame(maxWidth: .infinity)
                         }

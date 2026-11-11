@@ -58,7 +58,7 @@ struct ScheduleChip: View {
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(.blue)
                     .frame(width: 30, height: 30).background(Color.blue.opacity(0.12), in: .circle)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(trigger.gist).font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(1)
+                    Text(trigger.gist).font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(2)
                     Text(scheduleLine(type: trigger.type, schedule: trigger.schedule, repeating: trigger.repeating, next: trigger.next))
                         .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -130,7 +130,7 @@ struct SchedulesScreen: View {
         let mail = on.filter { $0.type == "email" }
         let off = t.triggers.filter { !$0.enabled }.sorted { ($0.lastFired ?? "") > ($1.lastFired ?? "") }
         return List {
-            if on.isEmpty { Text("Nothing scheduled.").foregroundStyle(.secondary) }
+            if on.isEmpty && !off.isEmpty { Text("Nothing scheduled.").foregroundStyle(.secondary) }
             if !once.isEmpty { Section("Coming up") { ForEach(once) { row($0) } } }
             if !repeating.isEmpty { Section("Repeating") { ForEach(repeating) { row($0) } } }
             if !mail.isEmpty { Section("Watching mail") { ForEach(mail) { row($0) } } }
@@ -142,6 +142,7 @@ struct SchedulesScreen: View {
                 }
             }
         }
+        .emptyState(t.triggers.isEmpty, "Nothing scheduled", systemImage: "calendar.badge.clock")
     }
 
     private func row(_ t: DashTrigger) -> some View {

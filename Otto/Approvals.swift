@@ -54,7 +54,8 @@ struct ApprovalSheet: View {
                 }
             }
             // "Approved", not "Paid": the Mac has the go-ahead; the payment itself is Otto's to report in the chat.
-            .navigationTitle(paid ? "Approved" : request.title)
+            // The amount the way the sheet writes it ("€17.00"), not the server's "17.00 EUR".
+            .navigationTitle(paid ? "Approved" : request.payment.map { "Pay \($0.money($0.total))" } ?? request.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if !paid {

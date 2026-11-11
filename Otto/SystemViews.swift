@@ -84,7 +84,6 @@ struct ActivityScreen: View {
 
     private func jobs(_ j: Jobs) -> some View {
         List {
-            if j.jobs.isEmpty { Text("No background jobs.").foregroundStyle(.secondary) }
             ForEach(j.jobs.sorted { $0.createdAt > $1.createdAt }) { job in
                 NavigationLink {
                     ScrollView {
@@ -109,6 +108,7 @@ struct ActivityScreen: View {
                 }
             }
         }
+        .emptyState(j.jobs.isEmpty, "No background jobs", systemImage: "gearshape.2")
     }
 
     private func triggers(_ t: Triggers) -> some View {
@@ -135,7 +135,9 @@ struct ActivityScreen: View {
             let when: String = if let n = t.nextRun { "next \(ago(Date(timeIntervalSince1970: n / 1000)))" }
                 else if t.type == "email" { "on matching mail" }
                 else { t.lastFired.map { "fired \(ago($0))" } ?? "" }
-            Text([when, t.repeating ? "repeats" : nil, t.type == "cron" && t.repeating ? t.schedule : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+            // A repeating cron in words, as Schedules has it: "Weekdays at 18:00", never "0 18 * * 1-5".
+            let repeats: String? = !t.repeating ? nil : t.type == "cron" ? t.schedule.map { humanCron($0) ?? $0 } : "repeats"
+            Text([when, repeats].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.footnote).foregroundStyle(.secondary)
         }
     }

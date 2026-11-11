@@ -173,7 +173,7 @@ struct WalkieView: View {
                 .frame(width: 200, height: 200)
                 .scaleEffect(phase == .listening ? 1 : 0.9)
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: phase == .listening)
-            OttoAvatar(size: 180, thinking: phase == .thinking, lookingAtCursor: phase == .listening)
+            OttoAvatar(size: 180, thinking: phase == .thinking)
                 .scaleEffect(holding ? 0.96 : 1)
                 .animation(.spring(response: 0.25, dampingFraction: 0.7), value: holding)
         }

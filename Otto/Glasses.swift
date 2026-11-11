@@ -108,7 +108,8 @@ struct GlassesScreen: View {
 
     var body: some View {
         List {
-            Section {
+            // No black box before there's a camera to show: the connect button leads until then.
+            if g.session != nil || g.frame != nil { Section {
                 ZStack {
                     Color.black
                     if let f = g.frame { Image(uiImage: f).resizable().scaledToFit() }
@@ -119,7 +120,7 @@ struct GlassesScreen: View {
                 .listRowInsets(EdgeInsets())
             } footer: {
                 if g.stream == .streaming { Text(receiver.isEmpty ? "Preview only" : "\(g.sent) frames sent") }
-            }
+            } }
             Section {
                 if g.registration != .registered {
                     Button("Connect glasses") { Task { await g.register() } }
@@ -139,5 +140,6 @@ struct GlassesScreen: View {
             if let e = g.error { Section { Text(e).foregroundStyle(.secondary) } }
         }
         .navigationTitle("Glasses")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

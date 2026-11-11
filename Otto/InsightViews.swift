@@ -21,10 +21,11 @@ private struct LoopsList: View {
     var body: some View {
         let text = Dictionary(l.open.map { ($0.id, $0.text) }, uniquingKeysWith: { a, _ in a })
         List {
-            Section {
-                if l.open.isEmpty { Text("Nothing open.").foregroundStyle(.secondary) }
-                ForEach(l.open) { row($0, closed: flipped.contains($0.id)) }
-            } header: { Text("Open · \(l.open.count)") }
+            if !l.open.isEmpty {
+                Section {
+                    ForEach(l.open) { row($0, closed: flipped.contains($0.id)) }
+                } header: { Text("Open · \(l.open.count)") }
+            }
 
             let p = l.plan
             if !p.close.isEmpty || !p.propose.isEmpty || !p.avoidance.isEmpty {
@@ -45,6 +46,8 @@ private struct LoopsList: View {
                 }
             }
         }
+        .emptyState(l.open.isEmpty && l.recent.isEmpty && l.plan.close.isEmpty && l.plan.propose.isEmpty && l.plan.avoidance.isEmpty,
+                    "Nothing open", systemImage: "checklist")
         .refreshable { await reload() }
     }
 
@@ -233,7 +236,7 @@ struct TripsScreen: View {
             let upcoming = t.trips.filter { $0.end >= today }.sorted { $0.start < $1.start }
             let past = t.trips.filter { $0.end < today }.sorted { $0.start > $1.start }
             List {
-                if upcoming.isEmpty { Text(t.trips.isEmpty ? "No bookings on file. Forward a confirmation to Otto." : "Nothing coming up.").foregroundStyle(.secondary) }
+                if upcoming.isEmpty && !past.isEmpty { Text("Nothing coming up.").foregroundStyle(.secondary) }
                 ForEach(upcoming) { trip($0, t) }
                 if !past.isEmpty {
                     Section {
@@ -243,6 +246,7 @@ struct TripsScreen: View {
                     }
                 }
             }
+            .emptyState(t.trips.isEmpty, "No trips", systemImage: "airplane", "Forward a booking confirmation to Otto.")
             .refreshable { await reload() }
         }
         .navigationTitle("Trips").navigationBarTitleDisplayMode(.inline)
@@ -305,7 +309,6 @@ struct PackagesList: View {
         let active = p.packages.filter { $0.status != "delivered" }
         let delivered = p.packages.filter { $0.status == "delivered" }
         List {
-            if p.packages.isEmpty { Text("Packages show up here as shipping emails arrive.").foregroundStyle(.secondary) }
             ForEach(active) { pkg in
                 package(pkg, header: pkg.id == active.first?.id ? "On the way · \(active.count)" : nil)
             }
@@ -313,6 +316,7 @@ struct PackagesList: View {
                 package(pkg, header: pkg.id == delivered.first?.id ? "Delivered" : nil)
             }
         }
+        .emptyState(p.packages.isEmpty, "No packages", systemImage: "shippingbox", "Packages show up here as shipping emails arrive.")
         .refreshable { await reload() }
     }
 

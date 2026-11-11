@@ -153,6 +153,14 @@ struct Loaded<T: Decodable, Content: View>: View {
     }
 }
 
+extension View {
+    /// A screen with nothing in it, drawn the way the system draws one (as "Can't reach your Mac" is), over
+    /// the empty list so pull to refresh still works.
+    func emptyState(_ empty: Bool, _ title: String, systemImage: String, _ description: String? = nil) -> some View {
+        overlay { if empty { ContentUnavailableView(title, systemImage: systemImage, description: description.map(Text.init)) } }
+    }
+}
+
 // MARK: - Formatting
 
 /// A server timestamp or bare date, as a Date.

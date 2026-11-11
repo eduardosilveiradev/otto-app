@@ -153,7 +153,6 @@ struct PeopleScreen: View {
         Loaded(path: "people") { (p: People, reload) in
             let cards = p.cards.filter { q.isEmpty || [$0.name, $0.relationship, $0.city, $0.org].compactMap { $0 }.joined(separator: " ").localizedCaseInsensitiveContains(q) }
             List {
-                if p.cards.isEmpty { Text("Nobody yet. Tell Otto who someone is and they show up here.").foregroundStyle(.secondary) }
                 ForEach(cards) { c in
                     NavigationLink { PersonScreen(card: c) } label: {
                         HStack {
@@ -170,6 +169,7 @@ struct PeopleScreen: View {
                     }
                 }
             }
+            .emptyState(p.cards.isEmpty, "Nobody yet", systemImage: "person.2", "Tell Otto who someone is and they show up here.")
             .searchable(text: $query, prompt: "Search people")
             .refreshable { await reload() }
         }

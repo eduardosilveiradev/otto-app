@@ -298,10 +298,6 @@ struct CallsScreen: View {
     var body: some View {
         Loaded(path: "calls") { (r: DashCalls, reload) in
             List {
-                if r.calls.isEmpty {
-                    Text("No calls in the last two hours. Ask Otto to call somewhere and it shows up here while it rings.")
-                        .foregroundStyle(.secondary)
-                }
                 ForEach(r.calls) { c in
                     Button { open = c } label: {
                         HStack(spacing: 12) {
@@ -320,6 +316,8 @@ struct CallsScreen: View {
                     .tint(.primary)
                 }
             }
+            .emptyState(r.calls.isEmpty, "No recent calls", systemImage: "phone",
+                        "Calls from the last two hours. Ask Otto to call somewhere and it shows up here while it rings.")
             .refreshable { await reload() }
         }
         .navigationTitle("Calls").navigationBarTitleDisplayMode(.inline)

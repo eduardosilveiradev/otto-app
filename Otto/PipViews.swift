@@ -1414,8 +1414,9 @@ private struct PillButton: View {
             }
             .font(size: 17, weight: .semibold, relativeTo: .headline)
             .frame(maxWidth: .infinity).frame(minHeight: 50)
-            .foregroundStyle(primary ? Color(.systemBackground) : destructive ? Color(.systemRed) : .primary)
-            .background(primary ? Color.primary : Color(.secondarySystemFill), in: .capsule)
+            // Primary is the app's one accent, as Pay, Copy code and Done are.
+            .foregroundStyle(primary ? .white : destructive ? Color(.systemRed) : .primary)
+            .background(primary ? Color.accentColor : Color(.secondarySystemFill), in: .capsule)
             .contentShape(.capsule)
         }
         .buttonStyle(PillPress())

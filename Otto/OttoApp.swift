@@ -88,7 +88,8 @@ private struct MainRoot: View {
                 withAnimation(.easeOut(duration: 0.4)) { splash = .gone }
             }
             .environment(store)
-            .task { Notifier.shared.requestPermission(); await store.start() }
+            // Notifications are asked for once, in onboarding, where "Not now" stays not now.
+            .task { await store.start() }
             .onChange(of: phase, initial: true) { _, p in
                 if store.foreground && p != .active { store.pips.leftApp() }
                 store.foreground = p == .active

@@ -254,7 +254,7 @@ struct ChatView: View {
                               who: { m in m.from == .me || m.from == .terminal ? "You" : row?.memberStates.first { $0.id == m.author }?.name ?? thread.name },
                               retry: fetchOlder, open: show, close: { closeSearch() })
             } else if thread.isOtto && messages.isEmpty && !store.ottoTyping {
-                EmptyChat(asleep: store.asleep, connected: store.connected, lookingAtCursor: focused)
+                EmptyChat(asleep: store.asleep, connected: store.connected)
             }
         }
         .onChange(of: searchWords) {
@@ -290,10 +290,11 @@ struct ChatView: View {
         .sheet(item: Binding(get: { thread.isOtto ? store.shownApproval : nil }, set: { _ in })) {
             ApprovalSheet(request: $0)
         }
-        // The header's fade, mirrored behind the composer: bubbles dissolve into the
-        // edge instead of meeting a solid strip.
+        // The header's fade, mirrored behind the composer: bubbles dissolve over the 24pt above it
+        // and are gone by the top of the field, instead of reading through the glass.
         .overlay(alignment: .bottom) {
-            LinearGradient(colors: [Color(.systemBackground).opacity(0), Color(.systemBackground)],
+            LinearGradient(stops: [.init(color: Color(.systemBackground).opacity(0), location: 0),
+                                   .init(color: Color(.systemBackground), location: 24 / (ui.bottomInset + 24))],
                            startPoint: .top, endPoint: .bottom)
                 .frame(height: ui.bottomInset + 24)
                 .ignoresSafeArea(edges: .bottom)
@@ -613,13 +614,25 @@ struct ChatView: View {
         }
         .animation(.snappy, value: calls.live?.id)
         .animation(.snappy, value: gate.card?.key)
-        // No fill behind the banner: the bar's soft scroll edge already blurs the thread under
-        // the whole bar, banner included. A systemBackground fill here is the solid black band.
+        // The thread fades out under the bar, as in Messages: the soft scroll edge alone blurs only up by the
+        // status bar, so bubbles read sharp behind the face and the banners. Solid under the bar, then a 24pt
+        // fade below it (the composer's, mirrored), so there is no band where a hard-edged fill would be.
         // A pull down on the bar's empty space opens search too: the top of a long thread is a long way up.
         // Behind the buttons, so they keep their own touches.
         .background {
-            Color.clear.contentShape(.rect)
-                .gesture(DragGesture(minimumDistance: 20).onEnded { if $0.translation.height > 50 { openSearch() } })
+            ZStack {
+                VStack(spacing: 0) {
+                    Color(.systemBackground)
+                    LinearGradient(colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: 24)
+                }
+                .padding(.bottom, -24)
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
+                Color.clear.contentShape(.rect)
+                    .gesture(DragGesture(minimumDistance: 20).onEnded { if $0.translation.height > 50 { openSearch() } })
+            }
         }
     }
 
@@ -644,7 +657,7 @@ struct ChatView: View {
         } else {
             Button { showDetails = true } label: {
                 VStack(spacing: -6) {
-                    OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, lookingAtCursor: focused)
+                    OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep)
                     HStack(spacing: 4) {
                         Text("Otto").font(size: 15, weight: .semibold, relativeTo: .subheadline)
                         Image(systemName: "chevron.right").font(size: 11, weight: .semibold, relativeTo: .caption2)
@@ -1235,7 +1248,8 @@ private struct Row: View {
         } else if message.isVoice || message.audio != nil {
             VStack(alignment: .leading, spacing: 6) {
                 VoiceRow(message: message, mine: mine)
-                if !mine, !message.text.isEmpty { Text(Self.linked(message.text)).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary) }
+                // What Otto said, so it reads as the message: full-strength text, only smaller.
+                if !mine, !message.text.isEmpty { Text(Self.linked(message.text)).font(size: 13, relativeTo: .footnote) }
             }
         } else {
             Text(text)
@@ -2240,9 +2254,7 @@ struct TodoList: View {
 private struct EmptyChat: View {
     let asleep: Bool
     let connected: Bool
-    // *** ADDED PARAMETER HERE ***
-    let lookingAtCursor: Bool
-    
+
     private var line: String {
         if !connected { return "Can't reach the server. What you send goes out when it's back." }
         return "Say hi. Reminders, mail, plans: I'll keep track of the rest."

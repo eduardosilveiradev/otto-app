@@ -376,7 +376,6 @@ private struct AwakePage: View {
                 Glyph(name: stayAwake ? "bolt.horizontal.fill" : "bolt.horizontal")
                     .contentTransition(.symbolEffect(.replace))
                 Toggle("Stay connected in background", isOn: $stayAwake)
-                    .tint(.orange)
                     .padding(14)
                     .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 14, style: .continuous))
             }

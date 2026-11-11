@@ -135,7 +135,7 @@ struct CallView: View {
                     .padding(.top, 8)
                 status.font(.headline).foregroundStyle(.white.opacity(0.6)).padding(.top, 4)
                 if let e = call.error {
-                    Text(e).font(.footnote).foregroundStyle(.red.opacity(0.8)).multilineTextAlignment(.center)
+                    Text(e).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
                         .padding(.top, 8).padding(.horizontal, 40)
                 }
                 Spacer()
