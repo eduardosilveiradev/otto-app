@@ -116,8 +116,10 @@ struct ConversationsView: View {
                         ConversationCell(row: r.conversation, match: r.matches.last, divided: i > 0, store: store)
                     }
                 } else {
+                    // Otto is a thread like the rest, pinned above them.
+                    if let otto = pips.row("app") { ConversationCell(row: otto, match: nil, divided: false, store: store, pinned: true) }
                     ForEach(Array(pips.list.enumerated()), id: \.element.id) { i, row in
-                        ConversationCell(row: row, match: nil, divided: i > 0, store: store)
+                        ConversationCell(row: row, match: nil, divided: i > 0 || pips.row("app") != nil, store: store)
                     }
                 }
             }
@@ -161,19 +163,28 @@ struct ConversationsView: View {
         }
     }
 
-    /// Otto at the top, in the bar the app has today.
-    private var top: some View {
-        Button { pips.open("app") } label: {
-            HeaderTitle(name: "Otto") {
-                FaceView(look: pips.row("app")?.otto?.look ?? .otto, size: 68, live: true)
-                    .frame(width: 68, height: 68)
+    /// A large title and the new button; Otto's own thread is the pinned first row. Until the server
+    /// lists that row, Otto stays up here, so the thread is never out of reach.
+    @ViewBuilder private var top: some View {
+        Group {
+            if pips.row("app") == nil {
+                Button { pips.open("app") } label: {
+                    HeaderTitle(name: "Otto") {
+                        FaceView(look: .otto, size: 68, live: true).frame(width: 68, height: 68)
+                    }
+                }
+                .tint(.primary)
+                .accessibilityLabel("Otto")
+                .frame(maxWidth: .infinity)
+            } else {
+                Text("Chats").font(size: 34, weight: .bold, relativeTo: .largeTitle)
+                    .accessibilityAddTraits(.isHeader)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 20).padding(.top, 34)
             }
         }
-        .tint(.primary)
         .padding(.top, 55)
         .padding(.bottom, 6)
-        .accessibilityLabel("Otto")
-        .frame(maxWidth: .infinity)
         .overlay(alignment: .topTrailing) {
             Menu {
                 Button("New group", systemImage: "person.2") { new = .group }
@@ -245,6 +256,7 @@ private struct ConversationCell: View {
     let match: ConversationMessage?
     let divided: Bool
     let store: OttoStore
+    var pinned = false
     @Environment(\.dynamicTypeSize) private var type
 
     private var pips: PipStore { store.pips }
@@ -259,6 +271,7 @@ private struct ConversationCell: View {
                     let line = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
                     line {
                         Text(row.name).font(size: 17, weight: .semibold, relativeTo: .headline).lineLimit(1)
+                        if pinned { Image(systemName: "pin.fill").font(size: 11, relativeTo: .caption2).foregroundStyle(.tertiary).accessibilityLabel("Pinned") }
                         if !stacked { Spacer(minLength: 8) }
                         Text(row.lastMessage.flatMap { LiveBackend.date($0.ts) }.map(PipClock.listTime) ?? "")
                             .monospacedDigit().font(size: 15, relativeTo: .subheadline).foregroundStyle(.secondary)
@@ -284,7 +297,9 @@ private struct ConversationCell: View {
     }
 
     @ViewBuilder private var picture: some View {
-        if row.isGroup {
+        if row.kind == "otto" {
+            FaceView(look: row.otto?.look ?? .otto, size: 58, live: true).frame(width: 58, height: 58)
+        } else if row.isGroup {
             GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 58)
         } else if let pip = row.pips.first {
             FaceView(look: pip.look, size: 58).frame(width: 58, height: 58)
@@ -304,6 +319,8 @@ private struct ConversationCell: View {
             Text(PipClock.wake(wake)).foregroundStyle(.secondary)
         } else if let m = row.lastMessage {
             Text(line(m)).foregroundStyle(row.needsYou ? .primary : .secondary)
+        } else if row.kind == "otto", let m = store.messages.last {
+            Text(m.from == .me ? "You: \(m.text)" : m.text).foregroundStyle(.secondary)
         }
     }
 
@@ -363,9 +380,14 @@ struct PipLine: View {
             .contentShape(.rect)
     }
 
+    /// Your own ask is already on screen as your message; its line only shows when the ask failed.
+    private var yoursAndFine: Bool { handoff.map { $0.from == "user" && $0.status != "failed" } ?? false }
+
     var body: some View {
         Group {
-            if tappable {
+            if yoursAndFine {
+                EmptyView()
+            } else if tappable {
                 Button(action: open) { label }.buttonStyle(.plain)
             } else {
                 label
