@@ -316,6 +316,24 @@ struct ChatView: View {
             }
         }
         .animation(.snappy, value: scrolledUp)
+        // What Otto is doing, in one quiet line above the composer, as on the Mac: only while the
+        // thinking bubble is scrolled out of view and the connection is fine, so the step is never on screen twice.
+        .overlay(alignment: .bottomLeading) {
+            if scrolledUp && !showingResults && thread.typing && thread.connected, let step = thread.typingStatus, !step.isEmpty {
+                HStack(spacing: 6) {
+                    OttoAvatar(size: 13, thinking: true)
+                    Text(step).lineLimit(1).truncationMode(.tail)
+                        .contentTransition(.interpolate)
+                        .animation(.snappy, value: step)
+                }
+                .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                .accessibilityElement(children: .ignore).accessibilityLabel("Otto: \(step)")
+                .padding(.leading, 20).padding(.trailing, 72)
+                .padding(.bottom, ui.bottomInset + 6)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
+        }
         // Messages opens the contact card by zooming it out of the header, glass over the blurred
         // thread, edge to edge (measured off a screen recording), and closes it back into the header.
         .fullScreenCover(isPresented: $showDetails) {
@@ -1501,7 +1519,11 @@ private struct Row: View {
                 .padding(.leading, 12)
             }
 
-            if message.failed == true && message.pending == true {
+            if message.pending == true && !thread.connected {
+                // Offline: it waits in the outbox and goes out on the next connection, as on the Mac.
+                Text("Will send when back online").font(size: 11, relativeTo: .caption2).foregroundStyle(.secondary)
+                    .padding(.trailing, 4)
+            } else if message.failed == true && message.pending == true {
                 // Still retried on its own at the next connection; the tap just doesn't wait for one.
                 Button { thread.retry(message.id) } label: {
                     (Text("Not delivered · ").foregroundStyle(.red) + Text("Try again").foregroundStyle(.blue)).hitSlop()
