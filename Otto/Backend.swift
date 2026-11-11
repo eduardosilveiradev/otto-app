@@ -188,7 +188,8 @@ protocol OttoBackend: AnyObject {
     var notifies: AsyncStream<(String, String)> { get }
     func decide(approval id: String, approve: Bool) async -> ApprovalOutcome
     /// The newest `limit` messages of the thread on the server, or with `since`, every one after it.
-    func history(background: Bool, limit: Int, since: Date?) async -> [Message]
+    /// Nil when the server couldn't be reached or answered with an error.
+    func history(background: Bool, limit: Int, since: Date?) async -> [Message]?
     /// True once the server has the message; false means try again later.
     func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool
     /// Same contract as `send`, for a button tap under its bubble's id.
@@ -310,7 +311,7 @@ final class MockBackend: OttoBackend {
         return try? JSONSerialization.data(withJSONObject: o)
     }
 
-    func history(background: Bool, limit: Int, since: Date?) async -> [Message] {
+    func history(background: Bool, limit: Int, since: Date?) async -> [Message]? {
         return []
     }
 

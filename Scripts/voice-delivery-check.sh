@@ -35,7 +35,7 @@ struct NotifierStub { func post(_ message: Message) {} }
     var hold = false
     var calls = 0
     var desktopSync: DesktopSync? = nil
-    func history(background: Bool, limit: Int, since: Date?) async -> [Message] { rows }
+    func history(background: Bool, limit: Int, since: Date?) async -> [Message]? { rows }
     func sendVoice(_ audio: Data, id: String, replyTo: String?) async -> String? {
         calls += 1
         if hold { return await withCheckedContinuation { held = $0 } }
@@ -122,7 +122,7 @@ cat >> "$T/check.swift" <<'SWIFT'
         let note = Message(from: .me, text: "", isVoice: true, pending: true)
         let payload = try! JSONSerialization.data(withJSONObject: [["dir": "in", "text": "spoken words", "ts": "2026-01-01T12:00:00Z", "id": note.wireID]])
         let rows = await HistoryDecoder(payload).history(background: false, limit: 50, since: nil)
-        assert(rows.count == 1 && rows[0].wireID == note.wireID)
+        assert(rows?.count == 1 && rows?[0].wireID == note.wireID)
         let backend = FakeBackend()
         let store = Store(backend)
         store.messages = [note]

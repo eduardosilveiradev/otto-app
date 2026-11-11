@@ -82,7 +82,8 @@ struct ChatView: View {
     /// The row count as of the last update (see `burst`), and an older page going in above what's on screen.
     /// Boxed like the offset: neither should re-run the body.
     @State private var counted = Counted()
-    final class Counted { var rows = 0; var paging = false }
+    /// `landing`: a search result is opening, so the composer and keyboard coming back don't scroll the thread.
+    final class Counted { var rows = 0; var paging = false; var landing = false }
     /// Far enough up the thread that the newest messages are out of sight.
     @State private var scrolledUp = false
     @State private var visibleNewest: Message.ID?
@@ -107,13 +108,70 @@ struct ChatView: View {
     /// The quote jump in flight; a second tap replaces it, so an old one can't end the new flash early.
     @State private var jumping: Task<Void, Never>?
 
+    /// Search: pulled down past the top of the thread (or on the header), as in Messages and Mail.
+    /// Open while `ui.searching`, which the composer reads too.
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
+    /// The server's newest 500 that are older than anything in this thread: fetched once a search,
+    /// kept until it closes. Nil until they land. `/app/history` has no query, so this is as far back as search reaches.
+    @State private var older: [Message]?
+    @State private var olderFailed = false
+    @State private var fetching: Task<Void, Never>?
+    private var searchWords: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var showingResults: Bool { ui.searching && !searchWords.isEmpty }
+    private var hits: [Message] {
+        let words = searchWords
+        return ((older ?? []) + thread.messages).filter { $0.patch == nil && ThreadSearch.matches($0.text, words) }
+    }
+
+    private func openSearch() {
+        guard !ui.searching else { return }
+        withAnimation(still ? .easeOut(duration: 0.2) : .snappy) { ui.searching = true }
+        Task { searchFocused = true }   // once the field is there to take it
+    }
+    private func closeSearch(animated: Bool = true) {
+        fetching?.cancel()
+        fetching = nil; older = nil; olderFailed = false; query = ""
+        let motion: Animation? = still ? .easeOut(duration: 0.2) : .snappy
+        withAnimation(animated ? motion : nil) { ui.searching = false }
+    }
+    private func fetchOlder() {
+        olderFailed = false
+        fetching = Task {
+            let rows = await store.backend.history(background: false, limit: 500, since: nil)
+            guard !Task.isCancelled else { return }
+            guard let rows else { olderFailed = true; return }
+            let oldest = thread.messages.first?.date ?? .distantFuture
+            older = rows.filter { $0.patch == nil && $0.date < oldest }
+        }
+    }
+    /// A tapped result, in the thread. One from the server's history goes in first, with everything
+    /// after it so the thread stays whole, and the ten before it, for context and so it can sit mid-screen.
+    private func show(_ m: Message) {
+        if thread.isOtto, let older, let i = older.firstIndex(where: { $0.id == m.id }) {
+            store.messages.insert(contentsOf: older[max(0, i - 10)...], at: 0)
+        }
+        // Nothing else may be moving the thread when the jump starts, or it wins: the bar goes in one
+        // step, and the composer and keyboard coming back only set the margin (no scroll on the keyboard's slow curve).
+        counted.landing = true
+        closeSearch(animated: false)
+        Task {
+            // ponytail: a fixed wait for their margin changes to land (a frame or three); a slower device may want more.
+            try? await Task.sleep(for: .milliseconds(250))
+            counted.landing = false
+            jump(to: m.id)
+        }
+    }
+
     /// A tapped quote: scroll its original into the middle (laying out older pages if it's up
     /// there) and light it up, so the eye lands on it.
     private func jump(to id: Message.ID) {
         let messages = thread.messages
         guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
-        let grew = messages.count - i + 4 > shown
-        if grew { shown = messages.count - i + 4 }
+        // A page above it, so the scroll there never comes near the top: the next page going in
+        // there scrolled in one step, which stopped the jump short of it.
+        let grew = messages.count - i + Self.page > shown
+        if grew { shown = messages.count - i + Self.page }
         jumping?.cancel()
         jumping = Task {
             do {
@@ -183,12 +241,24 @@ struct ChatView: View {
     var body: some View {
         let messages = thread.messages
         threadList
+        // Hidden, not removed, under the results: closing the search comes back to the same place.
+        .opacity(showingResults ? 0 : 1)
+        .allowsHitTesting(!showingResults)
+        .accessibilityHidden(showingResults)
         // An empty thread has no width of its own; without this the line wrapped a letter at a time.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
-            if thread.isOtto && messages.isEmpty && !store.ottoTyping {
+            if showingResults {
+                SearchResults(hits: hits, query: searchWords, loading: thread.isOtto && older == nil && !olderFailed, failed: olderFailed,
+                              bottomInset: ui.bottomInset,
+                              who: { m in m.from == .me || m.from == .terminal ? "You" : row?.memberStates.first { $0.id == m.author }?.name ?? thread.name },
+                              retry: fetchOlder, open: show, close: { closeSearch() })
+            } else if thread.isOtto && messages.isEmpty && !store.ottoTyping {
                 EmptyChat(asleep: store.asleep, connected: store.connected, lookingAtCursor: focused)
             }
+        }
+        .onChange(of: searchWords) {
+            if !searchWords.isEmpty, thread.isOtto, fetching == nil { fetchOlder() }
         }
         .background(Color(.systemBackground))
         .safeAreaBar(edge: .top, spacing: 0) {
@@ -231,7 +301,7 @@ struct ChatView: View {
         }
         // Back to the newest message, once you've scrolled well away from it.
         .overlay(alignment: .bottomTrailing) {
-            if scrolledUp {
+            if scrolledUp && !showingResults {
                 Button { move { $0.scrollTo(edge: .bottom) } } label: {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 16, weight: .semibold))
@@ -389,6 +459,8 @@ struct ChatView: View {
         // keyboard's curve.
         .contentMargins(.bottom, margin, for: .scrollContent)
         .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y + $0.contentInsets.top }) { offset.y = $1 }
+        // Pulled down past the top and let go: the search field, as in Messages and Mail.
+        .onScrollPhaseChange { old, _ in if old == .interacting, offset.y < -50 { openSearch() } }
         .onScrollGeometryChange(for: Bool.self, of: { g in
             g.contentSize.height + g.contentInsets.bottom - g.visibleRect.maxY < 4
         }) { _, at in atBottom = at }
@@ -411,8 +483,8 @@ struct ChatView: View {
             move(nil) { $0.scrollTo(y: offset.y + new - old) }
         }
         .onChange(of: ui.bottomInset) { old, new in
-            // A drag-to-dismiss, frame by frame: follow it, and never scroll under the finger.
-            guard ui.insetAnimated else { margin = new; return }
+            // A drag-to-dismiss, frame by frame: follow it, and never scroll under the finger. Or a search result opening.
+            guard ui.insetAnimated, !counted.landing else { margin = new; return }
             if new > old {
                 // A reader at the bottom stays there; one up the thread keeps the same bubbles in view, now above the keyboard.
                 move(ComposerUI.keyboard, keyboard: true) {
@@ -428,6 +500,19 @@ struct ChatView: View {
             }
         }
         .sensoryFeedback(.impact(weight: .light), trigger: lastMine)
+        #if DEBUG
+        // `-search <words>`: the thread searched for them, keyboard down (up with `-searchFocus`), for screenshots.
+        .task {
+            let args = ProcessInfo.processInfo.arguments
+            guard let i = args.firstIndex(of: "-search"), i + 1 < args.count else { return }
+            if args.contains("-searchFocus") { openSearch() } else { ui.searching = true }
+            query = args[i + 1]
+            // With `-searchJump`, then to the oldest match once the older history is in, as a tap would.
+            guard args.contains("-searchJump") else { return }
+            try? await Task.sleep(for: .seconds(3))
+            if let first = hits.first { show(first) }
+        }
+        #endif
         #if PERFDEMO
         // `-scrollDemo`: up to the top a few times, then home, printing the window each time.
         .task {
@@ -494,6 +579,10 @@ struct ChatView: View {
     private var ottoTop: some View {
         VStack(spacing: 8) {
             header
+            if ui.searching {
+                SearchBar(query: $query, focused: $searchFocused, close: { closeSearch() })
+                    .transition(still ? .opacity : .move(edge: .top).combined(with: .opacity))
+            }
             if thread.isOtto, let live = calls.live {
                 CallBanner(call: live) { openCall = live }
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -507,6 +596,12 @@ struct ChatView: View {
         .animation(.snappy, value: gate.card?.key)
         // No fill behind the banner: the bar's soft scroll edge already blurs the thread under
         // the whole bar, banner included. A systemBackground fill here is the solid black band.
+        // A pull down on the bar's empty space opens search too: the top of a long thread is a long way up.
+        // Behind the buttons, so they keep their own touches.
+        .background {
+            Color.clear.contentShape(.rect)
+                .gesture(DragGesture(minimumDistance: 20).onEnded { if $0.translation.height > 50 { openSearch() } })
+        }
     }
 
     /// With only Otto, today's picture. With pips, everyone is a solid, Otto included.
@@ -609,6 +704,8 @@ struct ChatView: View {
                 }
             }
             title.tint(.primary)
+                // The pull-downs' way in for VoiceOver and Full Keyboard Access.
+                .accessibilityAction(named: "Search messages", openSearch)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 6)
@@ -753,6 +850,12 @@ struct Composer: View {
         .animation(.snappy, value: focused)
         .padding(.top, 6)   // this 6 and the offset's 10: the empty strip KeyboardDock.loadView passes to the thread (keyboard down)
         .padding(.bottom, 4)
+        // Folded away, not removed, while the thread is searched: a draft stays as it was.
+        .frame(height: ui.searching ? 0 : nil, alignment: .top).clipped()
+        .opacity(ui.searching ? 0 : 1)
+        .allowsHitTesting(!ui.searching)
+        .accessibilityHidden(ui.searching)
+        .onChange(of: ui.searching) { ui.relayout() }
         .onChange(of: focused) { ui.focused = focused }
         .onChange(of: draft) { ui.relayout() }
         #if DEBUG
@@ -2332,6 +2435,8 @@ private enum Thumbs {
     @ObservationIgnored var level: () -> Double = { 0 }
     /// The composer's height, so a sent bubble knows how far below it the text field was.
     @ObservationIgnored var height: CGFloat = 50
+    /// The thread is being searched: the composer steps aside, so there's one text field at a time.
+    var searching = false
 }
 
 /// The voice glow rising from the bottom edge of the screen while a note records. Its own
