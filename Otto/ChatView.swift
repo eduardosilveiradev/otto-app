@@ -78,6 +78,10 @@ struct ChatView: View {
     /// frame, and as plain state each change re-ran the body of the whole thread.
     @State private var offset = Offset()
     final class Offset { var y: CGFloat = 0 }
+    /// The row count as of the last update (see `burst`), and an older page going in above what's on screen.
+    /// Boxed like the offset: neither should re-run the body.
+    @State private var counted = Counted()
+    final class Counted { var rows = 0; var paging = false }
     /// Far enough up the thread that the newest messages are out of sight.
     @State private var scrolledUp = false
     @State private var visibleNewest: Message.ID?
@@ -115,7 +119,7 @@ struct ChatView: View {
                 // Rows just paged in aren't built yet; give them a frame before scrolling to one.
                 // ponytail: two frames at 60Hz, verified 70 rows up; a slow device may want more.
                 if grew { try await Task.sleep(for: .milliseconds(32)) }
-                withAnimation(still ? nil : .snappy) { scroll.scrollTo(id: id, anchor: .center) }
+                move { $0.scrollTo(id: id, anchor: .center) }
                 // On the bubble once it has stopped moving, not while it flies past.
                 if !still { try await Task.sleep(for: .seconds(0.3)) }
                 withAnimation(.easeOut(duration: 0.2)) { flashed = id }
@@ -125,6 +129,20 @@ struct ChatView: View {
         }
     }
     @Environment(\.accessibilityReduceMotion) private var still
+
+    /// Every scroll the thread makes goes through here, so none of them can jump or ignore the system's setting:
+    /// - in one step under Reduce Motion, or while a burst of rows lands at once (a catch-up);
+    /// - `keyboard` keeps the keyboard's curve whatever the setting: the keyboard slides either way, and the thread rides it;
+    /// - a `follow` (the thread keeping up with something, not you asking) leaves a reader up the thread where they are.
+    private func move(_ animation: Animation? = .snappy, follow: Bool = false, keyboard: Bool = false,
+                      then done: @escaping () -> Void = {}, _ to: (inout ScrollPosition) -> Void) {
+        if follow && scrolledUp { return }
+        withAnimation(keyboard || !(still || burst) ? animation : nil, completionCriteria: .logicallyComplete) {
+            to(&scroll)
+        } completion: { done() }
+    }
+    /// More than one row since the last update: a catch-up landing, not someone typing.
+    private var burst: Bool { thread.messages.count - counted.rows > 1 }
 
     /// The space above a bubble. A group's always clears the name above it.
     private func gap(group: Bool, runStarts: Bool, stamped: Bool, sameAuthor: Bool) -> CGFloat {
@@ -213,7 +231,7 @@ struct ChatView: View {
         // Back to the newest message, once you've scrolled well away from it.
         .overlay(alignment: .bottomTrailing) {
             if scrolledUp {
-                Button { withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) } } label: {
+                Button { move { $0.scrollTo(edge: .bottom) } } label: {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 16, weight: .semibold))
                         .frame(width: 40, height: 40)
@@ -283,7 +301,7 @@ struct ChatView: View {
                                     swiping = on
                                     // Something may have grown while the anchor was off: back down, but only
                                     // for a reader who was at the bottom; anyone reading higher stays put.
-                                    if !on, pinnedAtSwipe, !atBottom { withAnimation(still ? nil : .snappy) { scroll.scrollTo(edge: .bottom) } }
+                                    if !on, pinnedAtSwipe, !atBottom { move { $0.scrollTo(edge: .bottom) } }
                                 },
                                 onTap: { thread.tap($0, on: m.id) },
                                 plainReceipt: pipsOn,
@@ -327,8 +345,11 @@ struct ChatView: View {
         // On the scroll view, not the stack: the bottom anchor's offset change then rides the same
         // animation as the rows. On the stack, the rows animated while the offset jumped, and every
         // new bubble, the dots coming or going, or a tapback shoved the thread down a frame before
-        // it slid back (measured frame by frame with -shiftLab).
-        .animation(thread.animated ? .spring(response: 0.42, dampingFraction: 0.82) : nil, value: messages.count)
+        // it slid back (measured frame by frame with -shiftLab). A burst (a catch-up) lands in one step
+        // rather than sliding the whole thread by all of it.
+        .animation(thread.animated && !burst ? .spring(response: 0.42, dampingFraction: 0.82) : nil, value: messages.count)
+        // After this update's other handlers have run, so they all still see a burst as one.
+        .onChange(of: messages.count, initial: true) { _, n in Task { counted.rows = n } }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typing)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: row?.activity.map(\.id))
         // The thinking bubble's to-do list and a tapback's room above a bubble change heights too.
@@ -349,14 +370,17 @@ struct ChatView: View {
         // Tapping anywhere in the thread puts the keyboard away; buttons still win their own taps.
         .contentShape(.rect)
         .onTapGesture { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
-        // Your own send always comes back down, like Messages, even from far up the thread.
-        .onChange(of: lastMine) { withAnimation(.snappy) { scroll.scrollTo(edge: .bottom) } }
+        // Your own send always comes back down, like Messages, even from far up the thread. One of
+        // yours from another device (a catch-up) doesn't pull a reader away from older messages.
+        .onChange(of: lastMine) {
+            let sent = thread.messages.last(where: { $0.from == .me })?.pending == true
+            move(follow: !sent) { $0.scrollTo(edge: .bottom) }
+        }
         // The thinking bubble can be tall (steps, a to-do list). When it goes, the thread is
         // shorter by that much; a reader at the bottom stays at the bottom instead of being left
         // looking at older messages.
         .onChange(of: thread.typing) { _, on in
-            guard !on, !scrolledUp else { return }
-            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { scroll.scrollTo(edge: .bottom) }
+            if !on { move(.spring(response: 0.42, dampingFraction: 0.82), follow: true) { $0.scrollTo(edge: .bottom) } }
         }
         // What the composer and keyboard cover. A SwiftUI margin rather than a UIKit safe-area
         // inset: SwiftUI applied the inset in one jump and then scrolled after it on its own
@@ -373,26 +397,33 @@ struct ChatView: View {
             scrolledUp = up
             if !up { shown = Self.page }   // back at the newest: drop the pages read on the way up
         }
-        // Near the top: the next page of older messages. The bottom anchor keeps what's on screen still.
+        // Near the top: the next page of older messages, going in above what's on screen.
         .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y + $0.contentInsets.top < 600 }) { _, near in
-            let messages = thread.messages
-            guard near, shown < messages.count else { return }
-            // Keep the oldest bubble on screen where it is, rather than at the top of the new page.
-            let keep = messages[messages.count - shown].id
+            guard near, shown < thread.messages.count else { return }
+            counted.paging = true
             shown += Self.page
-            Task { scroll.scrollTo(id: keep, anchor: .top) }
+        }
+        // Once it's laid out, down by exactly its height in one step, so the bubbles being read don't move.
+        .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentSize.height }) { old, new in
+            guard counted.paging else { return }
+            counted.paging = false
+            move(nil) { $0.scrollTo(y: offset.y + new - old) }
         }
         .onChange(of: ui.bottomInset) { old, new in
             // A drag-to-dismiss, frame by frame: follow it, and never scroll under the finger.
             guard ui.insetAnimated else { margin = new; return }
             if new > old {
-                withAnimation(ComposerUI.keyboard) { margin = new; scroll.scrollTo(edge: .bottom) }
+                // A reader at the bottom stays there; one up the thread keeps the same bubbles in view, now above the keyboard.
+                move(ComposerUI.keyboard, keyboard: true) {
+                    margin = new
+                    if atBottom { $0.scrollTo(edge: .bottom) } else { $0.scrollTo(y: offset.y + new - old) }
+                }
             } else {
                 // Shrinking the margin first clamps the offset in one frame (the snap). Slide the
                 // thread down by the same amount on the keyboard's curve, then let the margin go.
-                withAnimation(ComposerUI.keyboard, completionCriteria: .logicallyComplete) {
-                    scroll.scrollTo(y: max(0, offset.y - (old - new)))
-                } completion: { margin = ui.bottomInset }
+                move(ComposerUI.keyboard, keyboard: true, then: { margin = ui.bottomInset }) {
+                    $0.scrollTo(y: max(0, offset.y - (old - new)))
+                }
             }
         }
         .sensoryFeedback(.impact(weight: .light), trigger: lastMine)
@@ -402,13 +433,51 @@ struct ChatView: View {
             guard ProcessInfo.processInfo.arguments.contains("-scrollDemo") else { return }
             try? await Task.sleep(for: .seconds(2))
             for _ in 0..<4 {
-                withAnimation { scroll.scrollTo(edge: .top) }
+                move(.default) { $0.scrollTo(edge: .top) }
                 try? await Task.sleep(for: .seconds(1.5))
                 print("SCROLL top shown=\(shown) offset=\(Int(offset.y))")
             }
-            withAnimation { scroll.scrollTo(edge: .bottom) }
+            move(.default) { $0.scrollTo(edge: .bottom) }
             try? await Task.sleep(for: .seconds(1.5))
             print("SCROLL bottom shown=\(shown) scrolledUp=\(scrolledUp)")
+        }
+        #endif
+        #if DEBUG
+        // `-scrollLab` (with `-refThread -longRef -noNotificationPrompt`): every way the thread scrolls, one
+        // at a time, to record with Reduce Motion off and on. Each step prints "LAB <s> > <what>" just before
+        // it runs and "LAB <s> <what> <offset before> -> <offset after>" once it has settled.
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-scrollLab") else { return }
+            // Numbered, so a jump can't hide behind -longRef's repeats.
+            store.messages = store.messages.enumerated().map { i, m in var m = m; m.text = "\(i + 1) · \(m.text)"; return m }
+            let t0 = Date.now
+            func say(_ s: String) { print(String(format: "LAB %5.2f ", Date.now.timeIntervalSince(t0)) + s); fflush(stdout) }
+            func step(_ what: String, _ f: () -> Void) async {
+                try? await Task.sleep(for: .seconds(1.5))
+                say("> \(what)")
+                try? await Task.sleep(for: .seconds(0.8))   // a screenshot of before
+                let before = Int(offset.y)
+                f()
+                try? await Task.sleep(for: .seconds(1.2))
+                say("\(what) \(before) -> \(Int(offset.y))")
+            }
+            try? await Task.sleep(for: .seconds(1))
+            say("reduceMotion=\(still)")
+            await step("scroll up") { move(nil) { $0.scrollTo(y: offset.y - 1200) } }
+            await step("receive while up") { store.messages.append(Message(from: .otto, text: "this one lands while you're reading up there")) }
+            await step("dots on while up") { store.ottoTyping = true }
+            await step("dots off while up") { store.ottoTyping = false }
+            await step("keyboard up while up") { store.demoFocus = true }
+            await step("keyboard down while up") { store.demoFocus = false }
+            await step("near the top") { move(nil) { $0.scrollTo(y: 700) } }
+            await step("older page") { move(nil) { $0.scrollTo(y: 590) } }
+            await step("to the bottom") { move { $0.scrollTo(edge: .bottom) } }
+            await step("keyboard up") { store.demoFocus = true }
+            await step("send") { store.send("on my way") }
+            await step("receive") { store.messages.append(Message(from: .otto, text: "see you there")) }
+            await step("burst of 8") { store.messages += (1...8).map { Message(from: $0 % 3 == 0 ? .me : .otto, text: "caught up \($0)", read: true) } }
+            await step("keyboard down") { store.demoFocus = false }
+            say("end")
         }
         #endif
     }
