@@ -4,7 +4,8 @@ import SwiftUI
 @MainActor
 final class BoardModel: ObservableObject {
     enum Mode { case keys, emoji, settings, clipboard }
-    enum Otto: Equatable { case closed, composing, thinking, done(String), failed(String) }
+    /// `retry`: the ask didn't get through and can go again as it was.
+    enum Otto: Equatable { case closed, composing, thinking, done(String), failed(String, retry: Bool = false) }
     struct Suggestion: Hashable { var text: String; var literal = false; var primary = false }
 
     @Published var mode: Mode = .keys
@@ -39,6 +40,7 @@ final class BoardModel: ObservableObject {
     var pick: (Suggestion) -> Void = { _ in }
     var ask: (String) -> Void = { _ in }
     var undoOtto: () -> Void = {}
+    var retryOtto: () -> Void = {}
     var typeEmoji: (String) -> Void = { _ in }
     var deleteBackward: () -> Void = {}
     var settingsChanged: () -> Void = {}
@@ -179,7 +181,21 @@ struct TopBar: View {
                     case .thinking: Text("Otto is on it…").opacity(0.7)
                     case .done(let what):
                         HStack { Text(what).lineLimit(1); Spacer(); Button("Undo") { m.undoOtto() }.fontWeight(.semibold) }
-                    case .failed(let why): Text(why).font(.system(size: 13)).lineLimit(2).opacity(0.85)
+                    case .failed(let why, let retry):
+                        HStack(spacing: 8) {
+                            Text(why).font(.system(size: 13)).lineLimit(2).opacity(0.85)
+                            Spacer(minLength: 0)
+                            if retry {
+                                // The chip row's capsule, a size down to sit inside the bar. Tinted with the text
+                                // colour, as the row's divider is: a key-coloured fill vanishes on the key-coloured bar.
+                                Button { m.retryOtto() } label: {
+                                    Text("Try again").font(Font(s.uiFont(14, weight: .medium))).fixedSize()
+                                        .padding(.horizontal, 12).frame(height: 28)
+                                        .background(Capsule().fill(s.text.color.opacity(0.1)))
+                                }
+                                .accessibilityHint("Asks Otto the same thing again")
+                            }
+                        }
                     default:
                         HStack(spacing: 1) {
                             Text(m.prompt.isEmpty ? "Ask Otto, or pick one below" : m.prompt)
@@ -231,6 +247,9 @@ struct TopBar: View {
         }
         .padding(.horizontal, 8).padding(.top, 2)
         .buttonStyle(Tap())
+        .onChange(of: m.otto) { _, otto in
+            if case .failed(let why, _) = otto { AccessibilityNotification.Announcement(why).post() }
+        }
     }
 
     /// Quick asks. The ones starting "Rewrite" replace the text before the cursor; the rest insert.

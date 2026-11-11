@@ -34,13 +34,12 @@ enum ShareDirect {
         return (url, pair[1])
     }
 
-    /// Sends what was shared straight to Otto. True once the server has it.
+    /// Sends what was shared straight to Otto. Returns once the server has it, or throws why not.
     /// `ids`: one per item (the text, or each photo), the same on every attempt and the same the
     /// outbox used, so a retry, or a fallback after some items were queued, is deduped by the server.
-    static func send(text: String, jpegs: [Data], ids: [UUID]) async -> Bool {
-        guard let (base, token) = load(), let first = ids.first else { return false }
-        if jpegs.isEmpty { return await sendText(text, id: first.uuidString, base: base, token: token) }
-        var ok = true
+    static func send(text: String, jpegs: [Data], ids: [UUID]) async throws(ServerProblem) {
+        guard let (base, token) = load(), let first = ids.first else { throw .notSetUp }
+        if jpegs.isEmpty { return try await sendText(text, id: first.uuidString, base: base, token: token) }
         // The words ride along with the first photo, as a caption.
         for (i, jpeg) in jpegs.enumerated() {
             var c = URLComponents(url: base.appending(path: "app/photo"), resolvingAgainstBaseURL: false)!
@@ -50,13 +49,14 @@ enum ShareDirect {
             req.httpMethod = "POST"
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
-            let status = (try? await URLSession.shared.upload(for: req, from: jpeg))?.1 as? HTTPURLResponse
-            ok = ok && status.map { (200..<300).contains($0.statusCode) } == true
+            // Stops at the first that fails: a retry resends them all under the same ids, and the server dedupes.
+            var res: URLResponse?, err: (any Error)?
+            do { res = try await URLSession.shared.upload(for: req, from: jpeg).1 } catch { err = error }
+            if let problem = ServerProblem(status: (res as? HTTPURLResponse)?.statusCode, error: err) { throw problem }
         }
-        return ok
     }
 
-    private static func sendText(_ text: String, id: String, base: URL, token: String) async -> Bool {
+    private static func sendText(_ text: String, id: String, base: URL, token: String) async throws(ServerProblem) {
         var c = URLComponents(url: base.appending(path: "app"), resolvingAgainstBaseURL: false)!
         c.scheme = c.scheme == "https" ? "wss" : "ws"
         // A one-shot socket: the server mustn't hand it what's waiting for the app, or count it as the app open.
@@ -73,7 +73,7 @@ enum ShareDirect {
         defer { task.cancel(with: .normalClosure, reason: nil) }
         let frame: [String: Any] = ["type": "message", "id": id, "text": text, "shared": true]
         guard let json = try? JSONSerialization.data(withJSONObject: frame), let s = String(data: json, encoding: .utf8)
-        else { return false }
+        else { throw .unreachable }
         do {
             try await task.send(.string(s))
             // A pong means the server read everything before it, the frame included. Bounded: a network
@@ -88,11 +88,12 @@ enum ShareDirect {
                 DispatchQueue.global().asyncAfter(deadline: .now() + 15) { finish(URLError(.timedOut)) }
             }
             // An older server stops there. One that acks only does so once the message is written down.
-            guard seen.has("hello") else { return true }
+            guard seen.has("hello") else { return }
             for _ in 0..<100 where !seen.has(id) { try await Task.sleep(for: .milliseconds(100)) }
-            return seen.has(id)
+            if !seen.has(id) { throw URLError(.timedOut) }
         } catch {
-            return false
+            // A handshake the server turned down (401, 500) fails here too; its status says which.
+            throw ServerProblem(status: (task.response as? HTTPURLResponse)?.statusCode, error: error) ?? .unreachable
         }
     }
 

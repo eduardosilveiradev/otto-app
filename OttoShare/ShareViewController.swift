@@ -28,8 +28,10 @@ final class ShareModel {
     var note = ""
     var state = State.editing
     var finish: () -> Void = {}
+    /// A failed send can go again as it is.
+    var canSend: Bool { if case .failed = state { true } else { state == .editing } }
 
-    enum State { case editing, sending, queued, failed }
+    enum State: Equatable { case editing, sending, sent, queued, failed(ServerProblem) }
     /// True until every attachment has been read: Send waits, so a photo still loading isn't left out.
     var loading = true
     /// Photos that couldn't be read, said under the preview rather than dropped without a word.
@@ -87,8 +89,12 @@ final class ShareModel {
         guard ok else {
             // No app group on this build: hand it to the server directly instead.
             Task {
-                let direct = await ShareDirect.send(text: message, jpegs: images.compactMap { $0.jpegData(compressionQuality: 0.85) }, ids: itemIDs)
-                if direct { finish() } else { state = .failed }
+                do throws(ServerProblem) {
+                    try await ShareDirect.send(text: message, jpegs: images.compactMap { $0.jpegData(compressionQuality: 0.85) }, ids: itemIDs)
+                    await sent()
+                } catch {
+                    state = .failed(error)
+                }
             }
             return
         }
@@ -98,11 +104,18 @@ final class ShareModel {
         ShareOutbox.post(ShareOutbox.ping)
         Task {
             try? await Task.sleep(for: .seconds(1))
-            if taken { finish(); return }
+            if taken { await sent(); return }
             state = .queued
             try? await Task.sleep(for: .seconds(1.5))
             finish()
         }
+    }
+
+    /// Long enough to read "Sent" before the sheet goes.
+    private func sent() async {
+        state = .sent
+        try? await Task.sleep(for: .seconds(0.8))
+        finish()
     }
 }
 
@@ -123,6 +136,7 @@ struct ShareView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if model.loading { busy("Getting what you shared…") }
                 if !model.images.isEmpty {
                     ScrollView(.horizontal) {
                         HStack {
@@ -143,9 +157,14 @@ struct ShareView: View {
                 TextField("Add a message", text: $model.note, axis: .vertical)
                     .focused($focused)
                 switch model.state {
-                case .queued: Text("Otto will send it when the app next opens.").foregroundStyle(.secondary)
-                case .failed: Text("Couldn't hand it to the app. Open Otto once, then try again.").foregroundStyle(.red)
-                default: EmptyView()
+                case .editing: EmptyView()
+                case .sending: busy("Sending to Otto…")
+                case .sent:
+                    Label { Text("Sent") } icon: { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                case .queued: Label("Otto will send it when the app next opens.", systemImage: "tray.and.arrow.up").foregroundStyle(.secondary)
+                case .failed(let problem):
+                    Label(problem.message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                    Button("Try again") { model.send() }
                 }
             }
             .navigationTitle("Otto")
@@ -154,10 +173,27 @@ struct ShareView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { model.finish() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Send") { model.send() }
-                        .disabled(model.loading || model.state != .editing || (model.text.isEmpty && model.images.isEmpty && model.note.isEmpty))
+                        .disabled(model.loading || !model.canSend || (model.text.isEmpty && model.images.isEmpty && model.note.isEmpty))
                 }
             }
         }
         .onAppear { focused = true }
+        // The keyboard goes, so the outcome isn't hidden behind it; VoiceOver hears it without hunting.
+        .onChange(of: model.state) { _, state in
+            switch state {
+            case .sending: focused = false
+            case .sent: AccessibilityNotification.Announcement("Sent").post()
+            case .failed(let problem): AccessibilityNotification.Announcement(problem.message).post()
+            default: break
+            }
+        }
+    }
+
+    private func busy(_ what: String) -> some View {
+        HStack(spacing: 8) {
+            ProgressView()
+            Text(what).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
