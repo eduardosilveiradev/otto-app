@@ -49,7 +49,8 @@ struct ChatView: View {
     @State private var showDetails = ProcessInfo.processInfo.arguments.contains("-details")
     @Namespace private var card
     @State private var showCall = false
-    @State private var webCall = false
+    /// `-call` (with `-vapiPublicKey`, `-vapiAssistantId` and, in DEBUG, `-vapiHost`): open straight into a web call.
+    @State private var webCall = ProcessInfo.processInfo.arguments.contains("-call")
     /// Calls Otto is placing for you; a live one shows as a banner under the header.
     @State private var calls = CallWatch()
     @State private var gate = GateWatch()
