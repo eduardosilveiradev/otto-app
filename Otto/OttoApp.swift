@@ -358,8 +358,55 @@ final class OttoStore {
                 payment: .init(merchant: "Multisala Lux Roma", site: "lux.cdr.18tickets.it",
                                items: [.init(name: "Primetime ticket", detail: "Sun 1 Nov 17:50 · Sala 6 · E4", quantity: 1, unit: 8.5),
                                        .init(name: "Primetime ticket", detail: "Sun 1 Nov 17:50 · Sala 6 · E5", quantity: 1, unit: 8.5)],
-                               total: 17, currency: "EUR", method: "Link card ending 6983",
+                               total: 17, currency: "EUR", method: "Link card ending 4242",
                                notes: ["No refunds on cinema tickets", "Seats held until 16:14"], test: nil))]
+        }
+        // `-approvalDemo`: a change to Otto's core waiting on Approve.
+        if ProcessInfo.processInfo.arguments.contains("-approvalDemo") {
+            approvals = [ApprovalRequest(id: "demo-change", title: "Change Otto's core",
+                summary: "Adds a Sunday digest of the links you saved that week, one message, normal priority.",
+                files: [.init(path: "otto/digest.ts", tier: "guarded", why: "the new digest"),
+                        .init(path: "otto/server.ts", tier: "guarded", why: "runs it on Sundays at 10:00"),
+                        .init(path: "otto/tests/digest.test.ts", tier: "free", why: "an empty week sends nothing")],
+                branch: "otto/sunday-digest", stat: "3 files changed, 142 insertions(+), 6 deletions(-)", expires: nil)]
+        }
+        // `-longThread`: one of everything a thread can hold, for the design review.
+        if ProcessInfo.processInfo.arguments.contains("-longThread") {
+            func m(_ from: Sender, _ text: String, _ edit: (inout Message) -> Void = { _ in }) -> Message {
+                var x = Message(from: from, text: text); x.read = from == .me ? true : nil; edit(&x); return x
+            }
+            let photo = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 450)).jpegData(withCompressionQuality: 0.8) { ctx in
+                UIColor.systemTeal.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 600, height: 450))
+                UIColor.systemOrange.setFill(); ctx.fill(CGRect(x: 0, y: 300, width: 600, height: 150))
+            }
+            var all: [Message] = [
+                m(.otto, "morning. design review at 14:00, then you're free until 16:30. electricity bill, €112, due friday.") { $0.serverID = "long-1" },
+                m(.me, "can you tell the landlord tuesday morning works for the boiler") { $0.replyTo = "long-1" },
+                m(.otto, "draft to Luca:\nHi Luca, Tuesday morning works for the boiler service. I'll be home from 9. Thanks!") {
+                    $0.buttons = [ActionButton(label: "send ✓", data: "send"), ActionButton(label: "discard", data: "discard")] },
+                m(.me, "remind me to call the plumber when I'm home, and is tuesday free for the dentist") { $0.isVoice = true },
+                m(.otto, "plumber reminder set for when you're home. tuesday after 16:00 is free.") {
+                    $0.isVoice = true; $0.audio = RemoteFile(id: "demo-voice", name: "reply.m4a", kind: "audio") },
+                m(.me, "") { $0.image = photo; $0.reaction = "❤️" },
+                m(.otto, "that's the good shelf. the menu's here: https://www.example.com/menu") { $0.reaction = "👍" },
+                m(.terminal, "check why the dashboard build fails…"),
+            ]
+            all += Card.demoThread("mixed")
+            all += [
+                m(.otto, "on it. it runs at 3, and you'll get one line on it in the morning.") { $0.scheduled = [MockBackend.triggers[0]] },
+                m(.otto, "saved both.") { $0.recorded = [
+                    RecordedCard(kind: "money", id: "m1", title: "€49.80 · Linden Café", detail: "eating out · 2026-11-09", body: "This month at Linden Café: €49.80 (1)", action: nil),
+                    RecordedCard(kind: "loop", id: "n1", title: "Book the next dentist visit", detail: "Due 2026-11-17", body: nil, action: .init(label: "Done", data: "close loop n1"))] },
+                m(.otto, "here, one per seat.") { $0.files = [RemoteFile(id: "demo-pass-1", name: "Ticket_1.pdf", kind: "file")] },
+                m(.otto, "Northside code") { $0.otp = .init(code: "482915", sender: "Northside") },
+                m(.me, "and move the dentist to 17:00") { $0.failed = true },
+                m(.me, "actually 17:30") { $0.read = nil; $0.pending = true },
+            ]
+            messages = all
+            // `-longThread a|b`: its first eight messages, or the rest, so each fits one screen.
+            let args = ProcessInfo.processInfo.arguments, i = args.firstIndex(of: "-longThread")! + 1
+            if i < args.count, args[i] == "a" { messages = Array(messages.prefix(8)) }
+            if i < args.count, args[i] == "b" { messages = Array(messages.dropFirst(8)) }
         }
         // `-otpDemo`: a code arriving, drawer open, for screenshots.
         if ProcessInfo.processInfo.arguments.contains("-otpDemo") {

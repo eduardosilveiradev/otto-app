@@ -139,6 +139,8 @@ struct DetailsView: View {
                 case "Packages": PackagesScreen()
                 case "Activity": ActivityScreen()
                 case "Status": StatusScreen()
+                case "Settings": SettingsView()
+                case "Glasses": GlassesScreen()
                 default: DevicesScreen()
                 }
             }

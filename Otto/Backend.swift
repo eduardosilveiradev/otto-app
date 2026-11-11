@@ -302,6 +302,9 @@ final class MockBackend: OttoBackend {
 
     func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data? {
         let enc = JSONEncoder()
+        #if DEBUG
+        if CommandLine.arguments.contains("-emptyDash"), path == "triggers" { return MockDash.data(path) }
+        #endif
         if path == "triggers" { return try? enc.encode(["triggers": Self.triggers]) }
         if let canned = MockDash.data(path) { return canned }
         guard path == "triggers/item", let t = Self.triggers.first(where: { $0.id == query.first?.value }) else { return nil }
@@ -362,7 +365,8 @@ final class MockBackend: OttoBackend {
 
     func gate() async -> GateReply? {
         #if DEBUG
-        if PipFixture.on { return nil }
+        // `-mockGate`: the flight-day card; off otherwise, so the other screenshots have a plain header.
+        if PipFixture.on || !CommandLine.arguments.contains("-mockGate") { return nil }
         #endif
         let dep = Date().addingTimeInterval(3 * 3600)
         return GateReply(card: GateCard(
@@ -372,6 +376,17 @@ final class MockBackend: OttoBackend {
             departsAt: ISO8601DateFormatter().string(from: dep), durationMinutes: 320, state: "scheduled",
             delayMinutes: 40, gate: "B12", terminal: "2", seat: "14A", cabin: "Economy", booking: "ABC123"))
     }
+
+    #if DEBUG
+    func settings(flip id: String?) async -> SettingsPage? {
+        let t = { (id: String, label: String, on: Bool, section: String) in SettingToggle(id: id, label: label, on: on, section: section) }
+        return SettingsPage(toggles: [
+            t("brief", "morning brief", true, "otto"), t("voice", "speak replies when I speak", true, "otto"), t("quiet", "quiet hours", true, "otto"),
+            t("scan", "email scans", true, "recurring"), t("digest", "weekly reading digest", false, "recurring"),
+            t("gmail", "gmail", true, "connectors"), t("calendar", "calendar", true, "connectors"), t("drive", "drive", false, "connectors"),
+        ], note: nil)
+    }
+    #endif
 
     func stamps() async -> StampsReply? {
         StampsReply(stamps: [

@@ -6,7 +6,8 @@ import SwiftUI
 /// its background jobs, and what's armed.
 struct ActivityScreen: View {
     enum Tab: String, CaseIterable { case messages = "Unasked", changes = "Changes", jobs = "Jobs", triggers = "Triggers" }
-    @State private var tab = Tab.messages
+    /// `-activityTab Jobs` opens on that tab, for screenshots.
+    @State private var tab = UserDefaults.standard.string(forKey: "activityTab").flatMap(Tab.init(rawValue:)) ?? .messages
     /// Trigger gists, to name "trigger:<id>" sources.
     @State private var gists: [String: String] = [:]
     @Environment(OttoStore.self) private var store

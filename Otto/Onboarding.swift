@@ -226,6 +226,13 @@ private struct ConnectPage: View {
             }
             Secondary(label: "Look around with sample data") { next() }
         }
+        #if DEBUG
+        // `-connectManual` opens the typed form; `-connectProblem` with it shows the error line.
+        .onAppear {
+            if CommandLine.arguments.contains("-connectManual") { manual = true; server = "https://mac.example.ts.net"; token = "demo-token" }
+            if CommandLine.arguments.contains("-connectProblem") { problem = "Can't reach the Mac. Is Tailscale on?" }
+        }
+        #endif
         .sheet(isPresented: $scanning) {
             QRScanner { code in
                 scanning = false
