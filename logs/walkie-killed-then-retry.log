@@ -1,0 +1,6 @@
+# server held the upload, then was killed
+0.0s listening on 4599, mode hang
+10.0s POST /app/voice?id=240A2E84-3432-45C3-8E27-3CE1D0D09826
+# restarted, accepting
+0.0s listening on 4599, mode ok
+3.0s POST /app/voice?id=240A2E84-3432-45C3-8E27-3CE1D0D09826
