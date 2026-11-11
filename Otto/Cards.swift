@@ -426,33 +426,61 @@ private struct ImageBlock: View {
     let picture: Block.Picture
     @Environment(OttoStore.self) private var store
     @State private var image: UIImage?
+    /// Gone (a 404), or nothing it can show.
     @State private var missing = false
+    /// Anything else: tap to retry, and it retries once the connection is back.
+    @State private var failed = false
+    @State private var tries = 0
+
+    private var neutral: Color { Color(.systemBackground).opacity(0.5) }
 
     var body: some View {
         // The frame comes from the card; a filling photo must never widen it (it would push the whole row off screen).
-        Rectangle().fill(Color(.systemBackground).opacity(0.5))
+        Color.clear
             .frame(maxWidth: .infinity).frame(height: 180)
             .overlay {
                 if let image { Image(uiImage: image).resizable().scaledToFill() }
-                else if missing { Image(systemName: "photo").font(.title2).foregroundStyle(.tertiary) }
-                else { ProgressView() }
+                else if missing {
+                    Label("Photo no longer available", systemImage: "photo")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity).background(neutral)
+                } else if failed {
+                    Button { tries += 1 } label: {
+                        Text.couldntLoad.font(.footnote).multilineTextAlignment(.center).padding(12)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity).background(neutral)
+                    }
+                    .buttonStyle(.plain)
+                } else { MediaPlaceholder(fill: MediaCache.tint(picture.file) ?? neutral) }
             }
             .clipShape(.rect(cornerRadius: 10, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.primary.opacity(0.08)) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(picture.alt)
-        .accessibilityAddTraits(.isImage)
-        .task(id: picture.file ?? picture.url) { await load() }
+        .accessibilityValue(failed ? "Couldn't load" : missing ? "No longer available" : "")
+        .accessibilityAddTraits(failed ? .isButton : .isImage)
+        .accessibilityHint(failed ? "Tries loading it again" : "")
+        .accessibilityAction { if failed { tries += 1 } }
+        .task(id: "\(picture.file ?? picture.url ?? "") \(tries)") { await load() }
+        .onChange(of: store.connected) { if store.connected && failed { tries += 1 } }
     }
 
     private func load() async {
-        var data: Data?
-        if let id = picture.file {
-            data = await MediaCache.load(RemoteFile(id: id, name: "card", kind: "image"), from: store.backend)
-        } else if let s = picture.url, let u = URL(string: s), u.scheme == "https" {
-            data = try? await URLSession.shared.data(from: u).0
-        }
-        if let data, let img = UIImage(data: data) { image = img } else { missing = true }
+        guard image == nil else { return }
+        failed = false
+        do {
+            var data: Data?
+            if let id = picture.file {
+                data = try await MediaCache.load(RemoteFile(id: id, name: "card", kind: "image"), from: store.backend)
+            } else if let s = picture.url, let u = URL(string: s), u.scheme == "https" {
+                let (d, r) = try await URLSession.shared.data(from: u)
+                switch (r as? HTTPURLResponse)?.statusCode {
+                case 200: data = d
+                case 404: break
+                default: throw URLError(.badServerResponse)
+                }
+            }
+            if let data, let img = UIImage(data: data) { image = img } else { missing = true }
+        } catch { failed = !Task.isCancelled }
     }
 }
 

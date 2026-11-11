@@ -19,11 +19,15 @@ struct StudyBubble: View {
     @Environment(OttoStore.self) private var store
     let file: RemoteFile
     @State private var set: StudySet?
+    /// The server says it's gone (a 404).
     @State private var missing = false
+    /// Anything else that kept it from loading: tap to retry, and it retries once the connection is back.
+    @State private var failed = false
+    @State private var tries = 0
     @State private var open = false
 
     var body: some View {
-        Button { open = true } label: {
+        Button { if set == nil { tries += 1 } else { open = true } } label: {
             VStack(alignment: .leading, spacing: 3) {
                 Text(set?.title ?? (missing ? "Study set — no longer available" : "Study set"))
                     .font(size: 16, weight: .semibold, relativeTo: .callout).lineLimit(2)
@@ -31,19 +35,28 @@ struct StudyBubble: View {
                     Text([set.source, count(set)].compactMap { $0 }.joined(separator: " · "))
                         .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Text("Study").font(size: 15, weight: .medium, relativeTo: .subheadline).foregroundStyle(.blue).padding(.top, 6)
+                Group {
+                    if failed { Text.couldntLoad }
+                    else { Text("Study").foregroundStyle(.blue) }
+                }
+                .font(size: 15, weight: .medium, relativeTo: .subheadline).padding(.top, 6)
             }
             .frame(width: 230, alignment: .leading)
             .padding(.horizontal, 14).padding(.vertical, 11)
             .background(Color(.systemGray5), in: .rect(cornerRadius: 18, style: .continuous))
         }
         .tint(.primary)
-        .disabled(set == nil)
-        .task(id: file.id) {
-            guard set == nil, let d = await store.backend.file(file.id) else { missing = true; return }
-            set = try? JSONDecoder().decode(StudySet.self, from: d)
-            missing = set == nil
+        .disabled(set == nil && !failed)
+        .task(id: "\(file.id) \(tries)") {
+            guard set == nil else { return }
+            failed = false
+            do {
+                guard let d = try await store.backend.file(file.id) else { missing = true; return }
+                set = try? JSONDecoder().decode(StudySet.self, from: d)
+                failed = set == nil   // a file it can't read isn't gone either
+            } catch { failed = !Task.isCancelled }
         }
+        .onChange(of: store.connected) { if store.connected && failed { tries += 1 } }
         .fullScreenCover(isPresented: $open) { if let set { StudyView(set: set) } }
     }
 
