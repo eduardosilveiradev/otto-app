@@ -78,6 +78,9 @@ private struct MainRoot: View {
                 do {
                     // The reconnecting orb gets at least a second, even on a fast connect, so it reads.
                     try await Task.sleep(for: .seconds(1))
+                    #if DEBUG
+                    if CommandLine.arguments.contains("-holdSplash") { return }   // screenshots: the splash stays up
+                    #endif
                     while !ready { try await Task.sleep(for: .milliseconds(100)) }
                     // Offline there is nothing loaded to show off: just fade to the single chat.
                     if store.connected {
