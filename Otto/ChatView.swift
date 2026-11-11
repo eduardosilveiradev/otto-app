@@ -1556,13 +1556,17 @@ private struct QuoteLabel: LabelStyle {
 
 /// A photo, video or file Otto sent. Photos and videos show inline and open in the media viewer, a Wallet pass opens
 /// Add to Wallet, anything else opens in Quick Look.
-/// Each shows a spinner while its bytes download.
+/// A photo or video holds its place in a still box while its bytes download.
 private struct RemoteFileView: View {
     @Environment(OttoStore.self) private var store
     let file: RemoteFile
     @State private var data: Data?
     @State private var thumb: UIImage?
+    /// The server says it's gone (a 404).
     @State private var missing = false
+    /// Anything else that kept it from loading: tap to retry, and it retries once the connection is back.
+    @State private var failed = false
+    @State private var tries = 0
     @State private var opening = false
     @State private var preview: URL?
     @State private var pass: PKPass?
@@ -1590,22 +1594,29 @@ private struct RemoteFileView: View {
                     .onTapGesture { MediaViewer.shared.start = file.id }
                     .accessibilityLabel("Video, \(file.name)").accessibilityAddTraits(.isButton)
             } else if visual && !missing {
-                // still downloading: a placeholder the size of what's coming
-                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.incomingBubble)
-                    .frame(width: file.kind == "video" ? 180 : 220, height: file.kind == "video" ? 320 : 220)
-                    .overlay {
-                        VStack(spacing: 8) {
-                            ProgressView()
-                            Text(file.kind == "video" ? "Loading video" : "Loading photo").font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary)
+                // Still downloading, or couldn't be: a box the size of what's coming, in the photo's colour when it's known.
+                Group {
+                    if failed {
+                        Button { tries += 1 } label: {
+                            Text.couldntLoad.font(size: 13, relativeTo: .footnote).multilineTextAlignment(.center).padding(12)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity).background(.incomingBubble)
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(file.kind == "video" ? "Couldn't load video. Retry" : "Couldn't load photo. Retry")
+                    } else {
+                        MediaPlaceholder(fill: MediaCache.tint(file.id) ?? .incomingBubble)
+                            .accessibilityElement().accessibilityLabel(file.kind == "video" ? "Loading video" : "Loading photo")
                     }
-                    .accessibilityElement(children: .combine)
+                }
+                .frame(width: file.kind == "video" ? 180 : 220, height: file.kind == "video" ? 320 : 220)
+                .clipShape(.rect(cornerRadius: 18, style: .continuous))
             } else {
                 Button(action: open) {
                     HStack(spacing: 8) {
                         if opening { ProgressView().controlSize(.small) }
-                        else { Image(systemName: missing ? "exclamationmark.triangle" : isPass ? "wallet.pass" : "doc") }
-                        Text(missing ? "\(file.name) — no longer available" : isPass ? "Add to Apple Wallet" : file.name).lineLimit(1)
+                        else { Image(systemName: missing ? "exclamationmark.triangle" : failed ? "arrow.clockwise" : isPass ? "wallet.pass" : "doc") }
+                        if failed { Text.couldntLoad.lineLimit(1) }
+                        else { Text(missing ? "\(file.name) — no longer available" : isPass ? "Add to Apple Wallet" : file.name).lineLimit(1) }
                     }
                     .font(size: 15, relativeTo: .subheadline)
                     .padding(.horizontal, 12).padding(.vertical, 9)
@@ -1615,28 +1626,35 @@ private struct RemoteFileView: View {
                 .disabled(missing || opening)
             }
         }
-        .task(id: file.id) {
-            if file.kind == "video" {
-                if let t = await MediaCache.thumbnail(file, from: store.backend) { thumb = t } else { missing = true }
-                return
-            }
-            if let hit = MediaCache.data[file.id] { data = hit; return }
-            guard file.kind == "image" else { return }
-            await load()
+        .task(id: "\(file.id) \(tries)") {
+            failed = false   // a file that isn't fetched until tapped just loses its error once the connection is back
+            do {
+                if file.kind == "video" {
+                    if thumb == nil { thumb = try await MediaCache.thumbnail(file, from: store.backend); missing = thumb == nil }
+                    return
+                }
+                if let hit = MediaCache.data[file.id] { data = hit; return }
+                guard file.kind == "image" else { return }
+                try await load()
+            } catch { failed = !Task.isCancelled }
         }
+        .onChange(of: store.connected) { if store.connected && failed { tries += 1 } }
         .quickLookPreview($preview)
         .sheet(item: $pass) { AddPassSheet(pass: $0).ignoresSafeArea() }
     }
 
-    private func load() async {
+    private func load() async throws {
         // The thread lays out whole, so every row asks at once; MediaCache fetches each file once.
-        if let d = await MediaCache.load(file, from: store.backend) { data = d } else { missing = true }
+        data = try await MediaCache.load(file, from: store.backend)
+        missing = data == nil
     }
 
     private func open() {
         Task {
             opening = true; defer { opening = false }
-            if data == nil { await load() }
+            if data == nil {
+                do { try await load(); failed = false } catch { failed = true; return }
+            }
             guard let data else { return }
             if isPass, PKAddPassesViewController.canAddPasses(), let p = try? PKPass(data: data) { pass = p; return }
             let url = URL.temporaryDirectory.appending(path: file.name)
@@ -1740,7 +1758,7 @@ private struct VoiceRow: View {
         if let local = VoiceStore.data(message.id) { return local }
         guard let a = message.audio else { return nil }
         if let hit = Self.cache[a.id] { return hit }
-        let d = await store.backend.file(a.id)
+        let d = try? await store.backend.file(a.id)
         Self.cache[a.id] = d
         return d
     }

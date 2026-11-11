@@ -248,7 +248,7 @@ struct WalkieView: View {
         reply = m
         if let a = m.audio {
             heard = id
-            Task { await player.toggle(a.id) { await store.backend.file(a.id) } }
+            Task { await player.toggle(a.id) { try? await store.backend.file(a.id) } }
         } else if !m.isVoice, !m.text.isEmpty {
             heard = id
             try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])

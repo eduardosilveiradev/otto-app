@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import CoreImage
 
 /// Opens the full-screen media viewer on one photo: tapping any photo in the thread.
 @MainActor @Observable
@@ -10,30 +11,55 @@ final class MediaViewer {
 }
 
 /// Photo bytes Otto sent, fetched once and shared by the bubble and the viewer.
+/// Like `OttoBackend.file`: nil when the file is gone, a throw when it couldn't be fetched.
 @MainActor enum MediaCache {
     static var data: [String: Data] = [:]
-    static func load(_ file: RemoteFile, from backend: any OttoBackend) async -> Data? {
+    static func load(_ file: RemoteFile, from backend: any OttoBackend) async throws -> Data? {
         if let hit = data[file.id] { return hit }
-        let d = await backend.file(file.id)
-        if let d { data[file.id] = d }
+        let d = try await backend.file(file.id)
+        if let d {
+            data[file.id] = d
+            if file.kind == "image" && tints[file.id] == nil { tints[file.id] = average(d) }
+        }
         return d
     }
 
+    /// Each photo's average colour (0xRRGGBB), kept across launches: the bytes live in memory only,
+    /// so every launch fetches the thread's photos again, and each one loads into its own colour.
+    // ponytail: one entry per photo ever shown, never pruned; trim to the thread's files if it grows.
+    static var tints: [String: Int] = UserDefaults.standard.dictionary(forKey: "otto.photoTints") as? [String: Int] ?? [:] {
+        didSet { UserDefaults.standard.set(tints, forKey: "otto.photoTints") }
+    }
+    static func tint(_ id: String?) -> Color? {
+        guard let id, let c = tints[id] else { return nil }
+        return Color(red: Double(c >> 16 & 0xFF) / 255, green: Double(c >> 8 & 0xFF) / 255, blue: Double(c & 0xFF) / 255)
+    }
+    private static let context = CIContext()
+    private static func average(_ d: Data) -> Int? {
+        guard let img = CIImage(data: d),
+              let avg = CIFilter(name: "CIAreaAverage", parameters: [kCIInputImageKey: img, kCIInputExtentKey: CIVector(cgRect: img.extent)])?.outputImage
+        else { return nil }
+        var px = [UInt8](repeating: 0, count: 4)
+        context.render(avg, toBitmap: &px, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                       format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        return Int(px[0]) << 16 | Int(px[1]) << 8 | Int(px[2])
+    }
+
     /// A video needs a file to play from: the bytes written once to caches, named by id.
-    static func url(_ file: RemoteFile, from backend: any OttoBackend) async -> URL? {
+    static func url(_ file: RemoteFile, from backend: any OttoBackend) async throws -> URL? {
         let ext = (file.name as NSString).pathExtension
         let url = URL.cachesDirectory.appending(path: "media-\(file.id).\(ext.isEmpty ? "mp4" : ext)")
         if FileManager.default.fileExists(atPath: url.path) { return url }
-        guard let d = await load(file, from: backend), (try? d.write(to: url)) != nil else { return nil }
+        guard let d = try await load(file, from: backend), (try? d.write(to: url)) != nil else { return nil }
         data[file.id] = nil   // the file holds it now; don't keep a second copy in memory
         return url
     }
 
     static var thumbs: [String: UIImage] = [:]
     /// The video's first frame, for the bubble.
-    static func thumbnail(_ file: RemoteFile, from backend: any OttoBackend) async -> UIImage? {
+    static func thumbnail(_ file: RemoteFile, from backend: any OttoBackend) async throws -> UIImage? {
         if let hit = thumbs[file.id] { return hit }
-        guard let url = await url(file, from: backend) else { return nil }
+        guard let url = try await url(file, from: backend) else { return nil }
         let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         gen.appliesPreferredTrackTransform = true
         gen.maximumSize = CGSize(width: 720, height: 720)
@@ -41,6 +67,26 @@ final class MediaViewer {
         let img = UIImage(cgImage: cg); thumbs[file.id] = img
         return img
     }
+}
+
+/// Where a photo is still coming: a still box (no shimmer) in `fill`, shown only after 150 ms
+/// so one that arrives sooner never flashes a box first. The caller sizes and clips it.
+struct MediaPlaceholder: View {
+    let fill: Color
+    @State private var shown = false
+    var body: some View {
+        fill.opacity(shown ? 1 : 0)
+            .task {
+                try? await Task.sleep(for: .milliseconds(150))
+                withAnimation(.easeOut(duration: 0.2)) { shown = true }
+            }
+    }
+}
+
+extension Text {
+    /// What a file that couldn't be fetched (offline, a timeout, a 5xx; never a 404) says in its place.
+    /// The no-break space keeps the dot off the start of the line when large text wraps it.
+    static var couldntLoad: Text { Text("Couldn't load\u{00A0}· ").foregroundStyle(.secondary) + Text("Retry").foregroundStyle(.blue) }
 }
 
 /// One photo in the thread, yours (the JPEG you sent) or Otto's (fetched on demand).
@@ -146,7 +192,7 @@ struct MediaViewerView: View {
                     guard let i else { return }
                     let item = items[i]
                     Task {
-                        if item.isVideo, let f = item.file { sharing = await MediaCache.url(f, from: store.backend) }
+                        if item.isVideo, let f = item.file { sharing = try? await MediaCache.url(f, from: store.backend) }
                         else { sharing = await MediaPage.image(item, store: store) }
                     }
                 } label: {
@@ -176,7 +222,7 @@ private struct MediaPage: View {
 
     static func image(_ item: MediaItem, store: OttoStore) async -> UIImage? {
         if let load = item.local { return load().flatMap(UIImage.init(data:)) }
-        guard let f = item.file, let d = await MediaCache.load(f, from: store.backend) else { return nil }
+        guard let f = item.file, let d = try? await MediaCache.load(f, from: store.backend) else { return nil }
         return UIImage(data: d)
     }
 
@@ -245,7 +291,7 @@ private struct VideoPage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: item.id) {
-            guard let f = item.file, let url = await MediaCache.url(f, from: store.backend) else { failed = true; return }
+            guard let f = item.file, let url = try? await MediaCache.url(f, from: store.backend) else { failed = true; return }
             try? AVAudioSession.sharedInstance().setCategory(.playback)
             player = AVPlayer(url: url)
             if showing { player?.play() }

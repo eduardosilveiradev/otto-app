@@ -220,12 +220,15 @@ final class LiveBackend: OttoBackend {
                    + (shared ? [URLQueryItem(name: "shared", value: "1")] : [])) != nil
     }
 
-    func file(_ id: String) async -> Data? {
+    func file(_ id: String) async throws -> Data? {
         var req = URLRequest(url: base.appending(path: "app/file/\(id)"))
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        guard let (data, resp) = try? await session.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return data
+        let (data, resp) = try await session.data(for: req)
+        switch (resp as? HTTPURLResponse)?.statusCode {
+        case 200: return data
+        case 404: return nil
+        default: throw URLError(.badServerResponse)
+        }
     }
 
     func sendVoice(_ m4a: Data, id: String, replyTo: String?) async -> String? {
