@@ -71,7 +71,8 @@ It is not stable yet.
 Debug builds accept a few arguments for checking layout without a server:
 `-seedThread`, `-thinking`, `-keyboardDemo`, `-growDraft`, `-seedDraft`,
 `-seedAttachments`, and `-details -screen <Loops|Memory|People|Money|Trips|Activity|Status|Devices>`
-to open the contact card on one of its pages.
+to open the contact card on one of its pages, or `-details -checkServer` to open it on the
+server fields and check them.
 
 A Release build with `OTHER_SWIFT_FLAGS='$(inherited) -DPERFDEMO'` also takes `-perfDemo`
 (sends, typing steps, tapbacks and replies in a loop, then prints how many frames ran late)

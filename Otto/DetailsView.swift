@@ -16,9 +16,20 @@ struct DetailsView: View {
     @State private var done: Set<Loop.ID> = []
     /// `-screen Money` opens straight onto a page, for screenshots.
     @State private var screen = UserDefaults.standard.string(forKey: "screen")
+    /// Set each time the address or token is submitted; the check under the token answers for it.
+    @State private var submitted: UUID?
+    @State private var serverCheck: ServerCheck?
+    enum ServerCheck: Equatable { case checking, connected, failed(String) }
+    #if DEBUG
+    /// `-details -checkServer` opens scrolled to the server fields and submits them, for screenshots.
+    private let checkOnOpen = ProcessInfo.processInfo.arguments.contains("-checkServer")
+    #else
+    private let checkOnOpen = false
+    #endif
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             List {
                 Group {
                 Section {
@@ -79,17 +90,36 @@ struct DetailsView: View {
                 }
 
                 Section {
-                    TextField("https://your-mac.your-tailnet.ts.net", text: $server)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                    SecureField("App token", text: $token)
-                    TextField("Otto's phone number", text: $callNumber).keyboardType(.phonePad)
+                    labeled("Server address") {
+                        TextField("Server address", text: $server, prompt: Text(verbatim: "https://your-mac.your-tailnet.ts.net"))
+                            .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                            .onSubmit { submitted = UUID() }
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        labeled("App token") {
+                            // A one-time code field, so iOS offers a code it sees in Messages. The token isn't numeric: default keyboard.
+                            SecureField("App token", text: $token, prompt: Text(verbatim: ""))
+                                .textContentType(.oneTimeCode)
+                                .onSubmit { submitted = UUID() }
+                        }
+                        if let serverCheck { checkLine(serverCheck) }
+                    }
+                    .id("server")
+                    labeled("Otto's phone number") {
+                        TextField("Otto's phone number", text: $callNumber, prompt: Text(verbatim: "+1 555 0100")).keyboardType(.phonePad)
+                    }
                 } header: { Text("Server") } footer: {
                     Text("Over Tailscale. Quit and reopen the app after changing these.")
                 }
+                .listRowInsets(.vertical, 10)   // 20 between fields
+                .onChange(of: server) { submitted = nil; serverCheck = nil }
+                .onChange(of: token) { submitted = nil; serverCheck = nil }
+                .task(id: submitted) { if submitted != nil { await checkServer() } }
                 }
                 // Messages' rows are glass over the blurred thread, not solid grey.
                 .listRowBackground(Rectangle().fill(Color(UIColor { $0.userInterfaceStyle == .dark ? .white.withAlphaComponent(0.07) : .white.withAlphaComponent(0.65) })))
             }
+            .listSectionSpacing(24)
             .refreshable { await store.refreshBrief(); await store.setSnooze(nil) }
             .task {
                 async let s: Void = store.setSnooze(nil)
@@ -121,7 +151,67 @@ struct DetailsView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .scrollContentBackground(.hidden)
+            .task {
+                guard checkOnOpen else { return }
+                submitted = UUID()
+                try? await Task.sleep(for: .seconds(2))   // after the brief has loaded above it
+                proxy.scrollTo("server", anchor: .center)
+            }
+            }
         }
+    }
+
+    /// A label over its field. The field carries the same name for VoiceOver, so the label is hidden from it.
+    private func labeled(_ title: String, @ViewBuilder field: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.footnote).foregroundStyle(.secondary).accessibilityHidden(true)
+            field()
+        }
+    }
+
+    @ViewBuilder private func checkLine(_ check: ServerCheck) -> some View {
+        switch check {
+        case .checking:
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Checking…") }
+                .font(.footnote).foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+        case .connected: status("checkmark.circle.fill", "Connected", icon: .green, text: .secondary)
+        case .failed(let why): status("exclamationmark.triangle.fill", why, icon: .red, text: .red)
+        }
+    }
+
+    /// Not a Label: in a list row a Label's icon snaps to the row's icon column, far from its text.
+    private func status(_ symbol: String, _ text: String, icon: Color, text tint: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: symbol).foregroundStyle(icon)
+            Text(text).foregroundStyle(tint)
+        }
+        .font(.footnote)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Asks the server for this app's settings with the address and token as typed: the same
+    /// request onboarding makes before it saves them.
+    private func checkServer() async {
+        let s = server.trimmingCharacters(in: .whitespaces), t = token.trimmingCharacters(in: .whitespaces)
+        guard let url = URL(string: s), url.scheme?.hasPrefix("http") == true, url.host != nil else {
+            serverCheck = .failed("Enter the whole address, starting with https://"); return
+        }
+        guard !t.isEmpty else { serverCheck = .failed("Enter the app token from your Mac."); return }
+        serverCheck = .checking
+        var req = URLRequest(url: url.appending(path: "app/settings"), timeoutInterval: 10)
+        req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
+        var status: Int?, failure: (any Error)?
+        do { status = (try await URLSession.shared.data(for: req).1 as? HTTPURLResponse)?.statusCode } catch { failure = error }
+        guard !Task.isCancelled else { return }   // edited or submitted again meanwhile
+        serverCheck = switch ServerProblem(status: status, error: failure) {
+        case nil: .connected
+        case .unreachable?, .timedOut?: .failed("Can't reach that address. Check it, and that Tailscale is on.")
+        case .refused?: .failed("The server didn't accept that token. Check it, or make a new one on your Mac.")
+        case let problem?: .failed(problem.message)
+        }
+        if case .failed(let why) = serverCheck { AccessibilityNotification.Announcement(why).post() }
+        else { AccessibilityNotification.Announcement("Connected").post() }
     }
 
     /// The clock while Otto is holding things back, how far through the hold, and what's waiting.

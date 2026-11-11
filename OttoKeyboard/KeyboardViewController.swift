@@ -86,6 +86,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         model.pick = { [weak self] in self?.pick($0) }
         model.ask = { [weak self] in self?.askOtto($0) }
         model.undoOtto = { [weak self] in self?.undoOtto() }
+        model.retryOtto = { [weak self] in if let self, let a = lastAsk { askOtto(a.instruction, id: a.id) } }
         model.typeEmoji = { [weak self] in self?.insert($0) }
         model.deleteBackward = { [weak self] in self?.textDocumentProxy.deleteBackward() }
         model.settingsChanged = { [weak self] in self?.applySettings() }
@@ -573,7 +574,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     /// The ask whose answer is still wanted; a newer ask replaces it, so an older answer is dropped.
     private var askGen = UUID()
 
-    private func askOtto(_ instruction: String) {
+    /// The ask the retry chip sends again, under the same id: if the first did land after all,
+    /// the server answers the retry from the thread instead of asking Otto twice.
+    private var lastAsk: (instruction: String, id: String)?
+
+    private func askOtto(_ instruction: String, id: String = UUID().uuidString) {
         guard hasFullAccess else {
             model.otto = .failed("Turn on Allow Full Access: Settings › General › Keyboard › Keyboards › Otto.")
             return
@@ -585,12 +590,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         let field = before
         let rewrite = instruction.hasPrefix("Rewrite") && !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         model.otto = .thinking
-        var req = URLRequest(url: base.appending(path: "app/ask"), timeoutInterval: 40)
+        lastAsk = (instruction, id)
+        var req = URLRequest(url: base.appending(path: "app/ask"), timeoutInterval: 15)
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "id": UUID().uuidString, "text": instruction, "via": "keyboard", "field": field,
+            "id": id, "text": instruction, "via": "keyboard", "field": field,
         ])
         let gen = UUID(), doc = textDocumentProxy.documentIdentifier
         askGen = gen
@@ -604,19 +610,33 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
                 let (data, resp) = try await URLSession.shared.data(for: req)
                 guard mine() else { return }
                 // Only a 200 means the Mac has the ask; anything else (a 503 "send again", Funnel's 502
-                // with the Mac away) means it never landed, and the keyboard keeps no copy to retry.
-                guard (resp as? HTTPURLResponse)?.statusCode == 200 else { model.otto = .failed("Couldn't reach Otto. Try again."); return }
+                // with the Mac away) means it never landed, so it can go again.
+                let status = (resp as? HTTPURLResponse)?.statusCode
+                guard status == 200 else { fail(ServerProblem(status: status, error: nil) ?? .server(status ?? 0)); return }
                 guard here() else { model.otto = .failed("You moved to another field. The answer is in the app."); return }
-                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                       let reply = json["reply"] as? [String: Any], let text = reply["text"] as? String, !text.isEmpty
                 else { model.otto = .failed("Otto didn't answer in time. It'll be in the app."); return }
                 // Typed into while it worked: pasting the answer whole would land text where it wasn't asked for.
                 guard before == field else { model.otto = .failed("The text changed while Otto was writing. It's in the app."); return }
                 apply(text, replacing: rewrite ? field : nil)
             } catch {
-                if mine() { model.otto = .failed("Couldn't reach Otto. Try again.") }
+                if mine() { fail(ServerProblem(status: nil, error: error) ?? .unreachable) }
             }
         }
+    }
+
+    /// Short: two lines beside the retry chip, which already says "Try again".
+    private func fail(_ problem: ServerProblem) {
+        let why = switch problem {
+        case .offline: "You're offline."
+        case .unreachable: "Can't reach your Mac."
+        // A timed-out ask may still have landed, and then its answer goes to the app.
+        case .timedOut: "Otto took too long. It may answer in the app."
+        case .server(let code): "Otto's server hit an error (\(code))."
+        case .notSetUp, .refused: problem.message
+        }
+        model.otto = .failed(why, retry: problem != .refused)
     }
 
     private func apply(_ text: String, replacing old: String?) {
