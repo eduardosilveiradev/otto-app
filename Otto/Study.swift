@@ -215,10 +215,17 @@ private struct QuizPane: View {
                     Text(q.q).font(size: 22, weight: .semibold, relativeTo: .title2)
                     ForEach(q.options.indices, id: \.self) { o in
                         Button { if picked == nil { withAnimation(.snappy) { run.answered[run.at] = o } } } label: {
-                            Text(q.options[o]).frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 16).padding(.vertical, 13)
-                                .background(fill(o, q, picked), in: .rect(cornerRadius: 16, style: .continuous))
-                        }.tint(.primary)
+                            HStack {
+                                Text(q.options[o])
+                                Spacer(minLength: 8)
+                                if picked != nil, o == q.answer { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                                else if o == picked { Image(systemName: "xmark.circle.fill").foregroundStyle(.red) }
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 13)
+                            .background(fill(o, q, picked), in: .rect(cornerRadius: 16, style: .continuous))
+                        }
+                        .tint(.primary)
+                        .accessibilityValue(picked == nil ? "" : o == q.answer ? "Correct" : o == picked ? "Wrong" : "")
                     }
                     if let picked {
                         if let why = q.why { Text(why).font(.callout).foregroundStyle(.secondary) }

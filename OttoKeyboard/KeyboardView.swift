@@ -355,6 +355,20 @@ final class KeyView: UIView {
             }
         case .page(let p): label.text = p == .letters ? "ABC" : p == .numbers ? "123" : "#+="; label.font = style.uiFont(17)
         }
+        // ponytail: untested with VoiceOver on a device; activation relies on the board's own touch handling.
+        isAccessibilityElement = true
+        accessibilityTraits = shift == .locked && def.kind == .shift ? [.keyboardKey, .selected] : .keyboardKey
+        accessibilityLabel = switch def.kind {
+        case .char: label.text
+        case .shift: shift == .locked ? "Caps Lock" : "Shift"
+        case .delete: "Delete"
+        case .globe: "Next keyboard"
+        case .emoji: "Emoji"
+        case .otto: "Ask Otto"
+        case .space: spaceTitle
+        case .ret: returnTitle
+        case .page(let p): p == .letters ? "Letters" : p == .numbers ? "Numbers" : "More symbols"
+        }
         let textColor = returnAccent && def.kind == .ret ? style.onAccent.ui : style.text.ui
         label.textColor = textColor
         icon.tintColor = shift == .locked && def.kind == .shift ? style.accent.ui : textColor

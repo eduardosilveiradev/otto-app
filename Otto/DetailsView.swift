@@ -306,7 +306,8 @@ struct DetailsView: View {
                         Task { if !(await store.backend.setLoop(l.id, done: !closed)) { done.formSymmetricDifference([l.id]) } }
                     } label: {
                         HStack(spacing: 12) {
-                            RowIcon(symbol: closed ? "checkmark" : "circle")
+                            Image(systemName: closed ? "checkmark.circle.fill" : "circle")   // Reminders' mark, bare
+                                .font(.title3.weight(.light)).foregroundStyle(.secondary).frame(width: 26)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(l.title).strikethrough(closed).lineLimit(2)
                                     .foregroundStyle(closed ? .secondary : .primary)

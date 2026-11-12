@@ -196,6 +196,14 @@ private struct ConnectPage: View {
 
     private var canScan: Bool { DataScannerViewController.isSupported }
 
+    /// Right under what it's about (the fields, or the command and Paste), not under a link or down by the
+    /// buttons. Its line is always held, so the page doesn't re-centre and jump when an error arrives.
+    private var problemLine: some View {
+        Text(problem ?? " ").font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
+            .opacity(problem == nil ? 0 : 1)
+            .accessibilityHidden(problem == nil)
+    }
+
     var body: some View {
         Page(title: "Connect to your Mac",
              line: manual ? "The server address and the app token from your Mac."
@@ -216,6 +224,7 @@ private struct ConnectPage: View {
                     }
                     .textFieldStyle(.plain)
                     .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 14, style: .continuous))
+                    problemLine
                     Secondary(label: "Scan a code instead") { withAnimation { manual = false; problem = nil } }
                 } else {
                     // The whole command, as it runs: a shell line continuation keeps "--server" in one piece,
@@ -237,14 +246,10 @@ private struct ConnectPage: View {
                         .labelStyle(.titleAndIcon)
                         .tint(.orange)   // the page's one accent
                     }
+                    problemLine
                     // The other way in, beside the one it replaces; with no camera it's the big button instead.
                     if canScan { Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } } }
                 }
-                // Right under what it's about, not down by the buttons. Its line is always held, so the
-                // page doesn't re-centre and jump when an error arrives.
-                Text(problem ?? " ").font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
-                    .opacity(problem == nil ? 0 : 1)
-                    .accessibilityHidden(problem == nil)
             }
         } footer: {
             if manual {

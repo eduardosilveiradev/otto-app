@@ -193,6 +193,7 @@ struct ShareView: View {
             switch state {
             case .sending: focused = false
             case .sent: AccessibilityNotification.Announcement("Sent").post()
+            case .queued: AccessibilityNotification.Announcement("It goes to Otto next time you open the app.").post()
             case .failed(let problem): AccessibilityNotification.Announcement(problem.message).post()
             default: break
             }

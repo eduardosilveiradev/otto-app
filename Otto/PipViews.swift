@@ -763,7 +763,7 @@ struct PipDetailSheet: View {
                 .sensoryFeedback(.impact(weight: .light), trigger: p.paused)
 
                 PillButton(title: "Delete pip", destructive: true) { deleting = true }
-                    .padding(.horizontal, 16).padding(.top, 40)
+                    // On the button itself, so the popover's arrow points at it and not at the gap above.
                     .confirmationDialog("Delete \(p.name)?", isPresented: $deleting, titleVisibility: .visible) {
                         Button("Delete pip", role: .destructive) {
                             Task {
@@ -774,6 +774,7 @@ struct PipDetailSheet: View {
                     } message: {
                         Text("\(p.name) leaves your conversations and any groups it’s in.")
                     }
+                    .padding(.horizontal, 16).padding(.top, 40)
             }
             .padding(.bottom, 32)
         }
@@ -944,12 +945,13 @@ struct GroupDetailSheet: View {
                 }
 
                 PillButton(title: "Delete group", destructive: true) { deleting = true }
-                    .padding(.horizontal, 16).padding(.top, 40)
+                    // On the button itself, so the popover's arrow points at it and not at the gap above.
                     .confirmationDialog("Delete \(row.name)?", isPresented: $deleting, titleVisibility: .visible) {
                         Button("Delete group", role: .destructive) { run { await pips.deleteGroup(id) } }
                     } message: {
                         Text("\(row.name) leaves your conversations. Its pips stay.")
                     }
+                    .padding(.horizontal, 16).padding(.top, 40)
             }
             .padding(.bottom, 32)
             .disabled(busy)

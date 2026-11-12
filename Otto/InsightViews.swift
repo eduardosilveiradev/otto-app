@@ -64,7 +64,8 @@ private struct LoopsList: View {
             .toolbar { Button(closed ? "Reopen" : "Done") { flip(r.id, done: !closed) } }
         } label: {
             HStack(spacing: 12) {
-                RowIcon(symbol: closed ? "checkmark" : "circle")
+                Image(systemName: closed ? "checkmark.circle.fill" : "circle")   // Reminders' mark, bare
+                    .font(.title3.weight(.light)).foregroundStyle(.secondary).frame(width: 26)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(r.text).lineLimit(3).strikethrough(closed).foregroundStyle(closed ? .secondary : .primary)
                     let m = meta(r)
@@ -399,6 +400,10 @@ struct PackagesList: View {
         }
         if pkg.status == "exception" && pkg.eta == nil { return "Delivery problem" }
         guard let eta = pkg.eta else { return pkg.status == "ordered" ? "Not shipped yet" : "No delivery date yet" }
+        // Still on the way after its last possible day: say it was due, as Loops does, not that it arrives.
+        if (pkg.etaLatest ?? eta).prefix(10) < Date.now.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day()) {
+            return "Was due \(day(eta))"
+        }
         if let late = pkg.etaLatest, late != eta, let a = dashDate(eta), let b = dashDate(late), a < b {
             return "Arrives " + (a..<b).formatted(.interval.day().month(.abbreviated))
         }
