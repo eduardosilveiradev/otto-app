@@ -317,7 +317,12 @@ final class MockBackend: OttoBackend {
     }
 
     func react(to id: String, emoji: String) async {}
-    func file(_ id: String) async -> Data? { nil }
+    func file(_ id: String) async -> Data? {
+        #if DEBUG
+        if id == "demo-study" { return try? JSONEncoder().encode(StudySet.demo) }
+        #endif
+        return nil
+    }
     #if DEBUG
     func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse? {
         PipFixture.respond(method, path, query: query, body: body)

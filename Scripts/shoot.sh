@@ -153,6 +153,10 @@ shot sheet change-approval 6 "Approve a change to Otto's core" $O -demoThread -a
 shot sheet boarding-pass 11 "Flight-day boarding pass" $O -demoThread -mockGate -openGate
 shot sheet live-call 8 "A call Otto is placing, live transcript" $O -demoThread -mockCalls -openCall
 shot media viewer 6 "Full-screen photo viewer" $O -mediaThread -media
+shot study bubble 6 "Study set Otto sent, in the thread" $O -studyThread
+shot study cards 7 "Study set open on its cards" $O -studyThread -studyOpen cards
+shot study flipped 7 "A card turned over: Again or Knew it" $O -studyThread -studyOpen flipped
+shot study quiz 7 "Quiz with a wrong answer picked" $O -studyThread -studyOpen quiz
 shot walkie open 9 "Walkie-talkie" $O -demoThread -walkie
 shot call web-call-failed 25 "Web call that couldn't connect" $O -demoThread -call -vapiPublicKey demo -vapiAssistantId demo -vapiHost 127.0.0.1
 

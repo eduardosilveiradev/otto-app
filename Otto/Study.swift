@@ -12,6 +12,23 @@ struct StudySet: Codable {
     let quiz: [Question]
 
     static func isStudy(_ f: RemoteFile) -> Bool { f.name.hasSuffix(".study.json") }
+
+    #if DEBUG
+    /// For screenshots: `-studyThread` serves it, `-studyOpen cards|flipped|quiz` opens it on that pane.
+    static var debugOpen: String? {
+        let a = ProcessInfo.processInfo.arguments
+        return a.firstIndex(of: "-studyOpen").map { $0 + 1 < a.count ? a[$0 + 1] : "cards" }
+    }
+    static let demo = StudySet(title: "Photosynthesis", source: "Biology, p. 112", cards: [
+        Card(front: "Where does photosynthesis happen?", back: "In the chloroplasts, mostly in the leaf’s mesophyll cells."),
+        Card(front: "What does the light reaction make?", back: "ATP and NADPH, and oxygen as a by-product."),
+        Card(front: "What is the Calvin cycle’s input?", back: "Carbon dioxide, fixed by RuBisCO into sugar."),
+    ], quiz: [
+        Question(q: "Which gas do plants release during photosynthesis?", options: ["Carbon dioxide", "Oxygen", "Nitrogen"], answer: 1,
+                 why: "Splitting water in the light reaction frees oxygen."),
+        Question(q: "Where is chlorophyll found?", options: ["Mitochondria", "Nucleus", "Chloroplasts"], answer: 2, why: nil),
+    ])
+    #endif
 }
 
 /// The bubble for a study set: what it is and how much is in it, like an iMessage app message.
@@ -54,6 +71,9 @@ struct StudyBubble: View {
                 guard let d = try await store.backend.file(file.id) else { missing = true; return }
                 set = try? JSONDecoder().decode(StudySet.self, from: d)
                 failed = set == nil   // a file it can't read isn't gone either
+                #if DEBUG
+                open = set != nil && StudySet.debugOpen != nil
+                #endif
             } catch { failed = !Task.isCancelled }
         }
         .onChange(of: store.connected) { if store.connected && failed { tries += 1 } }
@@ -85,6 +105,12 @@ struct StudyView: View {
                 else { QuizPane(quiz: set.quiz, run: $quiz) }
             }
             .navigationTitle(set.title).navigationBarTitleDisplayMode(.inline)
+            #if DEBUG
+            .onAppear {
+                if StudySet.debugOpen == "flipped" { cards.flipped = true }
+                if StudySet.debugOpen == "quiz" { mode = 1; quiz.answered[0] = 0 }
+            }
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {

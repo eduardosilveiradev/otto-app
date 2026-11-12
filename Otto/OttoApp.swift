@@ -404,6 +404,12 @@ final class OttoStore {
             if i < args.count, args[i] == "a" { messages = Array(messages.prefix(8)) }
             if i < args.count, args[i] == "b" { messages = Array(messages.dropFirst(8)) }
         }
+        // `-studyThread`: a study set's bubble (MockBackend serves it); `-studyOpen [quiz]` opens it.
+        if ProcessInfo.processInfo.arguments.contains("-studyThread") {
+            messages = [Message(from: .me, text: "can you make me flashcards from this page", read: true),
+                        Message(from: .otto, text: "here, cards first and then a quiz.",
+                                files: [RemoteFile(id: "demo-study", name: "Photosynthesis.study.json", kind: "file")])]
+        }
         // `-otpDemo`: a code arriving, drawer open, for screenshots.
         if ProcessInfo.processInfo.arguments.contains("-otpDemo") {
             let m = Message(from: .otto, text: "Clerk code", serverID: "demo-otp", otp: .init(code: "482915", sender: "Clerk"))
