@@ -24,7 +24,7 @@ struct MessageOtto: AppIntent {
             return .result(dialog: try await spoken(a))
         }
         let sent = await store.sendAndConfirm(mine.id)
-        return .result(dialog: sent ? "Sent." : "Otto's offline. It goes out next time the app connects.")
+        return .result(dialog: sent ? "Sent." : "Otto’s offline. It goes out next time the app connects.")
     }
 }
 
@@ -33,7 +33,7 @@ struct MessageOtto: AppIntent {
 /// says nothing, and never opens the app.
 struct LogPayment: AppIntent {
     static let title: LocalizedStringResource = "Log Payment"
-    static let description = IntentDescription("Send a Wallet payment to Otto's money tracking.")
+    static let description = IntentDescription("Send a Wallet payment to Otto’s money tracking.")
     static let supportedModes: IntentModes = [.background]
     static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
 
@@ -76,7 +76,7 @@ struct SnapToOtto: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard let image = UIImage(data: photo.data), let jpeg = OttoStore.jpeg(image) else {
-            return .result(dialog: "That isn't a photo I can read.")
+            return .result(dialog: "That isn’t a photo I can read.")
         }
         let words = note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var mine = Message(from: .me, text: words, image: jpeg)
@@ -84,7 +84,7 @@ struct SnapToOtto: AppIntent {
         guard let a = await OttoStore.shared.siri(mine, send: { await $0.snap(jpeg, note: words, id: mine.wireID) }) else {
             // Unreachable: it goes up as a plain photo when the app next connects, pending until then.
             let sent = await OttoStore.shared.sendAndConfirm(mine.id)
-            return .result(dialog: sent ? "Sent." : "Otto's offline. The photo goes out next time the app connects.")
+            return .result(dialog: sent ? "Sent." : "Otto’s offline. The photo goes out next time the app connects.")
         }
         return .result(dialog: try await spoken(a))
     }
@@ -109,12 +109,12 @@ struct SaveThisPlace: AppIntent {
             try await continueInForeground("Otto needs your location for this.", alwaysConfirm: false)
             fix = await Here.location()
         }
-        guard let fix else { return .result(dialog: "Couldn't get your location.") }
+        guard let fix else { return .result(dialog: "Couldn’t get your location.") }
         let place = await Here.describe(fix)
         let mine = Message(from: .me, text: "📍 " + (words.isEmpty ? (place["name"] as? String ?? "here") : words))
         guard let a = await OttoStore.shared.siri(mine, send: { await $0.ask(id: mine.wireID, text: words, via: "here", place: place) }) else {
             OttoStore.shared.giveUp(mine.id)   // the place can't ride a later retry: say it didn't go
-            return .result(dialog: "Otto's offline, so that place isn't saved.")
+            return .result(dialog: "Otto’s offline, so that place isn’t saved.")
         }
         return .result(dialog: try await spoken(a))
     }

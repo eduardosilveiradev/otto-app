@@ -100,12 +100,12 @@ struct WalkieView: View {
                 if stuck {
                     // The thread's own words for an unsent message, and the same way on.
                     Button(action: retry) {
-                        (Text(sent?.pending == true ? "Not delivered · " : "Otto didn't answer · ").foregroundStyle(.red)
+                        (Text(sent?.pending == true ? "Not delivered · " : "Otto didn’t answer · ").foregroundStyle(.red)
                          + Text("Try again").foregroundStyle(.blue)).hitSlop()
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Text(reply.map { $0.text.isEmpty ? "…" : $0.text } ?? "Let go to send.")
+                    Text(reply.map { $0.text.isEmpty ? "…" : $0.text } ?? " ")   // one instruction at a time: the caption says it
                         .foregroundStyle(reply == nil ? .secondary : .primary)
                 }
             }
@@ -197,8 +197,8 @@ struct WalkieView: View {
 
     private var caption: String {
         switch phase {
-        case .listening: "Listening"
-        case .thinking: "Otto's thinking"
+        case .listening: "Let go to send"
+        case .thinking: "Otto’s thinking"
         case .speaking: "Otto"
         case .idle: "Hold to talk"
         }

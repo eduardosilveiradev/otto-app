@@ -39,7 +39,7 @@ struct DetailsView: View {
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
                             Text(store.backend is MockBackend ? "sample data"
-                                 : !store.connected ? "asleep — can't reach the server" : "connected")
+                                 : !store.connected ? "asleep — can’t reach the server" : "connected")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
@@ -107,8 +107,8 @@ struct DetailsView: View {
                         if let serverCheck { checkLine(serverCheck) }
                     }
                     .id("server")
-                    labeled("Otto's phone number") {
-                        TextField("Otto's phone number", text: $callNumber, prompt: Text(verbatim: "+1 555 0100")).keyboardType(.phonePad)
+                    labeled("Otto’s phone number") {
+                        TextField("Otto’s phone number", text: $callNumber, prompt: Text(verbatim: "+1 555 0100")).keyboardType(.phonePad)
                     }
                 } header: { Text("Server") } footer: {
                     Text("Over Tailscale. Quit and reopen the app after changing these.")
@@ -212,8 +212,8 @@ struct DetailsView: View {
         guard !Task.isCancelled else { return }   // edited or submitted again meanwhile
         serverCheck = switch ServerProblem(status: status, error: failure) {
         case nil: .connected
-        case .unreachable?, .timedOut?: .failed("Can't reach that address. Check it, and that Tailscale is on.")
-        case .refused?: .failed("The server didn't accept that token. Check it, or make a new one on your Mac.")
+        case .unreachable?, .timedOut?: .failed("Can’t reach that address. Check it, and that Tailscale is on.")
+        case .refused?: .failed("The server didn’t accept that token. Check it, or make a new one on your Mac.")
         case let problem?: .failed(problem.message)
         }
         if case .failed(let why) = serverCheck { AccessibilityNotification.Announcement(why).post() }

@@ -290,13 +290,13 @@ struct ChatView: View {
         .sheet(item: Binding(get: { thread.isOtto ? store.shownApproval : nil }, set: { _ in })) {
             ApprovalSheet(request: $0)
         }
-        // The header's fade, mirrored behind the composer: bubbles dissolve over the 24pt above it
+        // The header's fade, mirrored behind the composer: bubbles dissolve over the 16pt above it
         // and are gone by the top of the field, instead of reading through the glass.
         .overlay(alignment: .bottom) {
             LinearGradient(stops: [.init(color: Color(.systemBackground).opacity(0), location: 0),
-                                   .init(color: Color(.systemBackground), location: 24 / (ui.bottomInset + 24))],
+                                   .init(color: Color(.systemBackground), location: 16 / (ui.bottomInset + 16))],
                            startPoint: .top, endPoint: .bottom)
-                .frame(height: ui.bottomInset + 24)
+                .frame(height: ui.bottomInset + 16)
                 .ignoresSafeArea(edges: .bottom)
                 .allowsHitTesting(false)
         }
@@ -355,7 +355,7 @@ struct ChatView: View {
         }
         .alert("Calling Otto", isPresented: $showCall) {
             Button("OK", role: .cancel) {}
-        } message: { Text("Add Otto's phone number in details (tap Otto's name).") }
+        } message: { Text("Add Otto’s phone number in details (tap Otto’s name).") }
     }
 
     @ViewBuilder private var threadList: some View {
@@ -419,19 +419,20 @@ struct ChatView: View {
                     }
                     if thread.typing {
                         Typing(status: thread.typingStatus, todos: thread.typingTodos, connected: thread.connected).padding(.top, 10).id("typing")
-                            .transition(.asymmetric(insertion: .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity),
-                                                    removal: .opacity))
+                            .transition(still ? .opacity : .asymmetric(insertion: .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity),
+                                                                       removal: .opacity))
                     }
                     if !thread.isOtto {
                         ForEach(row?.activity ?? []) { a in
                             ActivityLine(member: a, withFace: isGroup) { store.pips.press($0, in: thread.conversationID) }
                                 .id("activity-\(a.id)")
-                                .transition(.scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity))
+                                .transition(still ? .opacity : .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity))
                         }
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 6)
+                // Past the composer's 16pt fade, so the newest line ("Will send when back online", "Read") sits clear of it.
+                .padding(.bottom, 18)
         }
         // On the scroll view, not the stack: the bottom anchor's offset change then rides the same
         // animation as the rows. On the stack, the rows animated while the offset jumped, and every
@@ -441,13 +442,14 @@ struct ChatView: View {
         .animation(thread.animated && !burst ? .spring(response: 0.42, dampingFraction: 0.82) : nil, value: messages.count)
         // After this update's other handlers have run, so they all still see a burst as one.
         .onChange(of: messages.count, initial: true) { _, n in Task { counted.rows = n } }
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typing)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: row?.activity.map(\.id))
+        // Under Reduce Motion these heights change in one step; the rows' own fades still play.
+        .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: thread.typing)
+        .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: row?.activity.map(\.id))
         // The thinking bubble's to-do list and a tapback's room above a bubble change heights too.
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typingTodos)
+        .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: thread.typingTodos)
         // A new step's line can wrap to two, or back to one: the bubble's height follows smoothly.
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typingStatus)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: messages.map(\.reaction))
+        .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: thread.typingStatus)
+        .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: messages.map(\.reaction))
         // Pinned to the bottom as content grows (new bubbles, typing dots, the keyboard),
         // so nothing has to scroll after the fact and fight the insert animation.
         .scrollPosition($scroll)
@@ -570,7 +572,7 @@ struct ChatView: View {
             try? await Task.sleep(for: .seconds(1))
             say("reduceMotion=\(still)")
             await step("scroll up") { move(nil) { $0.scrollTo(y: offset.y - 1200) } }
-            await step("receive while up") { store.messages.append(Message(from: .otto, text: "this one lands while you're reading up there")) }
+            await step("receive while up") { store.messages.append(Message(from: .otto, text: "this one lands while you’re reading up there")) }
             await step("dots on while up") { store.ottoTyping = true }
             await step("dots off while up") { store.ottoTyping = false }
             await step("keyboard up while up") { store.demoFocus = true }
@@ -2255,8 +2257,8 @@ private struct EmptyChat: View {
     let connected: Bool
 
     private var line: String {
-        if !connected { return "Can't reach the server. What you send goes out when it's back." }
-        return "Say hi. Reminders, mail, plans: I'll keep track of the rest."
+        if !connected { return "Can’t reach the server. What you send goes out when it’s back." }
+        return "Say hi. Reminders, mail, plans: I’ll keep track of the rest."
     }
     var body: some View {
         VStack(spacing: 14) {

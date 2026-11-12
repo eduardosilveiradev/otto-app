@@ -443,6 +443,7 @@ struct ActivityLine: View {
     let member: PipMember
     let withFace: Bool
     let press: (ActionButton) -> Void
+    @Environment(\.accessibilityReduceMotion) private var still
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
@@ -474,7 +475,7 @@ struct ActivityLine: View {
             Spacer(minLength: 41)
         }
         .padding(.top, 10)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: member.activity)
+        .animation(still ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: member.activity)
         .accessibilityElement(children: .combine)
     }
 }
@@ -727,7 +728,8 @@ struct PipDetailSheet: View {
                             line(divided: i > 0) {
                                 Text(s.name)
                                 Spacer(minLength: 8)
-                                Text(s.label).foregroundStyle(.secondary).lineLimit(1)
+                                // From the cron, in the phone's clock style; the stored label is how it was set.
+                                Text(humanCron(s.schedule) ?? s.label).foregroundStyle(.secondary).lineLimit(1)
                             }
                         }
                     }
@@ -842,7 +844,7 @@ private struct FailureLine: ViewModifier {
     let text: String?
     func body(content: Content) -> some View {
         content
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            .safeAreaBar(edge: .bottom, spacing: 0) {
                 if let text {
                     // Red on the warning glyph, the words at full strength: small red text on the bar is under 4.5:1.
                     Label { Text(text).foregroundStyle(.primary) } icon: {
@@ -852,7 +854,6 @@ private struct FailureLine: ViewModifier {
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 32).padding(.vertical, 10)
-                        .background(.bar)
                 }
             }
             .onChange(of: text) { if let text { AccessibilityNotification.Announcement(text).post() } }
@@ -1252,7 +1253,7 @@ private struct PipEditSheet: View {
                     HStack {
                         Text(s.name.isEmpty ? "New schedule" : s.name).lineLimit(1)
                         Spacer(minLength: 8)
-                        Text(Self.incomplete(s) ? "Incomplete" : s.label).lineLimit(1)
+                        Text(Self.incomplete(s) ? "Incomplete" : humanCron(s.schedule) ?? s.label).lineLimit(1)
                             .foregroundStyle(Self.incomplete(s) ? Color(.systemRed) : .secondary)
                     }
                 }
@@ -1368,7 +1369,8 @@ private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
 
 private func section<C: View>(_ title: String, bottom: CGFloat = 24, @ViewBuilder _ c: () -> C) -> some View {
     VStack(alignment: .leading, spacing: 6) {
-        Text(title).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).padding(.horizontal, 32)
+        // The same header a List section draws (the edit sheet's, the contact card's): 17pt semibold.
+        Text(title).font(size: 17, weight: .semibold, relativeTo: .headline).foregroundStyle(.secondary).padding(.horizontal, 32)
         VStack(spacing: 0) { c() }
             .background(Color(sheetColour), in: .rect(cornerRadius: 26, style: .continuous))
             .padding(.horizontal, 16)

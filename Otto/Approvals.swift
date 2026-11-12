@@ -64,12 +64,12 @@ struct ApprovalSheet: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .bottom) {
+            // A system bar: the sheet's soft scroll edge under the buttons, not a ruled strip across the rows.
+            .safeAreaBar(edge: .bottom) {
                 if paid {
                     Button { store.closeApproval(request.id) } label: { Text("Done").frame(maxWidth: .infinity) }
                         .buttonStyle(.borderedProminent).controlSize(.large)
                         .padding(.horizontal, 20).padding(.vertical, 12)
-                        .background(.bar)
                 } else if let tried = unconfirmed {
                     // The first answer may have landed: only the same one can be sent again, never the other.
                     Button { Task { await decide(tried) } } label: {
@@ -77,7 +77,6 @@ struct ApprovalSheet: View {
                     }
                     .buttonStyle(.borderedProminent).controlSize(.large)
                     .padding(.horizontal, 20).padding(.vertical, 12)
-                    .background(.bar)
                 } else {
                 HStack(spacing: 12) {
                     Button(role: .destructive) { Task { await decide(false) } } label: {
@@ -92,7 +91,6 @@ struct ApprovalSheet: View {
                 .controlSize(.large)
                 .disabled(busy)
                 .padding(.horizontal, 20).padding(.vertical, 12)
-                .background(.bar)
                 }
             }
         }
@@ -154,11 +152,7 @@ struct ApprovalSheet: View {
                     HStack(spacing: 6) {
                         Text(f.path).font(.system(.subheadline, design: .monospaced)).lineLimit(2)
                         Spacer(minLength: 4)
-                        Text(f.tier)
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(f.tier == "guarded" ? Color.orange.opacity(0.2) : Color.secondary.opacity(0.15), in: .capsule)
-                            .foregroundStyle(f.tier == "guarded" ? Color.orange : Color.secondary)
+                        Pill(text: f.tier, tint: f.tier == "guarded" ? .orange : .secondary)
                     }
                     Text(f.why).font(.caption).foregroundStyle(.secondary)
                 }
@@ -196,7 +190,7 @@ struct ApprovalSheet: View {
         // The decision may have landed and only its answer been lost: trying again is safe (same decision),
         // but saying "nothing was paid" might not be true.
         case .unknown:
-            failed = "Couldn't confirm with your Mac. Check the chat, or try again."
+            failed = "Couldn’t confirm with your Mac. Check the chat, or try again."
             unconfirmed = approve
         }
     }

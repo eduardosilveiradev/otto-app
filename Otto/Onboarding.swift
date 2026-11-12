@@ -142,13 +142,14 @@ private struct Secondary: View {
 /// A big SF Symbol on a soft tinted disc: each page's picture.
 private struct Glyph: View {
     let name: String
+    @Environment(\.accessibilityReduceMotion) private var still
     var body: some View {
         Image(systemName: name)
             .font(.system(size: 52, weight: .regular))
             .foregroundStyle(.primary)   // white in dark, black in light; the circle keeps the orange
             .frame(width: 128, height: 128)
             .background(Color.orange.opacity(0.12), in: .circle)
-            .symbolEffect(.bounce, options: .nonRepeating)
+            .symbolEffect(.bounce, options: .nonRepeating, isActive: !still)
     }
 }
 
@@ -159,8 +160,8 @@ private struct HelloPage: View {
     @State private var awake = false
 
     var body: some View {
-        Page(title: "Hi, I'm Otto.",
-             line: "One chat that keeps track of the rest: your mail, your calendar, what you said you'd do, and what you asked me to remember.") {
+        Page(title: "Hi, I’m Otto.",
+             line: "One chat that keeps track of the rest: your mail, your calendar, what you said you’d do, and what you asked me to remember.") {
             OttoAvatar(size: 148, asleep: !awake)
                 .onTapGesture { withAnimation(.spring) { awake = true } }
                 .task { try? await Task.sleep(for: .seconds(1.2)); withAnimation(.spring) { awake = true } }
@@ -249,7 +250,7 @@ private struct ConnectPage: View {
         // `-connectManual` opens the typed form; `-connectProblem` with it shows the error line.
         .onAppear {
             if CommandLine.arguments.contains("-connectManual") { manual = true; server = "https://mac.example.ts.net"; token = "demo-token" }
-            if CommandLine.arguments.contains("-connectProblem") { problem = "Can't reach the Mac. Is Tailscale on?" }
+            if CommandLine.arguments.contains("-connectProblem") { problem = "Can’t reach the Mac. Is Tailscale on?" }
         }
         #endif
         .sheet(isPresented: $scanning) {
@@ -268,7 +269,7 @@ private struct ConnectPage: View {
               c.scheme == "otto", c.host == "pair",
               let s = c.queryItems?.first(where: { $0.name == "server" })?.value,
               let t = c.queryItems?.first(where: { $0.name == "token" })?.value
-        else { problem = "That isn't an Otto pairing code."; return }
+        else { problem = "That isn’t an Otto pairing code."; return }
         server = s; token = t
         await connect(s, t)
     }
@@ -286,11 +287,11 @@ private struct ConnectPage: View {
             case 200..<300:
                 savedServer = s; savedToken = t
                 next()
-            case 401: problem = "The Mac didn't accept that token."
-            default: problem = "Reached something, but it isn't Otto."
+            case 401: problem = "The Mac didn’t accept that token."
+            default: problem = "Reached something, but it isn’t Otto."
             }
         } catch {
-            problem = "Can't reach the Mac. Is Tailscale on?"
+            problem = "Can’t reach the Mac. Is Tailscale on?"
         }
     }
 }
@@ -327,7 +328,7 @@ private struct NotifyPage: View {
     let next: () -> Void
     var body: some View {
         Page(title: "Let me tap you on the shoulder",
-             line: "Replies, reminders you set, and the odd thing that can't wait. Everything else waits for a quiet moment.") {
+             line: "Replies, reminders you set, and the odd thing that can’t wait. Everything else waits for a quiet moment.") {
             Glyph(name: "bell.badge")
         } footer: {
             Primary(label: "Allow notifications") {
@@ -344,7 +345,7 @@ private struct TalkPage: View {
     let next: () -> Void
     var body: some View {
         Page(title: "Talk to me anywhere",
-             line: "You don't have to open the app.") {
+             line: "You don’t have to open the app.") {
             EmptyView()
         } content: {
             VStack(spacing: 0) {
@@ -378,7 +379,7 @@ private struct SharePage: View {
     let next: () -> Void
     var body: some View {
         Page(title: "Send me anything",
-             line: "Links, photos, PDFs, a receipt. Share from any app and pick Otto. If it isn't in the row, tap More and add it.") {
+             line: "Links, photos, PDFs, a receipt. Share from any app and pick Otto. If it isn’t in the row, tap More and add it.") {
             Glyph(name: "square.and.arrow.up")
         } footer: {
             Primary(label: "Continue", action: next)
@@ -407,8 +408,8 @@ private struct DonePage: View {
     @AppStorage("serverURL") private var server = ""
     var body: some View {
         Page(title: "All set",
-             line: server.isEmpty ? "You're on sample data. Pair with your Mac any time from my contact card."
-                                  : "Say hi whenever. I'll be here.") {
+             line: server.isEmpty ? "You’re on sample data. Pair with your Mac any time from my contact card."
+                                  : "Say hi whenever. I’ll be here.") {
             OttoAvatar(size: 148)
         } footer: {
             Primary(label: "Say hi", action: finish)

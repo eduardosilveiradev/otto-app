@@ -59,7 +59,7 @@ final class CallManager {
                     try? await vapi.startLocalAudioLevelObserver()
                 }
             // Ended before it started: a room that can't be joined says "left" before its error.
-            case .callDidEnd: if phase == .connecting { fail("Couldn't connect.") } else { phase = .ended }
+            case .callDidEnd: if phase == .connecting { fail("Couldn’t connect.") } else { phase = .ended }
             case .speechUpdate(let s): if s.role == .assistant { ottoSpeaking = s.status == .started }
             case .error(let e): fail(e.localizedDescription)
             default: break
@@ -68,7 +68,7 @@ final class CallManager {
         // "calling…" doesn't wait forever: a call that hasn't connected in 20 seconds won't.
         Task {
             try? await Task.sleep(for: .seconds(20))
-            if self.vapi === vapi && phase == .connecting { fail("Couldn't connect.") }
+            if self.vapi === vapi && phase == .connecting { fail("Couldn’t connect.") }
         }
 
         var overrides: [String: Any] = [:]

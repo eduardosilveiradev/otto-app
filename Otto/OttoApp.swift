@@ -325,8 +325,8 @@ final class OttoStore {
         // `-scheduleThread`: a reply carrying a schedule chip, against MockBackend's triggers.
         if ProcessInfo.processInfo.arguments.contains("-scheduleThread") {
             messages = [
-                Message(from: .me, text: "fix the voice thing at 3am while i'm sleeping", read: true),
-                Message(from: .otto, text: "on it. it runs at 3, and you'll get one line on it in the morning.", scheduled: [MockBackend.triggers[0]]),
+                Message(from: .me, text: "fix the voice thing at 3am while i’m sleeping", read: true),
+                Message(from: .otto, text: "on it. it runs at 3, and you’ll get one line on it in the morning.", scheduled: [MockBackend.triggers[0]]),
                 Message(from: .otto, text: "logged it, and the race is in your spending.",
                         recorded: [RecordedCard(kind: "money", id: "m1", title: "€49.80 · E-MOTION Roma", detail: "fun · 2026-10-31", body: "This month at E-MOTION Roma: €49.80 (1)", action: nil),
                                    RecordedCard(kind: "loop", id: "n1", title: "Book the next sim session", detail: "Due 2026-11-07", body: nil, action: .init(label: "Done", data: "close loop n1"))]),
@@ -354,7 +354,7 @@ final class OttoStore {
         }
         // `-approvalDemo`: a change to Otto's core waiting on Approve.
         if ProcessInfo.processInfo.arguments.contains("-approvalDemo") {
-            approvals = [ApprovalRequest(id: "demo-change", title: "Change Otto's core",
+            approvals = [ApprovalRequest(id: "demo-change", title: "Change Otto’s core",
                 summary: "Adds a Sunday digest of the links you saved that week, one message, normal priority.",
                 files: [.init(path: "otto/digest.ts", tier: "guarded", why: "the new digest"),
                         .init(path: "otto/server.ts", tier: "guarded", why: "runs it on Sundays at 10:00"),
@@ -371,20 +371,20 @@ final class OttoStore {
                 UIColor.systemOrange.setFill(); ctx.fill(CGRect(x: 0, y: 300, width: 600, height: 150))
             }
             var all: [Message] = [
-                m(.otto, "morning. design review at 14:00, then you're free until 16:30. electricity bill, €112, due friday.") { $0.serverID = "long-1" },
+                m(.otto, "morning. design review at 14:00, then you’re free until 16:30. electricity bill, €112, due friday.") { $0.serverID = "long-1" },
                 m(.me, "can you tell the landlord tuesday morning works for the boiler") { $0.replyTo = "long-1" },
-                m(.otto, "draft to Luca:\nHi Luca, Tuesday morning works for the boiler service. I'll be home from 9. Thanks!") {
+                m(.otto, "draft to Luca:\nHi Luca, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks!") {
                     $0.buttons = [ActionButton(label: "send ✓", data: "send"), ActionButton(label: "discard", data: "discard")] },
-                m(.me, "remind me to call the plumber when I'm home, and is tuesday free for the dentist") { $0.isVoice = true },
-                m(.otto, "plumber reminder set for when you're home. tuesday after 16:00 is free.") {
+                m(.me, "remind me to call the plumber when I’m home, and is tuesday free for the dentist") { $0.isVoice = true },
+                m(.otto, "plumber reminder set for when you’re home. tuesday after 16:00 is free.") {
                     $0.isVoice = true; $0.audio = RemoteFile(id: "demo-voice", name: "reply.m4a", kind: "audio") },
                 m(.me, "") { $0.image = photo; $0.reaction = "❤️" },
-                m(.otto, "that's the good shelf. the menu's here: https://www.example.com/menu") { $0.reaction = "👍" },
+                m(.otto, "that’s the good shelf. the menu’s here: https://www.example.com/menu") { $0.reaction = "👍" },
                 m(.terminal, "check why the dashboard build fails…"),
             ]
             all += Card.demoThread("mixed")
             all += [
-                m(.otto, "on it. it runs at 3, and you'll get one line on it in the morning.") { $0.scheduled = [MockBackend.triggers[0]] },
+                m(.otto, "on it. it runs at 3, and you’ll get one line on it in the morning.") { $0.scheduled = [MockBackend.triggers[0]] },
                 m(.otto, "saved both.") { $0.recorded = [
                     RecordedCard(kind: "money", id: "m1", title: "€49.80 · Linden Café", detail: "eating out · 2026-11-09", body: "This month at Linden Café: €49.80 (1)", action: nil),
                     RecordedCard(kind: "loop", id: "n1", title: "Book the next dentist visit", detail: "Due 2026-11-17", body: nil, action: .init(label: "Done", data: "close loop n1"))] },
@@ -407,12 +407,12 @@ final class OttoStore {
         // `-demoThread`: the conversation the website shows, for screen recordings.
         if ProcessInfo.processInfo.arguments.contains("-demoThread") {
             messages = [
-                Message(from: .otto, text: "morning. design review at 14:00, then you're free until 16:30. enel bill, €112, due friday. and it's thursday, so: the boiler"),
+                Message(from: .otto, text: "morning. design review at 14:00, then you’re free until 16:30. enel bill, €112, due friday. and it’s thursday, so: the boiler"),
                 Message(from: .me, text: "can you tell the landlord tuesday morning works for the boiler guy", read: true),
-                Message(from: .otto, text: "draft:\n\"Hi, Tuesday morning works for the boiler service. I'll be home from 9. Thanks!\"",
+                Message(from: .otto, text: "draft:\n\"Hi, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks!\"",
                         buttons: [ActionButton(label: "send ✓", data: "send"), ActionButton(label: "discard", data: "discard")]),
-                Message(id: UUID(uuidString: "0D0D0D0D-0000-4000-8000-000000000001")!, from: .me, text: "remind me to call the plumber when I'm home, and is tuesday free for the dentist", isVoice: true, read: true),
-                Message(from: .otto, text: "plumber reminder set for when you're home. tuesday after 16:00 is free.", isVoice: true,
+                Message(id: UUID(uuidString: "0D0D0D0D-0000-4000-8000-000000000001")!, from: .me, text: "remind me to call the plumber when I’m home, and is tuesday free for the dentist", isVoice: true, read: true),
+                Message(from: .otto, text: "plumber reminder set for when you’re home. tuesday after 16:00 is free.", isVoice: true,
                         audio: RemoteFile(id: "demo-voice", name: "reply.m4a", kind: "audio")),
                 Message(from: .me, text: "whats a good place for dinner near the office thats not pizza", read: true),
             ]
@@ -425,15 +425,15 @@ final class OttoStore {
                 UIColor.systemTeal.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 600, height: 450))
                 UIColor.systemOrange.setFill(); ctx.fill(CGRect(x: 0, y: 300, width: 600, height: 150))
             }
-            let first = Message(from: .otto, text: "morning. design review at 14:00, then you're free until 16:30.", date: t, serverID: "lab-1")
+            let first = Message(from: .otto, text: "morning. design review at 14:00, then you’re free until 16:30.", date: t, serverID: "lab-1")
             messages = [
                 first,
-                Message(from: .me, text: "nice. what's the plan for the boiler?", date: t, read: true, replyTo: "lab-1"),
-                Message(from: .otto, text: String(repeating: "Here's the long version, every step spelled out so nothing gets lost between now and Tuesday. ", count: 14), date: t),
+                Message(from: .me, text: "nice. what’s the plan for the boiler?", date: t, read: true, replyTo: "lab-1"),
+                Message(from: .otto, text: String(repeating: "Here’s the long version, every step spelled out so nothing gets lost between now and Tuesday. ", count: 14), date: t),
                 Message(from: .me, text: "", date: t, image: photo, reaction: "❤️", read: true),
-                Message(from: .otto, text: "plumber reminder set for when you're home.", date: t, isVoice: true,
+                Message(from: .otto, text: "plumber reminder set for when you’re home.", date: t, isVoice: true,
                         audio: RemoteFile(id: "demo-voice", name: "reply.m4a", kind: "audio")),
-                Message(from: .otto, text: "the menu's here: https://www.apple.com/newsroom/", date: t, reaction: "👍"),
+                Message(from: .otto, text: "the menu’s here: https://www.apple.com/newsroom/", date: t, reaction: "👍"),
                 Message(from: .me, text: "ok", date: t, read: true),
                 Message(from: .me, text: "and can you book the 19:30 table for two?", date: t, read: true),
             ]
@@ -452,13 +452,13 @@ final class OttoStore {
         if ProcessInfo.processInfo.arguments.contains("-refThread") {
             let t = Date.now.addingTimeInterval(-120)
             messages = [
-                Message(from: .otto, text: "you're basically reading my baby photos", date: t),
+                Message(from: .otto, text: "you’re basically reading my baby photos", date: t),
                 Message(from: .me, text: "how do you handoff work between the conversation agent and the work agent", date: t, read: true),
                 Message(from: .otto, text: "brother you are really obsessed with the backend today", date: t),
-                Message(from: .otto, text: "externally there is no handoff, i'm just poke doing stuff in the cloud", date: t),
+                Message(from: .otto, text: "externally there is no handoff, i’m just poke doing stuff in the cloud", date: t),
                 Message(from: .otto, text: "if you want to build multi-agent setups yourself though, cognition and devin are hiring, or go play around at", date: t),
-                Message(from: .me, text: "i'm building a clone of u. basically ur son but OSS", date: t),
-                Message(from: .otto, text: "proud father moment i guess, just don't teach him my bad habitshonestly though, building always-on agents over messaging is fun until you hit carrier rate limits and weird bubble parsinggood luck with the repo, let me know when you need your dad to star it on github", date: t),
+                Message(from: .me, text: "i’m building a clone of u. basically ur son but OSS", date: t),
+                Message(from: .otto, text: "proud father moment i guess, just don’t teach him my bad habitshonestly though, building always-on agents over messaging is fun until you hit carrier rate limits and weird bubble parsinggood luck with the repo, let me know when you need your dad to star it on github", date: t),
             ]
             // `-longRef`: the same exchange many times over, for a thread longer than one page.
             if ProcessInfo.processInfo.arguments.contains("-longRef") {
@@ -729,15 +729,15 @@ final class OttoStore {
             messages.append(Message(from: .otto, text: text, buttons: buttons))
         }
 
-        messages = [Message(from: .otto, text: "morning. dentist at 15:00, then you're free. enel bill, €112, due friday. and it's thursday, so: the boiler",
+        messages = [Message(from: .otto, text: "morning. dentist at 15:00, then you’re free. enel bill, €112, due friday. and it’s thursday, so: the boiler",
                             date: Date().addingTimeInterval(-7 * 3600))]
         await wait(2.5)
 
         let ask = "can you tell the landlord tuesday morning works for the boiler guy"
         await type(ask); sendTyped(ask)
         await wait(0.5)
-        await think(["Reading your mail", "Finding the landlord's thread", "Writing"])
-        say("draft:\n\"Hi, Tuesday morning works for the boiler service. I'll be home from 9. Thanks!\"",
+        await think(["Reading your mail", "Finding the landlord’s thread", "Writing"])
+        say("draft:\n\"Hi, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks!\"",
             buttons: [ActionButton(label: "send ✓", data: "send"), ActionButton(label: "discard", data: "discard")])
         demoFocus = false
         await wait(2.8)
@@ -747,20 +747,20 @@ final class OttoStore {
         messages.append(Message(from: .me, text: "send ✓", read: true))
         await wait(0.4)
         await think(["Sending"], each: 1.0)
-        say("sent. I'll tell you when they answer.")
+        say("sent. I’ll tell you when they answer.")
         await wait(2.2)
 
-        let ask2 = "and remind me to call the plumber when I'm home"
+        let ask2 = "and remind me to call the plumber when I’m home"
         await type(ask2); sendTyped(ask2)
         await wait(0.4)
         await think(["Setting a reminder"], each: 1.2)
-        say("done. it'll go off when you get home.")
+        say("done. it’ll go off when you get home.")
         demoFocus = false
         await wait(3.5)
 
         // later, unprompted: the reason it exists
         await think(["Reading your mail"], each: 1.4)
-        say("landlord replied: tuesday 9 is perfect, he'll let the boiler guy in 👍")
+        say("landlord replied: tuesday 9 is perfect, he’ll let the boiler guy in 👍")
         await wait(4)
     }
     #endif

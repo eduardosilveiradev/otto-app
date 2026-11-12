@@ -86,7 +86,7 @@ struct MediaPlaceholder: View {
 extension Text {
     /// What a file that couldn't be fetched (offline, a timeout, a 5xx; never a 404) says in its place.
     /// The no-break space keeps the dot off the start of the line when large text wraps it.
-    static var couldntLoad: Text { Text("Couldn't load\u{00A0}· ").foregroundStyle(.secondary) + Text("Retry").foregroundStyle(.blue) }
+    static var couldntLoad: Text { Text("Couldn’t load\u{00A0}· ").foregroundStyle(.secondary) + Text("Retry").foregroundStyle(.blue) }
 }
 
 /// One photo in the thread, yours (the JPEG you sent) or Otto's (fetched on demand).
@@ -281,7 +281,7 @@ private struct VideoPage: View {
             if let player {
                 VideoPlayer(player: player)
             } else if failed {
-                Label("Couldn't load this video", systemImage: "exclamationmark.triangle").foregroundStyle(.white)
+                Label("Couldn’t load this video", systemImage: "exclamationmark.triangle").foregroundStyle(.white)
             } else {
                 VStack(spacing: 12) {
                     ProgressView().tint(.white).controlSize(.large)

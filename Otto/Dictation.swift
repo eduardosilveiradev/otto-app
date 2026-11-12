@@ -67,7 +67,7 @@ final class Dictation: ObservableObject {
                 fileURL = url
                 publish(.listening)
             } catch {
-                publish(.failed, text: "Couldn't start the microphone.")
+                publish(.failed, text: "Couldn’t start the microphone.")
             }
         }
     }
@@ -125,7 +125,7 @@ final class Dictation: ObservableObject {
         Task {
             let text = await Self.transcribe(url, preceding: r.preceding, langs: r.langs)
             try? FileManager.default.removeItem(at: url)
-            if let text, !text.isEmpty { publish(.done, text: text) } else { publish(.failed, text: "Didn't catch that.") }
+            if let text, !text.isEmpty { publish(.done, text: text) } else { publish(.failed, text: "Didn’t catch that.") }
             showListening = false
         }
     }
@@ -222,7 +222,7 @@ struct DictationListeningView: View {
             }
             .frame(height: 56)
             .animation(.easeOut(duration: 0.12), value: d.level)
-            Text("Go back to where you were typing and keep talking. Tap the keyboard's mic to finish.")
+            Text("Go back to where you were typing and keep talking. Tap the keyboard’s mic to finish.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 40)
             Spacer()
             Button("Stop") {

@@ -309,7 +309,7 @@ final class MockBackend: OttoBackend {
         if let canned = MockDash.data(path) { return canned }
         guard path == "triggers/item", let t = Self.triggers.first(where: { $0.id == query.first?.value }) else { return nil }
         var o = (try? JSONSerialization.jsonObject(with: enc.encode(t))) as? [String: Any] ?? [:]
-        o["action"] = "Overnight fix the user asked for: replies in the app sound robotic. Find out why from the voice daemon's own log, fix it on a branch, self-test it, and leave one line in the morning."
+        o["action"] = "Overnight fix the user asked for: replies in the app sound robotic. Find out why from the voice daemon’s own log, fix it on a branch, self-test it, and leave one line in the morning."
         o["createdAt"] = "2026-10-26T12:19:40Z"
         return try? JSONSerialization.data(withJSONObject: o)
     }
@@ -321,7 +321,7 @@ final class MockBackend: OttoBackend {
     func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool {
         Task {
             try? await Task.sleep(for: .seconds(60))
-            out.yield(Message(from: .otto, text: "(mock) got it — \"\(text)\". the real me isn't plugged in yet."))
+            out.yield(Message(from: .otto, text: "(mock) got it — \"\(text)\". the real me isn’t plugged in yet."))
         }
         return true
     }

@@ -25,7 +25,7 @@ enum MockDash {
         return """
         {"calls":[
           {"id":"c1","to":"+1 555 0142","task":"Book a table for two at 19:30 on Friday","status":"in-progress","seq":6,"createdAt":\(now - 95_000),"startedAt":\(now - 80_000),"endedAt":null,"endedReason":null,"takeover":false,"partial":{"user":"We have a table at"},
-           "lines":[{"role":"assistant","text":"Hi, I'm calling to book a table for two this Friday."},{"role":"user","text":"Sure, what time were you thinking?"},{"role":"assistant","text":"Half past seven, if you have it."}]},
+           "lines":[{"role":"assistant","text":"Hi, I’m calling to book a table for two this Friday."},{"role":"user","text":"Sure, what time were you thinking?"},{"role":"assistant","text":"Half past seven, if you have it."}]},
           {"id":"c2","to":"+1 555 0199","task":"Ask the bike shop if the repair is ready","status":"ended","seq":4,"createdAt":\(now - 3_000_000),"startedAt":\(now - 2_990_000),"endedAt":\(now - 2_900_000),"endedReason":"customer-ended-call","takeover":false,"partial":{},
            "lines":[{"role":"assistant","text":"Hi, is the blue bike under the name Sam ready?"},{"role":"user","text":"Yes, ready after 4."}]}]}
         """
@@ -69,7 +69,7 @@ enum MockDash {
           {"id":"r3","merchant":"Trenitalia","amount":29.90,"currency":"EUR","date":"2026-11-02","category":"Travel","method":"Apple Pay"},
           {"id":"r4","merchant":"Bar Luce","amount":4.50,"currency":"EUR","date":"2026-11-02","category":"Eating out","method":"Apple Pay","note":"flat white + brioche"},
           {"id":"r5","merchant":"Delta","amount":412.00,"currency":"USD","date":"2026-10-30","category":"Travel","method":"Card"}],
-         "byCurrency":[{"currency":"EUR","total":193.20,"count":4},{"currency":"USD","total":412.00,"count":1}],
+         "byCurrency":[{"currency":"EUR","total":1477.30,"count":42},{"currency":"USD","total":412.00,"count":1}],
          "byMonth":[{"month":"2026-11","totals":[{"currency":"EUR","total":193.20,"count":4}]},{"month":"2026-10","totals":[{"currency":"EUR","total":1284.10,"count":38},{"currency":"USD","total":412.00,"count":1}]}],
          "byCategory":[{"category":"Bills","total":112.00,"count":1},{"category":"Groceries","total":46.80,"count":1},{"category":"Travel","total":29.90,"count":1},{"category":"Eating out","total":4.50,"count":1}]}
         """,
@@ -99,7 +99,7 @@ enum MockDash {
           {"id":"j1","task":"Compare three flat insurance quotes","state":"running","createdAt":"2026-11-11T08:40:00Z","costUsd":0.42},
           {"id":"j2","task":"Summarise the building assembly minutes","state":"queued","createdAt":"2026-11-11T08:10:00Z","notBefore":"2026-11-12T01:00:00Z"},
           {"id":"j3","task":"Find a quieter route to the office","state":"done","createdAt":"2026-11-10T18:00:00Z","costUsd":0.18,"result":"**Take Elm Street.** Two minutes longer, no main road.\\n\\n- 14 min walk\\n- one crossing"},
-          {"id":"j4","task":"Check the train strike dates","state":"failed","createdAt":"2026-11-09T19:00:00Z","costUsd":0.05,"error":"The timetable site didn't answer."}]}
+          {"id":"j4","task":"Check the train strike dates","state":"failed","createdAt":"2026-11-09T19:00:00Z","costUsd":0.05,"error":"The timetable site didn’t answer."}]}
         """,
         "capabilities": """
         {"entries":[

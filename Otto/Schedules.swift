@@ -12,6 +12,14 @@ struct TriggerDetail: Decodable {
 
 extension DashTrigger {
     var next: Date? { nextRun.map { Date(timeIntervalSince1970: $0 / 1000) } }
+    /// When it runs, in words, and how soon: one line for Schedules and Activity alike.
+    var whenLine: String {
+        let line = scheduleLine(type: type, schedule: schedule, repeating: repeating, next: next)
+        if !enabled { return lastFired.map { "ran \(ago($0))" } ?? "paused" }
+        if repeating, let n = next { return "\(line) · next \(ago(n))" }
+        if let n = next { return "\(line) · \(ago(n))" }
+        return line
+    }
     var icon: String { type == "email" ? "envelope.badge" : repeating ? "repeat" : "alarm" }
 }
 
@@ -29,7 +37,9 @@ func humanCron(_ s: String) -> String? {
     if let n = f[0].stepValue, f[1] == "*" { return "Every \(n) minutes" }
     if let n = f[1].stepValue, let m = Int(f[0]) { return "Every \(n) hours at :\(String(format: "%02d", m))" }
     guard let m = Int(f[0]), let h = Int(f[1]) else { return nil }
-    let at = String(format: "%02d:%02d", h, m)
+    // In the phone's own clock style: "7:30 AM" or "07:30", as every other time on screen.
+    let at = Calendar.current.date(from: DateComponents(hour: h, minute: m))?.formatted(date: .omitted, time: .shortened)
+        ?? String(format: "%02d:%02d", h, m)
     let names = Calendar.current.weekdaySymbols   // Sunday first, as cron counts
     switch f[4] {
     case "*": return "Every day at \(at)"
@@ -150,18 +160,11 @@ struct SchedulesScreen: View {
             Label {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(t.gist).lineLimit(2)
-                    Text(sub(t)).font(.footnote).foregroundStyle(.secondary)
+                    Text(t.whenLine).font(.footnote).foregroundStyle(.secondary)
                 }
             } icon: { RowIcon(symbol: t.icon) }
             .opacity(t.enabled ? 1 : 0.5)
         }
     }
 
-    private func sub(_ t: DashTrigger) -> String {
-        let line = scheduleLine(type: t.type, schedule: t.schedule, repeating: t.repeating, next: t.next)
-        if !t.enabled { return t.lastFired.map { "ran \(ago($0))" } ?? "paused" }
-        if t.repeating, let n = t.next { return "\(line) · next \(ago(n))" }
-        if let n = t.next { return "\(line) · \(ago(n))" }
-        return line
-    }
 }

@@ -48,7 +48,7 @@ final class Glasses {
             }
             // .low is 360×640, already the size the Mac wants, so frames go out unscaled.
             guard let cam = try s.addCamera(config: StreamConfiguration(videoCodec: .raw, resolution: .low, frameRate: 15)) else {
-                error = "The glasses didn't offer a camera."
+                error = "The glasses didn’t offer a camera."
                 return stop()
             }
             camera = cam
@@ -135,7 +135,7 @@ struct GlassesScreen: View {
                 TextField("http://your-mac.local:8787", text: $receiver)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
             } header: { Text("Send frames to") } footer: {
-                Text("The Mac's receiver. Empty keeps it on the phone.")
+                Text("The Mac’s receiver. Empty keeps it on the phone.")
             }
             if let e = g.error { Section { Text(e).foregroundStyle(.secondary) } }
         }

@@ -456,7 +456,7 @@ private struct ImageBlock: View {
         .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.primary.opacity(0.08)) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(picture.alt)
-        .accessibilityValue(failed ? "Couldn't load" : missing ? "No longer available" : "")
+        .accessibilityValue(failed ? "Couldn’t load" : missing ? "No longer available" : "")
         .accessibilityAddTraits(failed ? .isButton : .isImage)
         .accessibilityHint(failed ? "Tries loading it again" : "")
         .accessibilityAction { if failed { tries += 1 } }
@@ -509,11 +509,11 @@ extension Card {
                           ActionButton(label: "Set a budget", data: "set a weekly budget")])),
             ("stat", "how many steps today", "a good day for walking.",
              Card(blocks: [.stat(.init(value: "9,412", label: "Steps today", delta: "1,280", tone: "down"))])),
-            ("list", "what's on my list for the hardware store", "four things.",
+            ("list", "what’s on my list for the hardware store", "four things.",
              Card(title: "Hardware store", blocks: [.list([
                 .init(title: "Wall anchors", detail: "8 mm, pack of 20", trailing: "€4.90", icon: "wrench.and.screwdriver"),
                 .init(title: "Lightbulbs", detail: "E27, warm white", trailing: "×3", icon: "lightbulb"),
-                .init(title: "Painter's tape", trailing: "€3.20", icon: "paintbrush"),
+                .init(title: "Painter’s tape", trailing: "€3.20", icon: "paintbrush"),
                 .init(title: "Door stop", detail: "the grey one, not the brass", icon: "door.left.hand.open")])])),
             ("table", "compare the three flats", "side by side:",
              Card(title: "Flats", blocks: [.table(.init(columns: ["Flat", "Rent", "Size", "Walk"],
@@ -521,17 +521,17 @@ extension Card {
             ("bars", "which day did i sleep least", "wednesday, by a lot.",
              Card(title: "Sleep", blocks: [.bars(.init(items: [.init(label: "Mon", value: 7.2), .init(label: "Tue", value: 6.8), .init(label: "Wed", value: 4.9),
                                                              .init(label: "Thu", value: 7.5), .init(label: "Fri", value: 6.1)], unit: "h"))])),
-            ("sparkline", "how's the electricity use looking", "trending down since the new fridge.",
+            ("sparkline", "how’s the electricity use looking", "trending down since the new fridge.",
              Card(blocks: [.sparkline(.init(values: [14.2, 13.8, 15.1, 12.9, 12.4, 11.8, 12.1, 11.2, 10.9, 10.4], label: "kWh per day, last 10 days"))])),
             ("progress", "how far along is the photo backup", "almost there.",
              Card(blocks: [.progress(.init(value: 0.82, label: "Photo backup", detail: "4,120 of 5,030 photos"))])),
-            ("timeline", "what's tomorrow look like", "a light one.",
+            ("timeline", "what’s tomorrow look like", "a light one.",
              Card(title: "Tomorrow", blocks: [.timeline([
                 .init(time: "08:30", title: "Gym", detail: "Leg day", done: true),
                 .init(time: "10:00", title: "Design review", detail: "Room 4 · 45 min", done: true),
                 .init(time: "13:00", title: "Lunch with Sam"),
                 .init(time: "17:30", title: "Pick up the parcel", detail: "Post office on Birch Ave")])])),
-            ("keyvalue", "what's the wifi at the cabin", "here it is.",
+            ("keyvalue", "what’s the wifi at the cabin", "here it is.",
              Card(title: "Cabin", blocks: [.keyvalue([.init(key: "Network", value: "Pinewood-5G"), .init(key: "Password", value: "mossy-trail-42"),
                                                      .init(key: "Check-in", value: "after 15:00"), .init(key: "Host", value: "Riley")])],
                   actions: [ActionButton(label: "Copy password", data: nil, copy: "mossy-trail-42")])),

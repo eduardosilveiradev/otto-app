@@ -137,9 +137,9 @@ struct Loaded<T: Decodable, Content: View>: View {
             if let value { content(value, load) }
             else if failed {
                 ContentUnavailableView {
-                    Label("Can't reach your Mac", systemImage: "wifi.slash")
+                    Label("Can’t reach your Mac", systemImage: "wifi.slash")
                 } description: {
-                    Text(store.backend.isLive ? "Otto didn't answer." : "This needs the Otto server.")
+                    Text(store.backend.isLive ? "Otto didn’t answer." : "This needs the Otto server.")
                 } actions: {
                     Button("Try Again") { failed = false; Task { await load() } }
                 }
@@ -213,16 +213,19 @@ struct RowIcon: View {
 struct Pill: View {
     let text: String
     var tint: Color = .secondary
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
         Text(text)
             .font(.caption.weight(.medium))
-            .foregroundStyle(tint == .secondary ? Color.secondary : tint == .orange ? Color.pillOrange : tint)
+            // Any tint as small text: as is in dark mode, 40% toward black in light, so green, red and
+            // orange all clear 4.5:1 on their pale capsule.
+            .foregroundStyle(tint == .secondary ? Color.secondary : scheme == .dark ? tint : tint.mix(with: .black, by: 0.4))
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(tint == .secondary ? Color(.tertiarySystemFill) : tint.opacity(0.15), in: .capsule)
     }
 }
 
 extension Color {
-    /// Orange text on a 15% orange capsule: system orange in dark mode, a burnt orange in light so it reads.
-    static let pillOrange = Color(UIColor { $0.userInterfaceStyle == .dark ? .systemOrange : UIColor(red: 0.70, green: 0.33, blue: 0, alpha: 1) })
+    /// Orange as small text: system orange in dark mode, a burnt orange in light so it reads on white.
+    static let orangeText = Color(UIColor { $0.userInterfaceStyle == .dark ? .systemOrange : UIColor(red: 0.70, green: 0.33, blue: 0, alpha: 1) })
 }

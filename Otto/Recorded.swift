@@ -46,7 +46,9 @@ struct RecordedChip: View {
                     .frame(width: 30, height: 30).background(Color.blue.opacity(0.12), in: .circle)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(card.title).font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(2)
-                    Text(card.detail ?? card.heading).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
+                    // The server's bare days ("Due 2026-11-07") in the app's own date style ("Due Sat, Nov 7").
+                    Text((card.detail ?? card.heading).replacing(/\d{4}-\d{2}-\d{2}/) { day(String($0.output)) })
+                        .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right").font(size: 12, weight: .semibold, relativeTo: .caption).foregroundStyle(.tertiary)

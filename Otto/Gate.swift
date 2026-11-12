@@ -220,7 +220,7 @@ struct GateSheet: View {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(card.notes, id: \.self) { n in
                                 Label(n, systemImage: "exclamationmark.triangle.fill")
-                                    .font(.footnote).foregroundStyle(.orange)
+                                    .font(.footnote).foregroundStyle(Color.orangeText)
                             }
                         }
                         .frame(maxWidth: 340, alignment: .leading)

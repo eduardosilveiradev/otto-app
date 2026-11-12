@@ -126,10 +126,9 @@ struct CallSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                transcript
-                if canAct { controls }
-            }
+            // The controls float on a system bar over the transcript's soft edge, as the thread's composer does.
+            transcript
+                .safeAreaBar(edge: .bottom, spacing: 0) { if canAct { controls } }
             .navigationTitle(call.to)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -226,7 +225,6 @@ struct CallSheet: View {
             .controlSize(.large)
         }
         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
-        .background(.bar)
     }
 
     private func say(_ action: String) async {
@@ -240,14 +238,14 @@ struct CallSheet: View {
         var body: [String: Any] = ["id": call.id, "action": action]
         if let text { body["text"] = text }
         guard let r: ControlResult = await store.backend.dash("calls/control", method: "POST", body: body) else {
-            note = "Couldn't reach your Mac."
+            note = "Couldn’t reach your Mac."
             return false
         }
         if r.ok {
             note = ["say": "Said on the call.", "tell": "Passed to the bot.", "end": "Hanging up.", "takeover": "Ringing your phone."][action]
             if action == "end" || action == "takeover" { handedOff = true; listener.stop() }
         } else {
-            note = r.error ?? "Otto couldn't do that."
+            note = r.error ?? "Otto couldn’t do that."
         }
         return r.ok
     }

@@ -101,7 +101,7 @@ private struct MemoryList: View {
     private func rebuild() async {
         struct Started: Decodable { let started: Bool }
         let r: Started? = await store.backend.dash("memory/rebuild", method: "POST")
-        note = r == nil ? "Already rebuilding, or the Mac didn't take it." : "Rebuilding. Pull to refresh in a minute."
+        note = r == nil ? "Already rebuilding, or the Mac didn’t take it." : "Rebuilding. Pull to refresh in a minute."
     }
 }
 

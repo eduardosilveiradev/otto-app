@@ -36,7 +36,7 @@ private struct LoopsList: View {
                     ForEach(p.propose, id: \.id) { c in plan("questionmark.circle", c.text, "asks you: \(c.reason)") }
                     ForEach(p.avoidance, id: \.id) { c in plan("arrow.uturn.right.circle", c.text, "pushed back \(c.deferrals)×") }
                 } header: { Text("Overnight tidy-up") } footer: {
-                    Text("Runs at \(Self.fiveAM). Closes what's clearly done, asks you about the rest.")
+                    Text("Runs at \(Self.fiveAM). Closes what’s clearly done, asks you about the rest.")
                 }
             }
 
@@ -47,7 +47,7 @@ private struct LoopsList: View {
             }
         }
         .emptyState(l.open.isEmpty && l.recent.isEmpty && l.plan.close.isEmpty && l.plan.propose.isEmpty && l.plan.avoidance.isEmpty,
-                    "Nothing open", systemImage: "checklist", "Things you said you'd do show up here.")
+                    "Nothing open", systemImage: "checklist", "Things you said you’d do show up here.")
         .refreshable { await reload() }
     }
 
@@ -191,7 +191,7 @@ private struct MoneyList: View {
                         Button { category = category == c.category ? nil : c.category } label: {
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack {
-                                    Text(c.category.capitalized)
+                                    Text(c.category.prefix(1).uppercased() + c.category.dropFirst())   // sentence case, "Eating out"
                                     if category == c.category { Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(.orange) }
                                     Spacer()
                                     Text(money(c.total, cur)).monospacedDigit().foregroundStyle(.secondary)
@@ -285,7 +285,7 @@ struct TripsScreen: View {
                 if t.current?.id == trip.id { Pill(text: t.current?.mode == "current" ? "Now" : "Next", tint: .orange) }
             }
         } footer: {
-            if let ps = t.problems[trip.id], !ps.isEmpty { Text(ps.joined(separator: "\n")).foregroundStyle(.orange) }
+            if let ps = t.problems[trip.id], !ps.isEmpty { Text(ps.joined(separator: "\n")).foregroundStyle(Color.orangeText) }
         }
     }
 }

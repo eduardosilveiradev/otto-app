@@ -24,7 +24,7 @@ struct ActivityScreen: View {
             }
         }
         .contentMargins(.top, 4, for: .scrollContent)
-        .safeAreaInset(edge: .top) {
+        .safeAreaBar(edge: .top) {
             Picker("Show", selection: $tab) { ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) } }
                 .pickerStyle(.segmented).padding(.horizontal).padding(.bottom, 6)
         }
@@ -75,7 +75,9 @@ struct ActivityScreen: View {
                         Spacer(minLength: 8)
                         if e.revertedAt != nil { Pill(text: "undone") }
                     }
-                    Text("\(ago(e.at)) · \(e.by) · \(e.tier) · \(e.origin.replacing("-", with: " "))")
+                    // When and what set it off, in words; not a log line of who, tier and origin.
+                    let how = ["user-message": "you asked", "button-tap": "you tapped"][e.origin] ?? e.origin.replacing("-", with: " ")
+                    Text("\(ago(e.at)) · \(how)")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -132,13 +134,8 @@ struct ActivityScreen: View {
     private func trig(_ t: DashTrigger) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(t.gist).lineLimit(3)
-            let when: String = if let n = t.nextRun { "next \(ago(Date(timeIntervalSince1970: n / 1000)))" }
-                else if t.type == "email" { "on matching mail" }
-                else { t.lastFired.map { "fired \(ago($0))" } ?? "" }
-            // A repeating cron in words, as Schedules has it: "Weekdays at 18:00", never "0 18 * * 1-5".
-            let repeats: String? = !t.repeating ? nil : t.type == "cron" ? t.schedule.map { humanCron($0) ?? $0 } : "repeats"
-            Text([when, repeats].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                .font(.footnote).foregroundStyle(.secondary)
+            // The same line Schedules shows for it.
+            Text(t.whenLine).font(.footnote).foregroundStyle(.secondary)
         }
     }
 }
@@ -179,7 +176,7 @@ struct StatusScreen: View {
                     }
                 } header: { Text("On the Mac") } footer: {
                     let bad = s.rows.filter { $0.verdict == "down" || $0.verdict == "degraded" }.count
-                    Text(bad == 0 ? "Everything that's on is up." : "\(bad) need\(bad == 1 ? "s" : "") a look.")
+                    Text(bad == 0 ? "Everything that’s on is up." : "\(bad) need\(bad == 1 ? "s" : "") a look.")
                 }
                 if !s.repairs.isEmpty {
                     Section("Recent repairs") {
