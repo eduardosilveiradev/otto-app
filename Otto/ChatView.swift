@@ -1572,6 +1572,7 @@ private struct Row: View {
                 HStack(spacing: 16) {
                     ForEach(message.buttons) { b in
                         Button { press(b) } label: { Text(b.label).hitSlop() }.font(size: 15, relativeTo: .subheadline).tint(.blue)
+                            .accessibilityLabel(b.label.trimmingCharacters(in: .symbols.union(.whitespaces)))
                     }
                 }
                 .padding(.leading, 12)

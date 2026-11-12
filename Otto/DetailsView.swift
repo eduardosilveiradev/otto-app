@@ -311,8 +311,9 @@ struct DetailsView: View {
                                 Text(l.title).strikethrough(closed).lineLimit(2)
                                     .foregroundStyle(closed ? .secondary : .primary)
                                 if let due = l.due, !closed {
-                                    Text("due \(due.formatted(.dateTime.weekday(.wide)))")
-                                        .font(.footnote).foregroundStyle(.secondary)
+                                    let late = due < Calendar.current.startOfDay(for: .now)
+                                    Text("\(late ? "was due" : "due") \(due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
+                                        .font(.footnote).foregroundStyle(late ? .red : .secondary)
                                 }
                             }
                             Spacer()

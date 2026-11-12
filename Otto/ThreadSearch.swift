@@ -125,7 +125,7 @@ struct SearchResults: View {
     /// The app's "Couldn't load · Retry", saying what didn't load.
     private var couldntLoad: some View {
         Button(action: retry) {
-            (Text("Couldn’t load older messages\u{00A0}· ").foregroundStyle(.secondary) + Text("Retry").foregroundStyle(.blue))
+            (Text("Couldn’t load older messages\u{00A0}· ").foregroundStyle(.secondary) + Text("Try again").foregroundStyle(.blue))
                 .multilineTextAlignment(.center)
                 .hitSlop()
         }

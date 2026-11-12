@@ -283,7 +283,7 @@ private struct CallBubble: View {
                 .foregroundStyle(ours ? .white : .primary)
                 .padding(.horizontal, 12).padding(.vertical, 7)
                 // The thread's own bubbles: Otto's side in the slate grey with a tail, theirs in the incoming grey.
-                .background(BubbleShape(mine: ours, tail: true).fill(ours ? .outgoingBubble : .incomingBubble))
+                .background(BubbleShape(mine: ours, tail: true).fill(ours ? Color.outgoingBubble : Color(.secondarySystemFill)))   // the thread grey vanishes on the sheet
                 .opacity(partial ? 0.55 : 1)
                 .frame(maxWidth: 300, alignment: ours ? .trailing : .leading)
         }

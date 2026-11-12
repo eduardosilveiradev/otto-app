@@ -68,7 +68,7 @@ private struct LoopsList: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(r.text).lineLimit(3).strikethrough(closed).foregroundStyle(closed ? .secondary : .primary)
                     let m = meta(r)
-                    if !m.isEmpty { Text(m).font(.footnote).foregroundStyle(.secondary).lineLimit(2) }
+                    if !m.isEmpty { Text(m).font(.footnote).foregroundStyle(late(r) ? .red : .secondary).lineLimit(2) }
                 }
             }
         }
@@ -82,9 +82,15 @@ private struct LoopsList: View {
         Calendar.current.date(bySettingHour: 5, minute: 0, second: 0, of: .now)?.formatted(date: .omitted, time: .shortened) ?? "05:00"
     }
 
+    /// Open and past its day. Compared as calendar days ("2026-11-07"), so a time zone can't shift it.
+    private func late(_ r: LoopRow) -> Bool {
+        guard let due = r.due, r.status == nil || r.status == "open" else { return false }
+        return due.prefix(10) < Date.now.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+    }
+
     private func meta(_ r: LoopRow) -> String {
         var bits: [String] = []
-        if let due = r.due { bits.append("due \(day(due))") }
+        if let due = r.due { bits.append("\(late(r) ? "was due" : "due") \(day(due))") }
         if let n = r.deferrals?.count, n > 0 { bits.append("pushed back \(n)×") }
         if let why = r.closedReason { bits.append(why) } else if let at = r.closedAt { bits.append("closed \(ago(at))") }
         if r.status == nil || r.status == "open" { bits.append("opened \(ago(r.createdAt))") }

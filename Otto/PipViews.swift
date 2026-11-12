@@ -571,7 +571,7 @@ struct HandoffSheet: View {
             Text(text)
                 .font(size: 15, relativeTo: .subheadline)
                 .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(Color.incomingBubble, in: .rect(cornerRadius: 17, style: .continuous))
+                .background(Color(.secondarySystemFill), in: .rect(cornerRadius: 17, style: .continuous))   // the thread's grey vanishes on a sheet
             Spacer(minLength: 10)   // the mockup’s 86% wide bubble
         }
         // The face says who on screen; VoiceOver hears the name.
@@ -582,8 +582,7 @@ struct HandoffSheet: View {
     private func stamp(_ h: PipHandoff) -> some View {
         Group {
             if let d = LiveBackend.date(h.askedAt) {
-                let day = Calendar.current.isDateInToday(d) ? "Today" : Calendar.current.isDateInYesterday(d) ? "Yesterday" : d.formatted(.dateTime.weekday(.wide))
-                (Text(day).fontWeight(.semibold) + Text(" " + d.formatted(date: .omitted, time: .shortened)))
+                (Text(messageDay(d)).fontWeight(.semibold) + Text(" " + d.formatted(date: .omitted, time: .shortened)))
                     .font(size: 11, relativeTo: .caption2).foregroundStyle(.secondary)
                     .padding(.top, 2)
             }
@@ -602,7 +601,7 @@ struct HandoffSheet: View {
     @ViewBuilder private func actions(_ h: PipHandoff, to: PipMember) -> some View {
         VStack(spacing: 8) {
             if h.status == "failed" {
-                PillButton(title: "Retry", primary: true) { pips.act("retry", on: h.id) }
+                PillButton(title: "Try again", primary: true) { pips.act("retry", on: h.id) }
                 PillButton(title: "Ask Otto to handle it") { pips.act("ask_otto", on: h.id) }
             } else {
                 let target = to.isOtto ? "app" : to.id
@@ -961,7 +960,7 @@ struct GroupDetailSheet: View {
         line(divided: divided) {
             Button { opened = .pip(m.id) } label: {
                 HStack(spacing: 12) {
-                    FaceView(look: m.look, size: 40).frame(width: 40, height: 40)
+                    FaceView(look: m.look.with(.rest), size: 40).frame(width: 40, height: 40)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(m.name).lineLimit(1)
                         if let job = m.isOtto ? String(localized: "Always in the group") : pips.details[m.id]?.job {
@@ -1031,7 +1030,7 @@ private struct NewGroupSheet: View {
                             if picked.remove(p.id) == nil { picked.insert(p.id) }
                         } label: {
                             HStack(spacing: 12) {
-                                FaceView(look: p.look, size: 32).frame(width: 32, height: 32)
+                                FaceView(look: p.look.with(.rest), size: 32).frame(width: 32, height: 32)
                                 Text(p.name).lineLimit(1)
                                 Spacer(minLength: 8)
                                 if picked.contains(p.id) { Image(systemName: "checkmark").fontWeight(.semibold) }
@@ -1300,6 +1299,8 @@ private struct ScheduleEditor: View {
 
     private let cal = Calendar.current
     private var week: [Int] { (0..<7).map { ($0 + cal.firstWeekday - 1) % 7 } }
+    @ScaledMetric(relativeTo: .subheadline) private var disc: CGFloat = 36
+    @Environment(\.dynamicTypeSize) private var type
 
     init(schedule: Binding<PipSchedule>) {
         _schedule = schedule
@@ -1327,7 +1328,10 @@ private struct ScheduleEditor: View {
                 TextField("What the pip should do each time", text: $schedule.ask, axis: .vertical)
             }
             Section {
-                HStack(spacing: 0) { ForEach(week, id: \.self, content: day) }
+                // At accessibility sizes the days grow, so they take two rows.
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: type.isAccessibilitySize ? 4 : 7), spacing: 4) {
+                    ForEach(week, id: \.self, content: day)
+                }
                 DatePicker("Time", selection: time, displayedComponents: .hourAndMinute)
             } header: {
                 Text("When")
@@ -1347,9 +1351,9 @@ private struct ScheduleEditor: View {
             // A schedule that never runs is a deleted one, and that's the row's swipe.
             if !on { when.days.insert(d) } else if when.days.count > 1 { when.days.remove(d) }
         } label: {
-            Text(cal.veryShortStandaloneWeekdaySymbols[d]).font(.system(size: 15, weight: .medium))
+            Text(cal.veryShortStandaloneWeekdaySymbols[d]).font(size: 15, weight: .medium, relativeTo: .subheadline)
                 .foregroundStyle(on ? Color(.systemBackground) : .primary)
-                .frame(width: 36, height: 36)
+                .frame(width: disc, height: disc)
                 .background(on ? Color.primary : Color(.secondarySystemFill), in: .circle)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .contentShape(.rect)

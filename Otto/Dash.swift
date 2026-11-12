@@ -141,7 +141,7 @@ struct Loaded<T: Decodable, Content: View>: View {
                 } description: {
                     Text(store.backend.isLive ? "Otto didn’t answer." : "This needs the Otto server.")
                 } actions: {
-                    Button("Try Again") { failed = false; Task { await load() } }
+                    Button("Try again") { failed = false; Task { await load() } }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(.systemGroupedBackground))
