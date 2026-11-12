@@ -93,10 +93,13 @@ private struct Page<Hero: View, Content: View, Footer: View>: View {
                     }
                     if Content.self != EmptyView.self { content.padding(.top, 24) }
                     Spacer(minLength: 32)
-                    // Room for one link under the button on every step, so the button doesn't jump between them.
-                    VStack(spacing: 6) { footer }
-                        .frame(minHeight: 102, alignment: .top)
-                        .padding(.bottom, 8)
+                    // Room for one link under the button on every step, so the button doesn't jump between them:
+                    // a hidden button and link set the height, at whatever size the text is.
+                    ZStack(alignment: .top) {
+                        VStack(spacing: 6) { Primary(label: " ") {}; Secondary(label: " ") {} }.hidden()
+                        VStack(spacing: 6) { footer }
+                    }
+                    .padding(.bottom, 8)
                 }
                 .frame(maxWidth: .infinity, minHeight: g.size.height)
             }
