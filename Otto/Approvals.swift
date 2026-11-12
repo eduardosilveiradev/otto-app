@@ -224,9 +224,8 @@ struct PrintedReceipt: View {
         }
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
-        // Printed: its longest row ("Paid with … 6983") is already the paper's width at the default
-        // size, so the receipt shrinks with smaller text but doesn't grow. VoiceOver reads it whole.
-        .dynamicTypeSize(...DynamicTypeSize.large)
+        // Grows with the text size like everything else; a row too wide for the paper stacks its value
+        // under its label (see row). VoiceOver reads it whole.
         .task { await run() }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Receipt for \(payment.money(payment.total)) to \(payment.merchant)")
@@ -373,7 +372,10 @@ struct PrintedReceipt: View {
     }
 
     private func row(_ l: String, _ r: String) -> some View {
-        HStack(alignment: .firstTextBaseline) { Text(l).lineLimit(1); Spacer(minLength: 12); Text(r).lineLimit(1) }
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline) { Text(l).lineLimit(1); Spacer(minLength: 12); Text(r).lineLimit(1) }
+            VStack(alignment: .leading, spacing: 2) { Text(l); Text(r) }.frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private struct Line: Shape { func path(in r: CGRect) -> Path { Path { $0.move(to: CGPoint(x: 0, y: r.midY)); $0.addLine(to: CGPoint(x: r.maxX, y: r.midY)) } } }

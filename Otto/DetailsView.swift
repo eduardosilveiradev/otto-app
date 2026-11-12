@@ -39,7 +39,7 @@ struct DetailsView: View {
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
                             Text(store.backend is MockBackend ? "sample data"
-                                 : !store.connected ? "asleep — can’t reach the server" : "connected")
+                                 : !store.connected ? "Asleep. Can’t reach your Mac." : "connected")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
@@ -156,6 +156,18 @@ struct DetailsView: View {
             .navigationBarTitleDisplayMode(.inline)
             // Rows scrolled up blur away under the clock and the back button, as in Settings; no ruled line.
             .scrollEdgeEffectStyle(.soft, for: .top)
+            // The glass behind has no colour for that edge to fade into, so the rows fade themselves: clear
+            // under the clock and the back button, solid 20pt below the bar. At rest only empty space is there.
+            .mask {
+                GeometryReader { g in
+                    VStack(spacing: 0) {
+                        Color.clear.frame(height: g.safeAreaInsets.top)
+                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 20)
+                        Color.black
+                    }
+                    .ignoresSafeArea()
+                }
+            }
             .scrollContentBackground(.hidden)
             .task {
                 guard checkOnOpen else { return }

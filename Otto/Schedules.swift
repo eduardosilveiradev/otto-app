@@ -27,7 +27,14 @@ extension DashTrigger {
 func scheduleLine(type: String, schedule: String?, repeating: Bool, next: Date?) -> String {
     if type == "email" { return "When matching mail arrives" }
     if repeating, let s = schedule { return humanCron(s) ?? s }
-    return next?.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute()) ?? schedule ?? ""
+    guard let next else { return schedule ?? "" }
+    // "Today at 4:35 PM", "Tomorrow at 9:00 AM", as first-party apps say it; later days keep their date.
+    if Calendar.current.isDateInToday(next) || Calendar.current.isDateInTomorrow(next) {
+        let f = DateFormatter()
+        f.dateStyle = .medium; f.timeStyle = .short; f.doesRelativeDateFormatting = true
+        return f.string(from: next)
+    }
+    return next.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
 }
 
 /// The common shapes of a 5-field cron in words; nil for anything else, which then shows as written.

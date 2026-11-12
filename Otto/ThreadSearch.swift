@@ -160,7 +160,7 @@ private struct SearchHit: View {
     var body: some View {
         Button(action: open) {
             VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
-                Text(message.date.formatted(date: .abbreviated, time: .shortened))
+                Text(messageWhen(message.date))
                     .font(size: 11, relativeTo: .caption2)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 4)

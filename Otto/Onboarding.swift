@@ -82,7 +82,8 @@ private struct Page<Hero: View, Content: View, Footer: View>: View {
         GeometryReader { g in
             ScrollView {
                 VStack(spacing: 0) {
-                    Spacer(minLength: 24)
+                    // A fixed start, not a centring spacer: the picture and headline sit at the same height on every step.
+                    Color.clear.frame(height: max(24, g.size.height * 0.1))
                     if Hero.self != EmptyView.self { hero.padding(.bottom, 32) }
                     VStack(spacing: 10) {
                         Text(title).font(size: 28, weight: .bold, relativeTo: .title).multilineTextAlignment(.center)
@@ -184,6 +185,9 @@ private struct ConnectPage: View {
     @State private var scanning = false
     @State private var checking = false
     @State private var problem: String?
+    /// Paste only when there's something to paste; the system draws an empty one dimmed, like a broken button.
+    /// Reading `hasStrings` doesn't trigger the paste prompt.
+    @State private var canPaste = UIPasteboard.general.hasStrings
 
     private var canScan: Bool { DataScannerViewController.isSupported }
 
@@ -235,19 +239,23 @@ private struct ConnectPage: View {
                 } else {
                     Primary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
                 }
-                PasteButton(payloadType: String.self) { strings in
-                    guard let s = strings.first else { return }
-                    Task { @MainActor in await take(s) }
+                if canPaste {
+                    PasteButton(payloadType: String.self) { strings in
+                        guard let s = strings.first else { return }
+                        Task { @MainActor in await take(s) }
+                    }
+                    .buttonBorderShape(.capsule)
+                    .labelStyle(.titleAndIcon)
+                    .tint(.orange)   // the page's one accent
                 }
-                .buttonBorderShape(.capsule)
-                .labelStyle(.titleAndIcon)
-                .tint(.orange)   // the page's one accent
                 if canScan {
                     Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
                 }
             }
             Secondary(label: "Look around with sample data") { next() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in canPaste = UIPasteboard.general.hasStrings }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in canPaste = UIPasteboard.general.hasStrings }
         #if DEBUG
         // `-connectManual` opens the typed form; `-connectProblem` with it shows the error line.
         .onAppear {

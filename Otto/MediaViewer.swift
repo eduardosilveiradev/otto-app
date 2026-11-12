@@ -181,7 +181,7 @@ struct MediaViewerView: View {
                 if let i {
                     VStack(spacing: 1) {
                         Text("\(i + 1) of \(items.count)").font(size: 15, weight: .semibold, relativeTo: .subheadline)
-                        Text("\(items[i].mine ? "You" : "Otto") · \(items[i].date.formatted(date: .abbreviated, time: .shortened))")
+                        Text("\(items[i].mine ? "You" : "Otto") · \(messageWhen(items[i].date))")
                             .font(size: 12, relativeTo: .caption).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 14).padding(.vertical, 6)

@@ -738,7 +738,9 @@ struct ChatView: View {
                     walkieHint = false
                 }
             }
-            title.tint(.primary)
+            // Hidden while the contact card is up, so the header's face doesn't show through its glass as a
+            // second, blurred Otto; it's back as the card zooms closed.
+            title.tint(.primary).opacity(showDetails ? 0 : 1)
                 // The pull-downs' way in for VoiceOver and Full Keyboard Access.
                 .accessibilityAction(named: "Search messages", openSearch)
         }
@@ -1134,6 +1136,18 @@ final class PastingTextView: UITextView {
 }
 
 // MARK: - Pieces (Unchanged)
+
+/// A message's day and time the way the thread's stamps write it: "Today 2:19 AM", "Monday 2:19 AM",
+/// then "Nov 3, 2:19 AM", with the year only when it isn't this one.
+func messageWhen(_ d: Date) -> String {
+    let cal = Calendar.current, time = d.formatted(date: .omitted, time: .shortened)
+    if cal.isDateInToday(d) { return "Today \(time)" }
+    if cal.isDateInYesterday(d) { return "Yesterday \(time)" }
+    if let days = cal.dateComponents([.day], from: d, to: .now).day, days < 7 { return "\(d.formatted(.dateTime.weekday(.wide))) \(time)" }
+    return cal.isDate(d, equalTo: .now, toGranularity: .year)
+        ? d.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        : d.formatted(date: .abbreviated, time: .shortened)
+}
 
 struct Stamp: View {
     let date: Date
@@ -2257,7 +2271,7 @@ private struct EmptyChat: View {
     let connected: Bool
 
     private var line: String {
-        if !connected { return "Can’t reach the server. What you send goes out when it’s back." }
+        if !connected { return "Can’t reach your Mac. What you send goes out when it’s back." }
         return "Say hi. Reminders, mail, plans: I’ll keep track of the rest."
     }
     var body: some View {
