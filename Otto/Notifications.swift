@@ -13,7 +13,7 @@ import UserNotifications
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
     static let refreshTask = "dev.otto.app.refresh"
-    private static let category = "OTTO_MESSAGE"
+    static let category = "OTTO_MESSAGE"
     private static let pipCategory = "OTTO_PIP_MESSAGE"
     private static let replyAction = "OTTO_REPLY"
 
@@ -123,9 +123,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Inline reply from the notification goes out like any typed message.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler done: @escaping () -> Void) {
-        let conversation = response.notification.request.content.userInfo["conversation"] as? String
-        if let conversation, response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            Task { @MainActor in OttoStore.shared.pips.open(conversation); done() }
+        let info = response.notification.request.content.userInfo
+        let conversation = info["conversation"] as? String
+        // A reminder (Reminders.swift) opens Otto's own thread, where its message lands once the Mac is up.
+        if let open = conversation ?? (info["reminder"] != nil ? "app" : nil), response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            Task { @MainActor in OttoStore.shared.pips.open(open); done() }
             return
         }
         if response.actionIdentifier == Self.replyAction,
@@ -141,10 +143,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         done()
     }
 
-    /// The chat is already on screen when the app is in front; no banner needed.
+    /// The chat is already on screen when the app is in front; no banner needed. A reminder still shows:
+    /// with the Mac off, nothing lands in the chat for it.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
-        done([])
+        done(notification.request.content.userInfo["reminder"] != nil ? [.banner, .sound] : [])
     }
 }
 

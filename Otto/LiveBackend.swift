@@ -25,6 +25,9 @@ import Foundation
 ///                  {"type":"open_todos","items":[{"text","status":"pending"|"in_progress"}]}   its open to-dos, idle too; on connect and on change
 ///                  a "message" (and its history row) may carry "quiet":true: a desktop was focused, so no banner
 ///                  {"type":"notify","id":"<newest held id>","text":"...","count":N}   focus ended: one banner for what was held, no bubble
+///                  {"type":"reminders","items":[{"id","at":"<ISO>","text"}]}   every upcoming reminder, on connect and on change:
+///                   each becomes a local notification (Reminders.swift), so it fires with the Mac off; we answer
+///                   {"type":"reminders_ack","items":[{"id","at"}]} for those really pending, and the server stops alerting for them
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
 ///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
 ///   GET  <server>/app/brief    brief JSON
@@ -374,6 +377,12 @@ final class LiveBackend: OttoBackend {
             if k.type == "approval" { if let a = try? JSONDecoder().decode(ApprovalRequest.self, from: data) { approvalOut.yield(.show(a)) }; return }
             if k.type == "approval_done", let id = k.id { approvalOut.yield(.done(id)); return }
             if k.type == "hello" { lock.withLock { acksOn = true }; return }
+            if k.type == "reminders" {
+                struct Frame: Decodable { let items: [ReminderItem] }
+                guard let set = try? JSONDecoder().decode(Frame.self, from: data), let task = lock.withLock({ socket }) else { return }
+                Task { if let ack = await Reminders.sync(set.items) { try? await task.send(.string(ack)) } }
+                return
+            }
             if k.type == "ack", let id = k.id { lock.withLock { acked.insert(id); if k.gone == true { gone.insert(id) } }; return }
             if let e = ConversationEvent.decode(type: k.type, data) { conversationOut.yield(e); return }
         }
