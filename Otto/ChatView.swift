@@ -2205,18 +2205,31 @@ private struct ScaledFont: ViewModifier {
 }
 
 struct Typing: View {
-    /// What Otto is doing, shown beside the dots; nil is just the dots.
+    /// What Otto is doing, shown beside the orb; nil is just the orb.
     let status: String?
     /// The list Otto is working through, under the step; empty shows nothing.
     var todos: [TodoItem] = []
-    /// Off while the server is unreachable: the line says it's reconnecting instead of the step.
+    /// Off while the server is unreachable: the orb shows it's reconnecting instead of thinking.
     let connected: Bool
 
+    /// The orb that fits the step, read off the label's first word (the server's
+    /// toolstatus.ts): looking things up, writing, running something, remembering.
+    static func orb(for status: String?) -> OrbState {
+        guard let status else { return .breathing }
+        switch status.split(separator: " ").first.map(String.init) ?? "" {
+        case "Searching", "Looking", "Checking", "Reading": return .searching
+        case "Editing", "Writing": return .composing
+        case "Running": return .solving
+        case "Remembering": return .weaving
+        default: return .working
+        }
+    }
+
     var body: some View {
-        // Top-aligned so the dots stay on the first line when a long status wraps. The same three dots
-        // as a pip's typing line: one typing signal across the app.
+        // Top-aligned so the orb stays on the first line when a long status wraps. Otto thinks with the
+        // orb; the three dots stay for pips (the owner wants the orb back, 12 Nov 2026).
         HStack(alignment: .top, spacing: 8) {
-            TypingDots().frame(width: 29, height: 7).padding(.top, 6)
+            MorphingOrb(state: !connected ? .connecting : Self.orb(for: status))
             // A status from before the drop would be stale; say what's actually happening.
             VStack(alignment: .leading, spacing: 8) {
                 if let status = connected ? status : "Reconnecting…" {
