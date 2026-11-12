@@ -84,7 +84,10 @@ shot() {
     sleep "$wait"
     [[ " $* " == *" -pipsFixture "* ]] && sleep 1.5   # the list, then Otto's thread pushed over it
     local f="$screen-$state-$theme.png"
-    xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1 && printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$screen" "$state" "$theme" "$note" >> "$TSV.new"
+    xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1
+    # A launch that hadn't drawn yet is a black frame of about 72 KB (the sparest real screen is 100): wait as long again and retake it.
+    [ "$(stat -f%z "$OUT/$f" 2>/dev/null || echo 0)" -lt 85000 ] && { sleep "$wait"; xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1; }
+    [ -f "$OUT/$f" ] && printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$screen" "$state" "$theme" "$note" >> "$TSV.new"
     echo "$f"
   done
 }

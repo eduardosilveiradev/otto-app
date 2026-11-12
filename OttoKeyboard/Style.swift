@@ -21,6 +21,14 @@ struct KeyStyle: Codable, Equatable {
     /// Small digits on the top row; a long press there types the digit.
     var numberHints = false
 
+    /// Text on the accent: white while it clears 3:1 there (blue, red, green), near-black on a light accent
+    /// (the default orange, yellow, Glass's white), where white was 2:1 or invisible.
+    var onAccent: RGBA {
+        func lin(_ c: CGFloat) -> CGFloat { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        let l = 0.2126 * lin(accent.r) + 0.7152 * lin(accent.g) + 0.0722 * lin(accent.b)
+        return 1.05 / (l + 0.05) >= 3 ? RGBA(1, 1, 1) : RGBA(0.12, 0.12, 0.12)
+    }
+
     /// Nothing painted behind the keys, so the keyboard and the system's globe/mic strip share one backdrop.
     var seeThrough: Bool { background.isEmpty }
 

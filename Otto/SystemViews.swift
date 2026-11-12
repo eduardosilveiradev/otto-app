@@ -100,9 +100,12 @@ struct ActivityScreen: View {
                                 Label { Text(e).textSelection(.enabled) } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red) }
                                     .padding(.top, 8)
                             }
-                            if job.result == nil && job.error == nil,
-                               let wait = ["queued": "Waiting to start.", "running": "Still running. The result shows up here when it’s done."][job.state] {
-                                Text(wait).foregroundStyle(.secondary).padding(.top, 8)
+                            if job.result == nil && job.error == nil, job.state == "queued" || job.state == "running" {
+                                HStack(spacing: 8) {
+                                    if job.state == "running" { ProgressView().controlSize(.small) }
+                                    Text(job.state == "running" ? "Still running." : "Waiting to start.")
+                                }
+                                .foregroundStyle(.secondary).padding(.top, 8)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading).padding()

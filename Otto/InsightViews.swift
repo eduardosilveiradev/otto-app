@@ -105,7 +105,6 @@ private struct LoopsList: View {
                 Text(sub).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .padding(.vertical, 4)
     }
 
     private func flip(_ id: String, done: Bool) {
@@ -247,7 +246,7 @@ struct TripsScreen: View {
             let upcoming = t.trips.filter { $0.end >= today }.sorted { $0.start < $1.start }
             let past = t.trips.filter { $0.end < today }.sorted { $0.start > $1.start }
             List {
-                if upcoming.isEmpty && !past.isEmpty { Section("Coming up") { Text("Nothing coming up.").foregroundStyle(.secondary) } }
+                if upcoming.isEmpty && !past.isEmpty { Section("Coming up") { Text("No trips planned.").foregroundStyle(.secondary) } }
                 ForEach(upcoming) { trip($0, t) }
                 if !past.isEmpty {
                     Section {

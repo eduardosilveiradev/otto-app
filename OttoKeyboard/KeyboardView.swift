@@ -355,7 +355,7 @@ final class KeyView: UIView {
             }
         case .page(let p): label.text = p == .letters ? "ABC" : p == .numbers ? "123" : "#+="; label.font = style.uiFont(17)
         }
-        let textColor = returnAccent && def.kind == .ret ? UIColor.white : style.text.ui
+        let textColor = returnAccent && def.kind == .ret ? style.onAccent.ui : style.text.ui
         label.textColor = textColor
         icon.tintColor = shift == .locked && def.kind == .shift ? style.accent.ui : textColor
         paint()
@@ -469,7 +469,7 @@ final class KeyPopup: UIView {
         let i = cells.firstIndex { x < $0.frame.maxX } ?? cells.count - 1
         for (j, c) in cells.enumerated() {
             c.backgroundColor = j == i ? style.accent.ui : .clear
-            c.textColor = j == i ? .white : style.text.ui
+            c.textColor = j == i ? style.onAccent.ui : style.text.ui
         }
         selected = cells[i].text
     }

@@ -169,7 +169,7 @@ struct ShareView: View {
                         case .sending: busy("Sending to Otto…")
                         case .sent:
                             Label { Text("Sent") } icon: { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                        case .queued: Label("Otto will send it when the app next opens.", systemImage: "tray.and.arrow.up").foregroundStyle(.secondary)
+                        case .queued: Label("It goes to Otto next time you open the app.", systemImage: "tray.and.arrow.up").foregroundStyle(.secondary)
                         case .failed(let problem):
                             Label(problem.message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
                             Button("Try again") { model.send() }

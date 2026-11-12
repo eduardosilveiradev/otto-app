@@ -93,10 +93,10 @@ private struct Page<Hero: View, Content: View, Footer: View>: View {
                     }
                     if Content.self != EmptyView.self { content.padding(.top, 24) }
                     Spacer(minLength: 32)
-                    // Room for one link under the button on every step, so the button doesn't jump between them:
-                    // a hidden button and link set the height, at whatever size the text is.
+                    // Room for two links under the button on every step (Connect has two), so the button doesn't
+                    // jump between them: a hidden button and links set the height, at whatever size the text is.
                     ZStack(alignment: .top) {
-                        VStack(spacing: 6) { Primary(label: " ") {}; Secondary(label: " ") {} }.hidden()
+                        VStack(spacing: 6) { Primary(label: " ") {}; Secondary(label: " ") {}; Secondary(label: " ") {} }.hidden()
                         VStack(spacing: 6) { footer }
                     }
                     .padding(.bottom, 8)
@@ -226,6 +226,16 @@ private struct ConnectPage: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).padding(.vertical, 10)
                         .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
+                    // The same pairing link, pasted: with the command it pairs, not down among the buttons.
+                    if canPaste {
+                        PasteButton(payloadType: String.self) { strings in
+                            guard let s = strings.first else { return }
+                            Task { @MainActor in await take(s) }
+                        }
+                        .buttonBorderShape(.capsule)
+                        .labelStyle(.titleAndIcon)
+                        .tint(.orange)   // the page's one accent
+                    }
                 }
                 // Right under what it's about, not down by the buttons. Its line is always held, so the
                 // page doesn't re-centre and jump when an error arrives.
@@ -243,15 +253,6 @@ private struct ConnectPage: View {
                     Primary(label: "Scan code", busy: checking) { scanning = true }
                 } else {
                     Primary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
-                }
-                if canPaste {
-                    PasteButton(payloadType: String.self) { strings in
-                        guard let s = strings.first else { return }
-                        Task { @MainActor in await take(s) }
-                    }
-                    .buttonBorderShape(.capsule)
-                    .labelStyle(.titleAndIcon)
-                    .tint(.orange)   // the page's one accent
                 }
                 if canScan {
                     Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
