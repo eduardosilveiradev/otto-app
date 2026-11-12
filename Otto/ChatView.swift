@@ -49,6 +49,10 @@ struct ChatView: View {
     @State private var showDetails = ProcessInfo.processInfo.arguments.contains("-details")
     @Namespace private var card
     @State private var showCall = false
+    /// The live browser tile, opened full screen.
+    @State private var browserOpen = ProcessInfo.processInfo.arguments.contains("-browserOpen")
+    /// Otto's Chrome tile, in its own thread and only while the server can be heard (a stale one would mislead).
+    private var browser: LiveBrowser? { thread.isOtto && thread.connected ? store.browser : nil }
     /// `-call` (with `-vapiPublicKey`, `-vapiAssistantId` and, in DEBUG, `-vapiHost`): open straight into a web call.
     @State private var webCall = ProcessInfo.processInfo.arguments.contains("-call")
     /// Calls Otto is placing for you; a live one shows as a banner under the header.
@@ -357,6 +361,7 @@ struct ChatView: View {
         .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
             MediaViewerView(store: store).presentationBackground(.clear)
         }
+        .fullScreenCover(isPresented: $browserOpen) { BrowserFullScreen() }
         .alert("Calling Otto", isPresented: $showCall) {
             Button("OK", role: .cancel) {}
         } message: { Text("Add Otto’s phone number in details (tap Otto’s name).") }
@@ -422,6 +427,16 @@ struct ChatView: View {
                                     removal: .opacity))
                         }
                     }
+                    // Right over the orb: what Otto is doing in Chrome, while it does it.
+                    if let browser {
+                        Button { browserOpen = true } label: { BrowserTileView(browser: browser) }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(browser.tile.caption)
+                            .accessibilityHint("Shows the page full screen")
+                            .padding(.top, 10).id("browser")
+                            .transition(.asymmetric(insertion: still ? .opacity : .scale(scale: 0.96, anchor: .bottomLeading).combined(with: .opacity),
+                                                    removal: .opacity))
+                    }
                     if thread.typing {
                         Typing(status: thread.typingStatus, todos: thread.typingTodos, connected: thread.connected).padding(.top, 10).id("typing")
                             .transition(still ? .opacity : .asymmetric(insertion: .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity),
@@ -452,6 +467,8 @@ struct ChatView: View {
         .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: row?.activity.map(\.id))
         // The thinking bubble's to-do list and a tapback's room above a bubble change heights too.
         .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: thread.typingTodos)
+        // The browser tile comes and goes; under Reduce Motion it still fades rather than pops.
+        .animation(still ? .easeOut(duration: 0.2) : .spring(response: 0.3, dampingFraction: 0.8), value: browser != nil)
         // A new step's line can wrap to two, or back to one: the bubble's height follows smoothly.
         .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: thread.typingStatus)
         .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: messages.map(\.reaction))
@@ -2265,6 +2282,102 @@ struct Typing: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: status)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: todos)
         .animation(.snappy(duration: 0.25), value: connected)
+    }
+}
+
+/// The browser tile with its picture decoded (OttoStore.browser).
+struct LiveBrowser: Equatable {
+    let tile: BrowserTile
+    let shot: UIImage?
+}
+
+/// What Otto is doing in Chrome: the latest screenshot, rounded, with its caption under it. A new
+/// frame cross-fades in over the last; the box keeps its size with or without a picture, since
+/// frames land every second in a thread pinned to the bottom.
+private struct BrowserTileView: View {
+    let browser: LiveBrowser
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // A ZStack, so old and new frames overlap while they cross-fade.
+            ZStack { BrowserShot(shot: browser.shot).id(browser.tile.ts).transition(.opacity) }
+                .aspectRatio(16 / 10, contentMode: .fit)
+                .clipShape(.rect(cornerRadius: 14, style: .continuous))
+                // Opacity only, so Reduce Motion keeps it as is.
+                .animation(.easeOut(duration: 0.3), value: browser.tile.ts)
+            Text(browser.tile.caption)
+                .font(size: 12, relativeTo: .caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2, reservesSpace: true)
+        }
+        .containerRelativeFrame(.horizontal, alignment: .leading) { w, _ in w * 0.6 }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
+    }
+}
+
+/// The screenshot, or a globe where there's none to show (none yet, or a sign-in or payment page).
+private struct BrowserShot: View {
+    let shot: UIImage?
+
+    var body: some View {
+        Color(.secondarySystemFill)
+            .overlay {
+                if let shot { Image(uiImage: shot).resizable().scaledToFill() }
+                else { Image(systemName: "globe").font(.system(size: 24, weight: .regular)).foregroundStyle(.tertiary) }
+            }
+            // A hairline in pure black or white, so a white page doesn't melt into a light thread.
+            .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 1) }
+            .accessibilityHidden(true)
+    }
+}
+
+/// The tile, full screen: the page as big as it fits, still live while Otto works, and the last
+/// frame kept once it's done. A tap anywhere closes it.
+private struct BrowserFullScreen: View {
+    @Environment(OttoStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var shown: LiveBrowser?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            if let shown {
+                VStack(spacing: 14) {
+                    Spacer(minLength: 0)
+                    ZStack {
+                        Group {
+                            if let shot = shown.shot { Image(uiImage: shot).resizable() }
+                            else { BrowserShot(shot: nil) }
+                        }
+                        .id(shown.tile.ts)
+                        .transition(.opacity)
+                    }
+                    .aspectRatio(shown.shot.map { $0.size.width / max($0.size.height, 1) } ?? 16 / 10, contentMode: .fit)
+                    .clipShape(.rect(cornerRadius: 10, style: .continuous))
+                    .accessibilityHidden(true)
+                    Text(shown.tile.caption)
+                        .font(size: 15, relativeTo: .subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                    Spacer(minLength: 0)
+                }
+                .animation(.easeOut(duration: 0.3), value: shown.tile.ts)
+            }
+            Button { dismiss() } label: {
+                Image(systemName: "xmark").font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44)
+            }
+            .glassEffect(.regular.interactive(), in: .circle)
+            .tint(.white)
+            .accessibilityLabel("Close")
+            .padding(.horizontal, 16)
+        }
+        .environment(\.colorScheme, .dark)
+        .contentShape(.rect)
+        .onTapGesture { dismiss() }
+        .onAppear { shown = store.browser; if shown == nil { dismiss() } }
+        .onChange(of: store.browser) { _, b in if let b { shown = b } }
     }
 }
 

@@ -128,6 +128,11 @@ shot chat todos-one 6 "A single open to-do" $O -demoThread -openTodos one
 shot chat todos-many 6 "Worst case opened: 30 to-dos, a 120-character one in progress; six shown, the rest counted" $O -demoThread -openTodos many -todosOpen
 shot chat todos-expanded 6 "To-do pill tapped open: the one in progress first" $O -demoThread -openTodos -todosOpen
 shot chat todos-while-typing 6 "Otto working: the list is in the bubble, the pill steps aside" $O -demoThread -thinking -todos -openTodos
+shot chat browser-tile 6 "Otto in Chrome: the live page tile over the thinking orb" $O -demoThread -thinking -browserTile
+shot chat browser-tile-private 6 "Sign-in page: caption only, no picture" $O -demoThread -thinking -browserTile private
+shot chat browser-tile-long 6 "Worst case: the server's 100-character caption, two lines kept" $O -demoThread -thinking -todos -browserTile long
+shot chat browser-tile-idle 6 "Tile still up after the reply ended (done comes 20 s later)" $O -demoThread -browserTile
+shot media browser-full 6 "Browser tile tapped: the page full screen" $O -demoThread -thinking -browserTile -browserOpen
 shot chat offline 6 "Server unreachable: Otto asleep, reconnecting" $O -demoThread -offline
 shot chat offline-pending 6 "Dead server with a send waiting: Will send when back online" $DEAD $N -longThread b
 shot chat offline-empty 15 "Real dead server: empty thread, asleep" $DEAD $N -emptyThread

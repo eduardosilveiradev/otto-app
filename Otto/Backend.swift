@@ -13,6 +13,35 @@ struct TodoItem: Codable, Hashable {
     let status: Status
 }
 
+/// What Otto is doing in Chrome right now: the latest screenshot (a JPEG; nil when there's none or
+/// the page is one not to mirror) and a line like "example.com · clicks Generate". Live only, never saved.
+struct BrowserTile: Equatable {
+    let image: Data?
+    let caption: String
+    let url: String
+    /// Epoch ms.
+    let ts: Double
+}
+
+/// A "browser" frame: the whole tile to show now, or `done` when it goes away.
+enum BrowserFrame: Equatable {
+    case show(BrowserTile)
+    case done
+
+    /// Nil when the data isn't a browser frame. A picture that won't decode leaves the caption alone.
+    init?(json data: Data) {
+        struct F: Decodable { let type: String; let done: Bool?; let image: String?; let caption: String?; let url: String?; let ts: Double? }
+        guard let f = try? JSONDecoder().decode(F.self, from: data), f.type == "browser" else { return nil }
+        if f.done == true { self = .done; return }
+        guard let caption = f.caption else { return nil }
+        // "data:image/jpeg;base64,<data>"
+        let b64 = f.image.flatMap { $0.hasPrefix("data:image/") ? $0.split(separator: ",", maxSplits: 1).dropFirst().first : nil }
+        self = .show(BrowserTile(image: b64.flatMap { Data(base64Encoded: String($0)) }, caption: caption, url: f.url ?? "", ts: f.ts ?? 0))
+    }
+
+    var tile: BrowserTile? { if case .show(let t) = self { t } else { nil } }
+}
+
 struct ActionButton: Identifiable, Hashable, Codable {
     var id: String { data ?? url ?? copy ?? label }
     let label: String
@@ -175,6 +204,8 @@ protocol OttoBackend: AnyObject {
     var todoLists: AsyncStream<[TodoItem]> { get }
     /// Otto's open to-dos (pending, in progress) between turns too, whole each time; empty when none.
     var openTodoLists: AsyncStream<[TodoItem]> { get }
+    /// What Otto is doing in Chrome, whole each time; nil when the tile goes away.
+    var browserTiles: AsyncStream<BrowserTile?> { get }
     /// wireIDs of your messages Otto has just taken in.
     var reads: AsyncStream<[String]> { get }
     var desktopSync: DesktopSync? { get }
@@ -237,6 +268,7 @@ extension OttoBackend {
     var edits: AsyncStream<(String, String)> { AsyncStream { _ in } }
     var notifies: AsyncStream<(String, String)> { AsyncStream { _ in } }
     var openTodoLists: AsyncStream<[TodoItem]> { AsyncStream { _ in } }
+    var browserTiles: AsyncStream<BrowserTile?> { AsyncStream { _ in } }
     func release() async -> Release? { nil }
     func snooze(_ change: SnoozeChange?) async -> Snooze? { nil }
     func setLoop(_ id: String, done: Bool) async -> Bool { !isLive }
