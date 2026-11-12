@@ -171,6 +171,24 @@ extension View {
     }
 }
 
+extension View {
+    /// Behind a sheet's bottom bar: the sheet's grey, faded in over the 24pt above it, so rows scrolled under
+    /// dissolve instead of reading through the buttons (the thread composer's treatment).
+    func bottomBarFade() -> some View {
+        background {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [Color(.systemGroupedBackground).opacity(0), Color(.systemGroupedBackground)],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 24)
+                Color(.systemGroupedBackground)
+            }
+            .padding(.top, -24)
+            .ignoresSafeArea(edges: .bottom)
+            .allowsHitTesting(false)
+        }
+    }
+}
+
 // MARK: - Formatting
 
 /// A server timestamp or bare date, as a Date.
@@ -215,7 +233,7 @@ struct Pill: View {
     var tint: Color = .secondary
     @Environment(\.colorScheme) private var scheme
     var body: some View {
-        Text(text)
+        Text(text.prefix(1).uppercased() + text.dropFirst())   // one case for every badge: "Running", "Live"
             .font(.caption.weight(.medium))
             // Any tint as small text: as is in dark mode, 40% toward black in light, so green, red and
             // orange all clear 4.5:1 on their pale capsule.

@@ -91,7 +91,7 @@ struct WalkieView: View {
                 .frame(height: 44)
                 .padding(.horizontal, 40)
                 .padding(.top, 18)
-                .opacity(phase == .listening || phase == .speaking ? 1 : 0.25)
+                .opacity(phase == .listening || phase == .speaking ? 1 : 0)   // nothing to show at rest
 
             Spacer(minLength: 24)
 

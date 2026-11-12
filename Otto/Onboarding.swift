@@ -199,6 +199,7 @@ private struct ConnectPage: View {
                     VStack(spacing: 0) {
                         TextField("https://your-mac.your-tailnet.ts.net", text: $server)
                             .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                            .accessibilityLabel("Server address")   // the placeholder is an example, not a name
                             .padding(14)
                         Divider().padding(.leading, 14)
                         SecureField("App token", text: $token)
@@ -240,6 +241,7 @@ private struct ConnectPage: View {
                 }
                 .buttonBorderShape(.capsule)
                 .labelStyle(.titleAndIcon)
+                .tint(.orange)   // the page's one accent
                 if canScan {
                     Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
                 }
@@ -364,7 +366,8 @@ private struct TalkPage: View {
 
     private func row(_ icon: String, _ title: String, _ detail: String) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            Image(systemName: icon).font(.system(size: 18)).foregroundStyle(.orange).frame(width: 24)
+            // The text colour, as the onboarding glyphs are, and scaled with the title beside it.
+            Image(systemName: icon).font(size: 18, relativeTo: .callout).foregroundStyle(.primary).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(size: 16, weight: .semibold, relativeTo: .callout)
                 Text(detail).font(size: 14, relativeTo: .subheadline).foregroundStyle(.secondary)

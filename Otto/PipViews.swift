@@ -575,8 +575,11 @@ struct HandoffSheet: View {
                 .font(size: 15, relativeTo: .subheadline)
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(Color.incomingBubble, in: .rect(cornerRadius: 17, style: .continuous))
-            Spacer(minLength: 10)   // the mockup's 86% wide bubble
+            Spacer(minLength: 10)   // the mockup’s 86% wide bubble
         }
+        // The face says who on screen; VoiceOver hears the name.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(ring.name): \(text)")
     }
 
     private func stamp(_ h: PipHandoff) -> some View {
@@ -844,6 +847,7 @@ private struct FailureLine: ViewModifier {
     let text: String?
     func body(content: Content) -> some View {
         content
+            .scrollEdgeEffectStyle(.soft, for: .bottom)   // the soft edge, never a ruled line through the rows
             .safeAreaBar(edge: .bottom, spacing: 0) {
                 if let text {
                     // Red on the warning glyph, the words at full strength: small red text on the bar is under 4.5:1.
@@ -854,6 +858,7 @@ private struct FailureLine: ViewModifier {
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 32).padding(.vertical, 10)
+                        .bottomBarFade()
                 }
             }
             .onChange(of: text) { if let text { AccessibilityNotification.Announcement(text).post() } }

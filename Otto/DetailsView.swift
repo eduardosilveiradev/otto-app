@@ -154,8 +154,8 @@ struct DetailsView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            // Rows scrolled up stop at the bar instead of running under the clock and the back button.
-            .scrollEdgeEffectStyle(.hard, for: .top)
+            // Rows scrolled up blur away under the clock and the back button, as in Settings; no ruled line.
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .scrollContentBackground(.hidden)
             .task {
                 guard checkOnOpen else { return }

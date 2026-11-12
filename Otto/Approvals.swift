@@ -65,7 +65,9 @@ struct ApprovalSheet: View {
                 }
             }
             // A system bar: the sheet's soft scroll edge under the buttons, not a ruled strip across the rows.
+            .scrollEdgeEffectStyle(.soft, for: .bottom)
             .safeAreaBar(edge: .bottom) {
+                Group {
                 if paid {
                     Button { store.closeApproval(request.id) } label: { Text("Done").frame(maxWidth: .infinity) }
                         .buttonStyle(.borderedProminent).controlSize(.large)
@@ -92,6 +94,8 @@ struct ApprovalSheet: View {
                 .disabled(busy)
                 .padding(.horizontal, 20).padding(.vertical, 12)
                 }
+                }
+                .bottomBarFade()
             }
         }
         .interactiveDismissDisabled()

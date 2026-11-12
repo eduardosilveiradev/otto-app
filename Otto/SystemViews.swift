@@ -57,7 +57,7 @@ struct ActivityScreen: View {
                             Spacer(minLength: 8)
                             if s.engaged == 0 && s.sent >= 3 { Pill(text: "never answered", tint: .orange) }
                         }
-                        Text("\(s.sent) sent · \(s.engaged) answered\(s.silentStreak > 1 ? " · last \(s.silentStreak) unanswered" : "")\(s.lastSent.map { " · \(ago($0))" } ?? "")")
+                        Text("\(s.sent) sent · \(s.engaged) answered\(s.engaged > 0 && s.silentStreak > 1 ? " · last \(s.silentStreak) unanswered" : "")\(s.lastSent.map { " · \(ago($0))" } ?? "")")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -123,8 +123,8 @@ struct ActivityScreen: View {
             }
             if !off.isEmpty {
                 Section {
-                    NavigationLink("Spent or paused · \(off.count)") {
-                        List { ForEach(off) { trig($0) } }.navigationTitle("Spent or paused").navigationBarTitleDisplayMode(.inline)
+                    NavigationLink("Done or paused · \(off.count)") {
+                        List { ForEach(off) { trig($0) } }.navigationTitle("Done or paused").navigationBarTitleDisplayMode(.inline)
                     }
                 }
             }

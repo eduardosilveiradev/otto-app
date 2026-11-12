@@ -193,22 +193,24 @@ struct CallSheet: View {
 
     private var controls: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                TextField("Something to say on the call", text: $draft, axis: .vertical)
-                    .lineLimit(1...4)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 20))
-                Menu {
-                    Button { Task { await say("say") } } label: { Label("Say it word for word", systemImage: "speaker.wave.2") }
-                    Button { Task { await say("tell") } } label: { Label("Tell the bot", systemImage: "text.bubble") }
-                } label: {
-                    Image(systemName: "arrow.up").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-                        .frame(width: 34, height: 34).background(.outgoingBubble, in: .circle)
-                } primaryAction: { Task { await say("say") } }
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1)
-                .accessibilityLabel("Say it. Hold for more.")
-            }
+            // The thread composer's shape: the send pill inside the field, there once there's something to send.
+            TextField("Something to say on the call", text: $draft, axis: .vertical)
+                .lineLimit(1...4)
+                .padding(.leading, 14).padding(.trailing, 48).padding(.vertical, 9)
+                .overlay(alignment: .bottomTrailing) {
+                    if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Menu {
+                            Button { Task { await say("say") } } label: { Label("Say it word for word", systemImage: "speaker.wave.2") }
+                            Button { Task { await say("tell") } } label: { Label("Tell the bot", systemImage: "text.bubble") }
+                        } label: {
+                            Image(systemName: "arrow.up").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                                .frame(width: 37, height: 27).background(.outgoingBubble, in: .capsule)
+                        } primaryAction: { Task { await say("say") } }
+                        .padding(.trailing, 6.5).padding(.bottom, 5.5)
+                        .accessibilityLabel("Say it. Hold for more.")
+                    }
+                }
+                .glassEffect(.regular, in: .rect(cornerRadius: 20))
             HStack(spacing: 10) {
                 // Only when the line can be handed over; a disabled one read as a broken button.
                 if call.takeover {

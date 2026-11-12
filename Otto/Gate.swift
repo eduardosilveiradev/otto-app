@@ -144,7 +144,8 @@ struct GateBanner: View {
 
     private var subtitle: String {
         let route = [card.from, card.to].compactMap { $0 }.joined(separator: " → ")
-        let time = card.departsEst.map { "departs \($0), was \(card.departs)" } ?? "departs \(card.departs)"
+        // Short enough that "was 08:45", the reason for the line, never truncates.
+        let time = card.departsEst.map { "\($0), was \(card.departs)" } ?? "departs \(card.departs)"
         return route.isEmpty ? time : "\(route) · \(time)"
     }
 
