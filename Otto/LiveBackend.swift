@@ -22,6 +22,7 @@ import Foundation
 ///                  {"type":"terminal","text":"first six words…","ts":"<ISO>"}   a prompt typed in Otto's terminal
 ///                  {"type":"echo","id","text","ts","shared"?}   yours, from the share sheet or the dashboard
 ///                  {"type":"todos","items":[{"text","status":"pending"|"in_progress"|"completed"}]}   Otto's to-do list while it works; [] when done
+///                  {"type":"open_todos","items":[{"text","status":"pending"|"in_progress"}]}   its open to-dos, idle too; on connect and on change
 ///                  a "message" (and its history row) may carry "quiet":true: a desktop was focused, so no banner
 ///                  {"type":"notify","id":"<newest held id>","text":"...","count":N}   focus ended: one banner for what was held, no bubble
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
@@ -47,6 +48,7 @@ final class LiveBackend: OttoBackend {
     let reactions: AsyncStream<(String, String)>
     let statuses: AsyncStream<String>
     let todoLists: AsyncStream<[TodoItem]>
+    let openTodoLists: AsyncStream<[TodoItem]>
     let desktopSync: DesktopSync?
     let reads: AsyncStream<[String]>
     let typing: AsyncStream<Bool>
@@ -62,6 +64,7 @@ final class LiveBackend: OttoBackend {
     private let reacted: AsyncStream<(String, String)>.Continuation
     private let status: AsyncStream<String>.Continuation
     private let todosOut: AsyncStream<[TodoItem]>.Continuation
+    private let openTodosOut: AsyncStream<[TodoItem]>.Continuation
     private let readIDs: AsyncStream<[String]>.Continuation
     private let typingOn: AsyncStream<Bool>.Continuation
     private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
@@ -102,6 +105,7 @@ final class LiveBackend: OttoBackend {
         (reactions, reacted) = AsyncStream.makeStream()
         (statuses, status) = AsyncStream.makeStream()
         (todoLists, todosOut) = AsyncStream.makeStream()
+        (openTodoLists, openTodosOut) = AsyncStream.makeStream()
         (reads, readIDs) = AsyncStream.makeStream()
         (typing, typingOn) = AsyncStream.makeStream()
         (approvalUpdates, approvalOut) = AsyncStream.makeStream()
@@ -378,6 +382,7 @@ final class LiveBackend: OttoBackend {
         if f.type == "edit", let id = f.id, let text = f.text { edited.yield((id, text)); return }
         if f.type == "status", let text = f.text { status.yield(text); return }
         if f.type == "todos" { todosOut.yield(f.items ?? []); return }
+        if f.type == "open_todos" { openTodosOut.yield(f.items ?? []); return }
         if f.type == "read", let ids = f.ids { readIDs.yield(ids); return }
         if f.type == "typing", let on = f.on { typingOn.yield(on); return }
         if f.type == "terminal", let text = f.text, let ts = f.ts { out.yield(Self.terminal(text, ts: ts)); return }

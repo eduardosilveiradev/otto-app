@@ -136,6 +136,8 @@ final class OttoStore {
     var ottoStatus: String?
     /// Otto's to-do list for this reply, under the live line; empty for most replies.
     var ottoTodos: [TodoItem] = []
+    /// Otto's open to-dos while it isn't working: the pill over the composer.
+    var openTodos: [TodoItem] = []
     /// Approval screens waiting on you, newest last; `Later` hides one until the next launch.
     var approvals: [ApprovalRequest] = []
     var hiddenApprovals: Set<String> = []
@@ -536,6 +538,16 @@ final class OttoStore {
                              TodoItem(text: "Echoing shares to the open app", status: .in_progress),
                              TodoItem(text: "Build and push", status: .pending)]
             } }
+        // `-openTodos`: two open to-dos for the pill over the composer (`-todosOpen` opens it);
+        // `-openTodos one` just one, `-openTodos many` the server's cap of 30, the one in progress at its 120 characters.
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-openTodos") {
+            let args = ProcessInfo.processInfo.arguments, kind = i + 1 < args.count ? args[i + 1] : ""
+            openTodos = kind == "one" ? [TodoItem(text: "Book the boiler service", status: .pending)]
+                : kind == "many" ? (1...29).map { TodoItem(text: "Follow up on invoice #\($0)", status: .pending) }
+                    + [TodoItem(text: "Reconciling the March and April statements against the receipts folder, then flagging anything without a match", status: .in_progress)]
+                : [TodoItem(text: "Book the boiler service", status: .pending),
+                   TodoItem(text: "Drafting the reply to the landlord", status: .in_progress)]
+        }
         #endif
         // Anything the server has that's newer than what's saved here, e.g. replies
         // that landed while the app was closed.
@@ -559,6 +571,7 @@ final class OttoStore {
                 armTypingTimeout()
             }
         }
+        Task { for await items in backend.openTodoLists { openTodos = items } }
         Task {
             for await items in backend.todoLists {
                 if !items.isEmpty { ottoTyping = true; reconcileVoiceDelivery(); armTypingTimeout() }
