@@ -287,7 +287,7 @@ private struct ConversationCell: View {
         }
         .buttonStyle(CellPress())
         .overlay(alignment: .leading) {
-            if row.unread > 0 { Circle().fill(Color(red: 1, green: 0.478, blue: 0.102)).frame(width: 10, height: 10).padding(.leading, 6) }
+            if row.unread > 0 { Circle().fill(Color.orangeText).frame(width: 10, height: 10).padding(.leading, 6) }
         }
         .overlay(alignment: .top) {
             if divided { Rectangle().fill(Color(.separator)).frame(height: 0.5).padding(.leading, 90) }
@@ -311,10 +311,7 @@ private struct ConversationCell: View {
         if let match {
             Text(match.text).foregroundStyle(.secondary)
         } else if let doing = row.activity.first(where: { $0.activity?.isEmpty == false })?.activity {
-            HStack(spacing: 6) {
-                TypingDots(dot: 5, gap: 3).frame(width: 21, height: 5)
-                Text(doing).foregroundStyle(.secondary)
-            }
+            Text(doing).foregroundStyle(.secondary)
         } else if row.kind == "pip", row.pips.first?.state == .asleep, let wake = row.nextWakeAt {
             Text(PipClock.wake(wake)).foregroundStyle(.secondary)
         } else if let m = row.lastMessage {
@@ -449,7 +446,7 @@ struct ActivityLine: View {
         HStack(alignment: .bottom, spacing: 8) {
             if withFace {
                 // One size for everyone down the side, Otto too, as Messages does.
-                FaceView(look: member.look, size: 34)
+                FaceView(look: member.look.with(.rest), size: 34)
                     .frame(width: 40, height: 34)
                     .padding(.bottom, -2)
             }

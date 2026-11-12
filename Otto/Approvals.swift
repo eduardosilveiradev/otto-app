@@ -219,16 +219,16 @@ struct PrintedReceipt: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            machine.zIndex(2)
+            machine.zIndex(2).accessibilityHidden(true)   // the printer is decoration; the paper carries the facts
             output.padding(.top, -16).zIndex(1)
         }
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
         // Grows with the text size like everything else; a row too wide for the paper stacks its value
-        // under its label (see row). VoiceOver reads it whole.
+        // under its label (see row). VoiceOver walks the paper row by row, as it's printed.
         .task { await run() }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Receipt for \(payment.money(payment.total)) to \(payment.merchant)")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Receipt")
     }
 
     private func run() async {
@@ -356,6 +356,7 @@ struct PrintedReceipt: View {
             .foregroundStyle(Color(white: 0.35))
             .padding(.vertical, 6)
             Barcode(seed: payment.merchant + payment.money(payment.total)).frame(height: 34).padding(.top, 10).padding(.horizontal, 30)
+                .accessibilityHidden(true)
             Text(payment.test == true ? "TEST · NOTHING CHARGED" : "THANK YOU").font(size: 9, design: .monospaced, relativeTo: .caption2)
                 .foregroundStyle(Color(white: 0.5)).frame(maxWidth: .infinity).padding(.top, 4)
         }
@@ -376,6 +377,7 @@ struct PrintedReceipt: View {
             HStack(alignment: .firstTextBaseline) { Text(l).lineLimit(1); Spacer(minLength: 12); Text(r).lineLimit(1) }
             VStack(alignment: .leading, spacing: 2) { Text(l); Text(r) }.frame(maxWidth: .infinity, alignment: .leading)
         }
+        .accessibilityElement(children: .combine)   // "Total, €17.00", one stop
     }
 
     private struct Line: Shape { func path(in r: CGRect) -> Path { Path { $0.move(to: CGPoint(x: 0, y: r.midY)); $0.addLine(to: CGPoint(x: r.maxX, y: r.midY)) } } }

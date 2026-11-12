@@ -87,6 +87,10 @@ struct ChatView: View {
     /// Far enough up the thread that the newest messages are out of sight.
     @State private var scrolledUp = false
     @State private var visibleNewest: Message.ID?
+    /// Group members' names by author id, for VoiceOver's "who" on each bubble.
+    private var authorNames: [String: String] {
+        Dictionary((row?.memberStates ?? []).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+    }
     private var newestOtto: Message? { thread.messages.last(where: { $0.from == .otto }) }
     private var seenDate: Date? {
         thread.isOtto && store.foreground && visibleNewest == newestOtto?.id ? newestOtto?.date : nil
@@ -369,7 +373,7 @@ struct ChatView: View {
                         let prev = i > 0 ? messages[i - 1] : nil
                         let next = i + 1 < messages.count ? messages[i + 1] : nil
                         let newBlock = prev.map { m.date.timeIntervalSince($0.date) > 3600 } ?? true
-                        if newBlock { Stamp(date: m.date, yesterday: pipsOn) }
+                        if newBlock { Stamp(date: m.date) }
                         if m.isPipLine {
                             PipLine(message: m, afterLine: !newBlock && prev?.isPipLine == true, highlighted: flashed == m.id).id(m.id).transition(.opacity)
                         } else if m.from == .terminal {
@@ -381,6 +385,7 @@ struct ChatView: View {
                             GroupChrome(on: isGroup && m.from != .me, author: m.author, member: row?.memberStates.first { $0.id == m.author }, showName: runStarts, showFace: runEnds) {
                             Row(thread: thread, message: m,
                                 quote: quote,
+                                names: authorNames,
                                 tail: runEnds,
                                 receipt: m.id == lastMine && m.pending != true && m.failed != true ? receipt(for: i, in: messages) : nil,
                                 fresh: m.from == .me && m.pending == true && Date.now.timeIntervalSince(m.date) < 1,
@@ -1140,22 +1145,27 @@ final class PastingTextView: UITextView {
 /// A message's day and time the way the thread's stamps write it: "Today 2:19 AM", "Monday 2:19 AM",
 /// then "Nov 3, 2:19 AM", with the year only when it isn't this one.
 func messageWhen(_ d: Date) -> String {
-    let cal = Calendar.current, time = d.formatted(date: .omitted, time: .shortened)
-    if cal.isDateInToday(d) { return "Today \(time)" }
-    if cal.isDateInYesterday(d) { return "Yesterday \(time)" }
-    if let days = cal.dateComponents([.day], from: d, to: .now).day, days < 7 { return "\(d.formatted(.dateTime.weekday(.wide))) \(time)" }
-    return cal.isDate(d, equalTo: .now, toGranularity: .year)
-        ? d.formatted(.dateTime.month(.abbreviated).day().hour().minute())
-        : d.formatted(date: .abbreviated, time: .shortened)
+    "\(messageDay(d)) \(d.formatted(date: .omitted, time: .shortened))"
+}
+
+/// The day half: Today, Yesterday, a weekday within the week, then the date.
+func messageDay(_ d: Date) -> String {
+    let cal = Calendar.current
+    let days = cal.dateComponents([.day], from: cal.startOfDay(for: d), to: cal.startOfDay(for: .now)).day ?? 0
+    switch days {
+    case 0: return "Today"
+    case 1: return "Yesterday"
+    case 2..<7: return d.formatted(.dateTime.weekday(.wide))
+    default: return cal.isDate(d, equalTo: .now, toGranularity: .year)
+        ? d.formatted(.dateTime.month(.abbreviated).day())
+        : d.formatted(.dateTime.month(.abbreviated).day().year())
+    }
 }
 
 struct Stamp: View {
     let date: Date
-    /// The pips mockup says "Yesterday"; the one-thread app keeps its weekday.
-    var yesterday = false
     var body: some View {
-        let day = Calendar.current.isDateInToday(date) ? "Today" : yesterday && Calendar.current.isDateInYesterday(date) ? "Yesterday" : date.formatted(.dateTime.weekday(.wide))
-        (Text(day).fontWeight(.semibold) + Text(" " + date.formatted(date: .omitted, time: .shortened)))
+        (Text(messageDay(date)).fontWeight(.semibold) + Text(" " + date.formatted(date: .omitted, time: .shortened)))
             .font(size: 11, relativeTo: .caption2)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
@@ -1189,6 +1199,8 @@ private struct Row: View {
     let message: Message
     /// The message this one answers, shown small above the bubble.
     let quote: Message?
+    /// In a group, who wrote a message, by author id, so VoiceOver says "Planner:", not the group's name.
+    var names: [String: String] = [:]
     let tail: Bool
     /// Under your newest message: true is "Read", false "Delivered", nil nothing.
     let receipt: Bool?
@@ -1376,9 +1388,11 @@ private struct Row: View {
     private var firstLink: URL? { Self.linked(message.text).runs.lazy.compactMap(\.link).first }
     /// Who put the tapback there: on yours it's Otto's, on Otto's it's yours.
     private var reactor: String { mine ? thread.name : "you" }
+    /// The writer's name: a group member's own, or the thread's.
+    private func name(of m: Message) -> String { names[m.author] ?? thread.name }
     /// What VoiceOver reads for the bubble: who, then what.
     private var spoken: String {
-        let who = mine ? "You" : thread.name
+        let who = mine ? "You" : name(of: message)
         if message.isVoice || message.audio != nil { return "\(who): voice message. \(message.text)" }
         if let d = Self.draft(message) { return "\(who): \(d.head) \(d.body)" }
         return "\(who): \(message.text)"
@@ -1447,7 +1461,7 @@ private struct Row: View {
                 .frame(maxWidth: .infinity, alignment: quote.from == .me ? .trailing : .leading)
                 // Out past the row's inset when it's the other side's, so it lines up with their bubbles.
                 .padding(mine ? .leading : .trailing, quote.from == message.from ? 0 : -89)
-                .accessibilityLabel("In reply to \(quote.from == .me ? "you" : thread.name): \(Self.summary(quote))")
+                .accessibilityLabel("In reply to \(quote.from == .me ? "you" : name(of: quote)): \(Self.summary(quote))")
                 .accessibilityHint("Shows the original message")
             }
             if let img = Thumbs.image(for: message) {
@@ -1455,7 +1469,7 @@ private struct Row: View {
                     .frame(maxWidth: 253, maxHeight: 320)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
                     .onTapGesture { MediaViewer.shared.start = message.id.uuidString }
-                    .accessibilityLabel(mine ? "You: photo" : "\(thread.name): photo")
+                    .accessibilityLabel(mine ? "You: photo" : "\(name(of: message)): photo")
                     .accessibilityAddTraits([.isImage, .isButton])
                     .modifier(Reactable(message: message, badge: !textShown, reactor: reactor, react: react, reply: reply, copy: { UIPasteboard.general.image = img }))
             }

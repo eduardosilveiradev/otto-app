@@ -345,17 +345,12 @@ struct PackagesList: View {
                 }
             }
 
-            Button {
-                if let u = pkg.trackingUrl.flatMap(URL.init(string:)) { openURL(u) }
-            } label: {
-                HStack(spacing: 12) {
-                    RowIcon(symbol: "shippingbox")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(pkg.carrierName).foregroundStyle(.primary)
-                        if let t = pkg.tracking { Text(t).font(.footnote.monospaced()).foregroundStyle(.secondary) }
-                    }
-                    Spacer()
-                    if pkg.trackingUrl != nil { Image(systemName: "arrow.up.right").font(.footnote).foregroundStyle(.tertiary) }
+            Group {
+                // Only a row with somewhere to go is a button.
+                if let u = pkg.trackingUrl.flatMap(URL.init(string:)) {
+                    Button { openURL(u) } label: { carrierRow(pkg, link: true) }.buttonStyle(.plain)
+                } else {
+                    carrierRow(pkg, link: false)
                 }
             }
             .contextMenu {
@@ -379,6 +374,19 @@ struct PackagesList: View {
     }
 
     /// "Arrives Tue 20 Oct", "Arrives 16–20 Oct", "Delivered Mon 19 Oct".
+    private func carrierRow(_ pkg: DashPackages.Package, link: Bool) -> some View {
+        HStack(spacing: 12) {
+            RowIcon(symbol: "shippingbox")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pkg.carrierName).foregroundStyle(.primary)
+                if let t = pkg.tracking { Text(t).font(.footnote.monospaced()).foregroundStyle(.secondary) }
+            }
+            Spacer()
+            if link { Image(systemName: "arrow.up.right").font(.footnote).foregroundStyle(.tertiary) }
+        }
+        .contentShape(.rect)
+    }
+
     private func arrival(_ pkg: DashPackages.Package) -> String {
         if pkg.status == "delivered" {
             let d = dashDate(pkg.deliveredAt) ?? dashDate(pkg.updatedAt)

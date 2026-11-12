@@ -156,7 +156,7 @@ struct StatusScreen: View {
                 Section("This phone") {
                     HStack(spacing: 10) {
                         Circle().fill(store.connected ? Color.green : Color.red).frame(width: 9, height: 9)
-                        LabeledContent("Live connection", value: store.connected ? "up" : "down")
+                        LabeledContent("Live connection", value: store.connected ? "Connected" : "Not connected")
                     }
                     if let drop = (store.backend as? LiveBackend)?.lastDrop {
                         Text("Last drop \(drop)").font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)

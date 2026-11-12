@@ -52,7 +52,7 @@ private struct MemoryList: View {
                     NavigationLink { MemoryDetailScreen(item: it) } label: { MemoryRow(item: it) }
                 }
             } header: {
-                Text(ranked != nil ? "Best matches · \(items.count)" : "\(items.count) of \(m.items.count)")
+                Text(ranked != nil ? "Best matches · \(items.count)" : items.count == m.items.count ? "Everything · \(items.count)" : "\(items.count) of \(m.items.count)")
             } footer: {
                 Text("Indexed \(ago(m.generatedAt))")
             }

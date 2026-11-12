@@ -38,9 +38,10 @@ struct DetailsView: View {
                         Text("Otto").font(.title2.weight(.semibold))
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
-                            Text(store.backend is MockBackend ? "sample data"
-                                 : !store.connected ? "Asleep. Can’t reach your Mac." : "connected")
-                                .font(.subheadline).foregroundStyle(.secondary)
+                            if let line = store.backend is MockBackend ? "Sample data"
+                                : !store.connected ? "Asleep. Can’t reach your Mac." : nil {
+                                Text(line).font(.subheadline).foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -67,7 +68,7 @@ struct DetailsView: View {
                 Section {
                     NavigationLink { StatusScreen() } label: { Label("Status", systemImage: "gauge.with.dots.needle.33percent") }
                     NavigationLink { DevicesScreen() } label: { Label("Devices", systemImage: "iphone") }
-                    NavigationLink { GlassesScreen() } label: { Label("Glasses", systemImage: "eyeglasses") }
+                    NavigationLink { GlassesScreen() } label: { Label { Text("Glasses") } icon: { Image(systemName: "eyeglasses").imageScale(.small) } }
                 }
 
                 Section {
@@ -315,10 +316,10 @@ struct DetailsView: View {
                                 }
                             }
                             Spacer()
-                            Pill(text: closed ? "Closed" : "Open", tint: closed ? .secondary : .orange)
                         }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityValue(closed ? "Closed" : "Open")
                 }
             }
         }
