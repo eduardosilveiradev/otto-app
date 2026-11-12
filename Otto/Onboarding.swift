@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UserNotifications
 import VisionKit
@@ -93,8 +94,13 @@ private struct Page<Hero: View, Content: View, Footer: View>: View {
                     }
                     if Content.self != EmptyView.self { content.padding(.top, 24) }
                     Spacer(minLength: 32)
-                    VStack(spacing: 6) { footer }
-                        .padding(.bottom, 8)
+                    // Room for one link under the button on every step, so the button doesn't jump between them:
+                    // a hidden button and link set the height, at whatever size the text is.
+                    ZStack(alignment: .top) {
+                        VStack(spacing: 6) { Primary(label: " ") {}; Secondary(label: " ") {} }.hidden()
+                        VStack(spacing: 6) { footer }
+                    }
+                    .padding(.bottom, 8)
                 }
                 .frame(maxWidth: .infinity, minHeight: g.size.height)
             }
@@ -191,6 +197,14 @@ private struct ConnectPage: View {
 
     private var canScan: Bool { DataScannerViewController.isSupported }
 
+    /// Right under what it's about (the fields, or the command and Paste), not under a link or down by the
+    /// buttons. Its line is always held, so the page doesn't re-centre and jump when an error arrives.
+    private var problemLine: some View {
+        Text(problem ?? " ").font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
+            .opacity(problem == nil ? 0 : 1)
+            .accessibilityHidden(problem == nil)
+    }
+
     var body: some View {
         Page(title: "Connect to your Mac",
              line: manual ? "The server address and the app token from your Mac."
@@ -211,6 +225,8 @@ private struct ConnectPage: View {
                     }
                     .textFieldStyle(.plain)
                     .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 14, style: .continuous))
+                    problemLine
+                    Secondary(label: "Scan a code instead") { withAnimation { manual = false; problem = nil } }
                 } else {
                     // The whole command, as it runs: a shell line continuation keeps "--server" in one piece,
                     // and the address is an example to swap for the Mac's own.
@@ -221,36 +237,34 @@ private struct ConnectPage: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).padding(.vertical, 10)
                         .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
+                    // The same pairing link, pasted: with the command it pairs, not down among the buttons.
+                    if canPaste {
+                        PasteButton(payloadType: String.self) { strings in
+                            guard let s = strings.first else { return }
+                            Task { @MainActor in await take(s) }
+                        }
+                        .buttonBorderShape(.capsule)
+                        .labelStyle(.titleAndIcon)
+                        .tint(.orange)   // the page's one accent
+                    }
+                    problemLine
+                    // The other way in, beside the one it replaces; with no camera it's the big button instead.
+                    if canScan { Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } } }
                 }
-                // Right under what it's about, not down by the buttons. Its line is always held, so the
-                // page doesn't re-centre and jump when an error arrives.
-                Text(problem ?? " ").font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
-                    .opacity(problem == nil ? 0 : 1)
-                    .accessibilityHidden(problem == nil)
             }
         } footer: {
             if manual {
                 Primary(label: "Connect", busy: checking) { Task { await connect(server, token) } }
-                Secondary(label: "Scan a code instead") { withAnimation { manual = false; problem = nil } }
+            } else if canScan {
+                Primary(label: "Scan code", busy: checking) {
+                    // Denied, the scanner opens black with no word why: say so here instead.
+                    if [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .video)) {
+                        problem = "Otto can’t use the camera. Turn it on in Settings, or type it in."
+                    } else { scanning = true }
+                }
             } else {
                 // No camera scanner: typing it in is the main way, so it gets the big button.
-                if canScan {
-                    Primary(label: "Scan code", busy: checking) { scanning = true }
-                } else {
-                    Primary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
-                }
-                if canPaste {
-                    PasteButton(payloadType: String.self) { strings in
-                        guard let s = strings.first else { return }
-                        Task { @MainActor in await take(s) }
-                    }
-                    .buttonBorderShape(.capsule)
-                    .labelStyle(.titleAndIcon)
-                    .tint(.orange)   // the page's one accent
-                }
-                if canScan {
-                    Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
-                }
+                Primary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
             }
             Secondary(label: "Look around with sample data") { next() }
         }
@@ -269,6 +283,10 @@ private struct ConnectPage: View {
                 Task { await take(code) }
             }
             .ignoresSafeArea()
+            .overlay(alignment: .topTrailing) {
+                Button("Cancel", systemImage: "xmark") { scanning = false }
+                    .labelStyle(.iconOnly).buttonStyle(.glass).controlSize(.large).padding()
+            }
             .presentationDetents([.large])
         }
     }
@@ -356,7 +374,7 @@ private struct TalkPage: View {
     var body: some View {
         Page(title: "Talk to me anywhere",
              line: "You don’t have to open the app.") {
-            EmptyView()
+            Glyph(name: "person.wave.2.fill")
         } content: {
             VStack(spacing: 0) {
                 row("mic.fill", "\u{201C}Hey Siri, ask Otto\u{2026}\u{201D}", "I answer out loud.")

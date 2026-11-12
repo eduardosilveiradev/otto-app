@@ -725,10 +725,11 @@ struct PipDetailSheet: View {
                     section("Schedules") {
                         ForEach(Array(p.schedules.enumerated()), id: \.element.id) { i, s in
                             line(divided: i > 0) {
-                                Text(s.name)
-                                Spacer(minLength: 8)
-                                // From the cron, in the phone's clock style; the stored label is how it was set.
-                                Text(humanCron(s.schedule) ?? s.label).foregroundStyle(.secondary).lineLimit(1)
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(s.name)
+                                    // From the cron, in the phone's clock style; the stored label is how it was set.
+                                    Text(humanCron(s.schedule) ?? s.label).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -762,7 +763,7 @@ struct PipDetailSheet: View {
                 .sensoryFeedback(.impact(weight: .light), trigger: p.paused)
 
                 PillButton(title: "Delete pip", destructive: true) { deleting = true }
-                    .padding(.horizontal, 16).padding(.top, 40)
+                    // On the button itself, so the popover's arrow points at it and not at the gap above.
                     .confirmationDialog("Delete \(p.name)?", isPresented: $deleting, titleVisibility: .visible) {
                         Button("Delete pip", role: .destructive) {
                             Task {
@@ -773,6 +774,7 @@ struct PipDetailSheet: View {
                     } message: {
                         Text("\(p.name) leaves your conversations and any groups it’s in.")
                     }
+                    .padding(.horizontal, 16).padding(.top, 40)
             }
             .padding(.bottom, 32)
         }
@@ -943,12 +945,13 @@ struct GroupDetailSheet: View {
                 }
 
                 PillButton(title: "Delete group", destructive: true) { deleting = true }
-                    .padding(.horizontal, 16).padding(.top, 40)
+                    // On the button itself, so the popover's arrow points at it and not at the gap above.
                     .confirmationDialog("Delete \(row.name)?", isPresented: $deleting, titleVisibility: .visible) {
                         Button("Delete group", role: .destructive) { run { await pips.deleteGroup(id) } }
                     } message: {
                         Text("\(row.name) leaves your conversations. Its pips stay.")
                     }
+                    .padding(.horizontal, 16).padding(.top, 40)
             }
             .padding(.bottom, 32)
             .disabled(busy)

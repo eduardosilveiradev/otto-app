@@ -145,7 +145,7 @@ private struct SearchHit: View {
     private var mine: Bool { message.from == .me || message.from == .terminal }
 
     private var text: AttributedString {
-        let shown = ThreadSearch.excerpt(message.text, query)
+        let shown = ThreadSearch.excerpt(message.draft?.body ?? message.text, query)
         var a = AttributedString(shown)
         for r in ThreadSearch.ranges(of: query, in: shown) {
             guard let lit = Range(r, in: a) else { continue }
@@ -177,7 +177,7 @@ private struct SearchHit: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(who), \(message.date.formatted(date: .long, time: .shortened)): \(message.text)")
+        .accessibilityLabel("\(who), \(message.date.formatted(date: .long, time: .shortened)): \(message.draft?.body ?? message.text)")
         .accessibilityHint("Shows it in the conversation")
     }
 }

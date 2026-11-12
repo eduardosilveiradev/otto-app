@@ -84,7 +84,10 @@ shot() {
     sleep "$wait"
     [[ " $* " == *" -pipsFixture "* ]] && sleep 1.5   # the list, then Otto's thread pushed over it
     local f="$screen-$state-$theme.png"
-    xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1 && printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$screen" "$state" "$theme" "$note" >> "$TSV.new"
+    xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1
+    # A launch that hadn't drawn yet is a black frame of about 72 KB (the sparest real screen is 100): wait as long again and retake it.
+    [ "$(stat -f%z "$OUT/$f" 2>/dev/null || echo 0)" -lt 85000 ] && { sleep "$wait"; xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1; }
+    [ -f "$OUT/$f" ] && printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$screen" "$state" "$theme" "$note" >> "$TSV.new"
     echo "$f"
   done
 }
@@ -153,6 +156,10 @@ shot sheet change-approval 6 "Approve a change to Otto's core" $O -demoThread -a
 shot sheet boarding-pass 11 "Flight-day boarding pass" $O -demoThread -mockGate -openGate
 shot sheet live-call 8 "A call Otto is placing, live transcript" $O -demoThread -mockCalls -openCall
 shot media viewer 6 "Full-screen photo viewer" $O -mediaThread -media
+shot study bubble 6 "Study set Otto sent, in the thread" $O -studyThread
+shot study cards 7 "Study set open on its cards" $O -studyThread -studyOpen cards
+shot study flipped 7 "A card turned over: Again or Knew it" $O -studyThread -studyOpen flipped
+shot study quiz 7 "Quiz with a wrong answer picked" $O -studyThread -studyOpen quiz
 shot walkie open 9 "Walkie-talkie" $O -demoThread -walkie
 shot call web-call-failed 25 "Web call that couldn't connect" $O -demoThread -call -vapiPublicKey demo -vapiAssistantId demo -vapiHost 127.0.0.1
 

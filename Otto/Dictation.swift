@@ -225,11 +225,15 @@ struct DictationListeningView: View {
             Text("Go back to where you were typing and keep talking. Tap the keyboard’s mic to finish.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 40)
             Spacer()
-            Button("Stop") {
+            Button {
                 DictationBridge.write(.init(action: .stop, id: DictationBridge.readRequest()?.id ?? ""))
                 DictationBridge.post(DictationBridge.toApp)
+            } label: {
+                // On the label, where the prominent style can't repaint it: white on this orange is ~2:1.
+                Text("Stop").foregroundStyle(Color(white: 0.12))
             }
-            .buttonStyle(.borderedProminent).tint(.orange).padding(.bottom, 30)
+            .buttonStyle(.borderedProminent).tint(.orange)
+            .padding(.bottom, 30)
         }
         .frame(maxWidth: .infinity)
     }

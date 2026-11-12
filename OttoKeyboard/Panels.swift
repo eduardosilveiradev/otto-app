@@ -162,7 +162,7 @@ struct TopBar: View {
             Spacer()
             if !working {
                 Button { m.toggleDictation() } label: {
-                    Text("Done").font(Font(s.uiFont(15, weight: .semibold))).foregroundStyle(.white)
+                    Text("Done").font(Font(s.uiFont(15, weight: .semibold))).foregroundStyle(s.onAccent.color)
                         .padding(.horizontal, 16).frame(height: 32).background(Capsule().fill(s.accent.color))
                 }
             }
@@ -213,6 +213,7 @@ struct TopBar: View {
                     Button { m.ask(m.prompt) } label: {
                         Image(systemName: "arrow.up.circle.fill").font(.system(size: 30)).foregroundStyle(s.accent.color)
                     }
+                    .accessibilityLabel("Ask Otto")
                 }
                 Button { m.otto = .closed; m.prompt = "" } label: {
                     // 44 wide but row-high: a taller frame pushed the chip row up over it and it ate the taps.
@@ -337,6 +338,7 @@ struct EmojiPanel: View {
                     }
                 }
                 Button { m.deleteBackward() } label: { Image(systemName: "delete.left").frame(width: 46, height: 36) }
+                    .accessibilityLabel("Delete")
             }
             .padding(.bottom, 4)
         }
@@ -364,7 +366,7 @@ struct ClipboardPanel: View {
                 Button { m.copyField() } label: { Label("Copy field", systemImage: "doc.on.doc").font(.system(size: 14, weight: .medium)) }
                     .padding(.horizontal, 12).frame(height: 30).background(Capsule().fill(s.specialKey.color))
                 Button { m.pasteCurrent() } label: { Label("Paste", systemImage: "doc.on.clipboard").font(.system(size: 14, weight: .medium)) }
-                    .padding(.horizontal, 12).frame(height: 30).background(Capsule().fill(s.accent.color)).foregroundStyle(.white)
+                    .padding(.horizontal, 12).frame(height: 30).background(Capsule().fill(s.accent.color)).foregroundStyle(s.onAccent.color)
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
             if m.clips.isEmpty {
@@ -423,7 +425,7 @@ struct SettingsPanel: View {
                                     Text(l.name).font(Font(s.uiFont(14, weight: .medium)))
                                         .padding(.horizontal, 12).frame(height: 32)
                                         .background(Capsule().fill(on ? s.accent.color : s.key.color))
-                                        .foregroundStyle(on ? .white : s.text.color)
+                                        .foregroundStyle(on ? s.onAccent.color : s.text.color)
                                 }
                             }
                         }

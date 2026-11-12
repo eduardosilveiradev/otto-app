@@ -31,9 +31,9 @@ private struct LoopsList: View {
             if !p.close.isEmpty || !p.propose.isEmpty || !p.avoidance.isEmpty {
                 Section {
                     ForEach(p.close, id: \.id) { c in
-                        plan("checkmark.circle", text[c.id] ?? c.id, "closes it: \(c.reason)")
+                        plan("checkmark.circle", text[c.id] ?? c.id, "Will close it · \(c.reason)")
                     }
-                    ForEach(p.propose, id: \.id) { c in plan("questionmark.circle", c.text, "asks you: \(c.reason)") }
+                    ForEach(p.propose, id: \.id) { c in plan("questionmark.circle", c.text, "Will ask you · \(c.reason)") }
                     ForEach(p.avoidance, id: \.id) { c in plan("arrow.uturn.right.circle", c.text, "pushed back \(c.deferrals)×") }
                 } header: { Text("Overnight tidy-up") } footer: {
                     Text("Runs at \(Self.fiveAM). Closes what’s clearly done, asks you about the rest.")
@@ -64,11 +64,19 @@ private struct LoopsList: View {
             .toolbar { Button(closed ? "Reopen" : "Done") { flip(r.id, done: !closed) } }
         } label: {
             HStack(spacing: 12) {
-                RowIcon(symbol: closed ? "checkmark" : r.text.contains("€") ? "eurosign" : "arrow.turn.up.left")
+                Image(systemName: closed ? "checkmark.circle.fill" : "circle")   // Reminders' mark, bare
+                    .font(.title3.weight(.light)).foregroundStyle(.secondary).frame(width: 26)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(r.text).lineLimit(3).strikethrough(closed).foregroundStyle(closed ? .secondary : .primary)
                     let m = meta(r)
-                    if !m.isEmpty { Text(m).font(.footnote).foregroundStyle(late(r) ? .red : .secondary).lineLimit(2) }
+                    // Only the date goes red when it's passed, as in Reminders; the rest stays secondary.
+                    let due = late(r) ? r.due.map { "was due \(day($0))" } : nil
+                    if let due, m.hasPrefix(due) {
+                        Text("\(Text(due).foregroundStyle(.red))\(Text(String(m.dropFirst(due.count))).foregroundStyle(.secondary))")
+                            .font(.footnote).lineLimit(2)
+                    } else if !m.isEmpty {
+                        Text(m).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+                    }
                 }
             }
         }
@@ -105,7 +113,6 @@ private struct LoopsList: View {
                 Text(sub).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .padding(.vertical, 4)
     }
 
     private func flip(_ id: String, done: Bool) {
@@ -247,7 +254,7 @@ struct TripsScreen: View {
             let upcoming = t.trips.filter { $0.end >= today }.sorted { $0.start < $1.start }
             let past = t.trips.filter { $0.end < today }.sorted { $0.start > $1.start }
             List {
-                if upcoming.isEmpty && !past.isEmpty { Text("Nothing coming up.").foregroundStyle(.secondary) }
+                if upcoming.isEmpty && !past.isEmpty { Section("Coming up") { Text("No trips planned.").foregroundStyle(.secondary) } }
                 ForEach(upcoming) { trip($0, t) }
                 if !past.isEmpty {
                     Section {
@@ -341,7 +348,7 @@ struct PackagesList: View {
                     Text(arrival(pkg)).font(.subheadline.weight(.medium))
                         .foregroundStyle(pkg.status == "exception" ? .red : .primary)
                     Spacer()
-                    Text(ago(pkg.updatedAt)).font(.footnote).foregroundStyle(.secondary)
+                    Text("Updated \(ago(pkg.updatedAt))").font(.footnote).foregroundStyle(.secondary)
                 }
             }
             .padding(.vertical, 4)
@@ -400,6 +407,10 @@ struct PackagesList: View {
         }
         if pkg.status == "exception" && pkg.eta == nil { return "Delivery problem" }
         guard let eta = pkg.eta else { return pkg.status == "ordered" ? "Not shipped yet" : "No delivery date yet" }
+        // Still on the way after its last possible day: say it was due, as Loops does, not that it arrives.
+        if (pkg.etaLatest ?? eta).prefix(10) < Date.now.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day()) {
+            return "Was due \(day(eta))"
+        }
         if let late = pkg.etaLatest, late != eta, let a = dashDate(eta), let b = dashDate(late), a < b {
             return "Arrives " + (a..<b).formatted(.interval.day().month(.abbreviated))
         }

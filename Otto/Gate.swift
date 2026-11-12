@@ -227,8 +227,11 @@ struct GateSheet: View {
                         .frame(maxWidth: 340, alignment: .leading)
                     }
                     if let at = watch.fetchedAt {
-                        Text("Checked \(at, format: .relative(presentation: .named))")
-                            .font(.caption).foregroundStyle(.tertiary)
+                        Group {
+                            if Date.now.timeIntervalSince(at) < 60 { Text("Checked just now") }
+                            else { Text("Checked \(at, format: .relative(presentation: .named))") }
+                        }
+                        .font(.caption).foregroundStyle(.tertiary)
                     }
                 }
             }

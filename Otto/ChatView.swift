@@ -352,7 +352,7 @@ struct ChatView: View {
                     // Liquid Glass over the thread, as Messages does, with a wash in both modes so the
                     // thread's bubbles and the header's face don't show through as smudges.
                     Color.clear.glassEffect(.regular, in: .rect)
-                        .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor.black.withAlphaComponent(0.45) : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
+                        .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor.black.withAlphaComponent(0.6) : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
                         .ignoresSafeArea()
                 }
         }
@@ -1303,7 +1303,7 @@ private struct Row: View {
     }
     /// What goes in the bubble: a draft card, a voice note, or the text.
     @ViewBuilder private var content: some View {
-        if let d = Self.draft(message) {
+        if let d = message.draft {
             VStack(alignment: .leading, spacing: 8) {
                 Text(d.head).font(size: 15, weight: .semibold, relativeTo: .subheadline)
                 Text(Self.linked(d.body))
@@ -1329,7 +1329,7 @@ private struct Row: View {
     }
     /// The first link worth a card: not for photos, voice notes, audio or drafts.
     static func previewURL(_ m: Message) -> URL? {
-        if m.isPhoto || m.isVoice || m.audio != nil || draft(m) != nil { return nil }
+        if m.isPhoto || m.isVoice || m.audio != nil || m.draft != nil { return nil }
         return linked(m.text).runs.lazy.compactMap(\.link).first
     }
     /// A message that is nothing but the link: the bubble gives way to the card once metadata lands (Messages behaviour).
@@ -1344,16 +1344,6 @@ private struct Row: View {
         return (!attached || !message.text.isEmpty || message.isVoice || message.audio != nil) && !hidesText && message.groupLink == nil
     }
     private var hidesText: Bool { preview != nil && Self.previewURL(message).map { Self.isOnlyLink(message, $0) } == true }
-
-    /// Otto's "draft:" messages: the first line is the heading, the rest the words that would go out.
-    static func draft(_ m: Message) -> (head: String, body: String)? {
-        guard m.from == .otto, let nl = m.text.firstIndex(of: "\n") else { return nil }
-        let head = m.text[..<nl].trimmingCharacters(in: .whitespaces)
-        guard head.lowercased().hasPrefix("draft"), head.hasSuffix(":") else { return nil }
-        var body = m.text[m.text.index(after: nl)...].trimmingCharacters(in: .whitespacesAndNewlines)
-        if body.count > 1, body.first == "\"", body.last == "\"" { body = String(body.dropFirst().dropLast()) }
-        return (head, body)
-    }
 
     static let tapbacks = ["❤️", "👍", "👎", "😂", "‼️", "❓"]
     /// What VoiceOver calls each one (Messages' names).
@@ -1380,7 +1370,7 @@ private struct Row: View {
 
     /// What a message is, for a quote, the reply bar and VoiceOver: its words, or a word for what it holds.
     static func summary(_ m: Message) -> String {
-        if !m.text.isEmpty { return draft(m)?.body ?? m.text }
+        if !m.text.isEmpty { return m.draft?.body ?? m.text }
         if m.isVoice || m.audio != nil { return "Voice message" }
         if m.isPhoto { return "Photo" }
         if let c = m.card { return c.title ?? "Card" }
@@ -1411,8 +1401,13 @@ private struct Row: View {
         if let c = b.copy { UIPasteboard.general.string = c; UINotificationFeedbackGenerator().notificationOccurred(.success) }
         else if let u = b.url.flatMap(URL.init(string:)) { openURL(u) } else { onTap(b) }
     }
+    /// Which pass this is, when the message carries more than one: "Add Pass 2 to Apple Wallet".
+    private func passNumber(_ f: RemoteFile) -> Int? {
+        let passes = (message.files ?? []).filter { $0.name.lowercased().hasSuffix(".pkpass") }
+        return passes.count > 1 ? passes.firstIndex(of: f).map { $0 + 1 } : nil
+    }
     /// A draft copies as the words that would go out, without its "draft:" line.
-    private func copyText() { UIPasteboard.general.string = Self.draft(message)?.body ?? message.text }
+    private func copyText() { UIPasteboard.general.string = message.draft?.body ?? message.text }
     private var firstLink: URL? { Self.linked(message.text).runs.lazy.compactMap(\.link).first }
     /// Who put the tapback there: on yours it's Otto's, on Otto's it's yours.
     private var reactor: String { mine ? thread.name : "you" }
@@ -1422,7 +1417,7 @@ private struct Row: View {
     private var spoken: String {
         let who = mine ? "You" : name(of: message)
         if message.isVoice || message.audio != nil { return "\(who): voice message. \(message.text)" }
-        if let d = Self.draft(message) { return "\(who): \(d.head) \(d.body)" }
+        if let d = message.draft { return "\(who): \(d.head) \(d.body)" }
         return "\(who): \(message.text)"
     }
     /// The menu's other choices, for VoiceOver, which can't long-press: links are inside the
@@ -1436,7 +1431,7 @@ private struct Row: View {
     /// A long message lifts as its first lines: the whole of it filled the screen and ran under the menu.
     // ponytail: a length/line-count guess, not a measurement; at the largest text sizes a shorter bubble can still fill the screen.
     private var longPreview: Bool {
-        Self.draft(message) == nil && (message.text.count > 500 || message.text.filter { $0 == "\n" }.count > 12)
+        message.draft == nil && (message.text.count > 500 || message.text.filter { $0 == "\n" }.count > 12)
     }
 
     @ViewBuilder private var bubbleMenu: some View {
@@ -1502,7 +1497,7 @@ private struct Row: View {
                     .modifier(Reactable(message: message, badge: !textShown, reactor: reactor, react: react, reply: reply, copy: { UIPasteboard.general.image = img }))
             }
             ForEach(Array((message.files ?? []).enumerated()), id: \.element.id) { i, f in
-                Group { if StudySet.isStudy(f) { StudyBubble(file: f) } else { RemoteFileView(file: f) } }
+                Group { if StudySet.isStudy(f) { StudyBubble(file: f) } else { RemoteFileView(file: f, passNumber: passNumber(f)) } }
                     .modifier(Reactable(message: message, badge: !textShown && Thumbs.image(for: message) == nil && i == 0, reactor: reactor, react: react, reply: reply,
                                         copy: f.kind == "image" ? { if let d = MediaCache.data[f.id], let img = UIImage(data: d) { UIPasteboard.general.image = img } } : nil))
             }
@@ -1557,6 +1552,14 @@ private struct Row: View {
                     Button("Less of this", role: .destructive) { onTap(ActionButton(label: "Less of this", data: Self.lessOfThis(message))) }
                     Button("OK", role: .cancel) {}
                 } message: { Text($0) }
+                // Messages' mark for a send that didn't make it, beside the bubble; the line under it has the retry.
+                .overlay(alignment: .trailing) {
+                    if mine, message.failed == true {
+                        Image(systemName: "exclamationmark.circle.fill").font(.system(size: 20)).foregroundStyle(.red)
+                            .offset(x: 30).accessibilityHidden(true)
+                    }
+                }
+                .padding(.trailing, mine && message.failed == true ? 30 : 0)
             }
             if let g = message.groupLink { GroupLinkBubble(group: g) { store.pips.open(g.id) } }
             if !mine, let card = message.card, !card.shown.isEmpty {
@@ -1777,6 +1780,8 @@ private struct QuoteLabel: LabelStyle {
 private struct RemoteFileView: View {
     @Environment(OttoStore.self) private var store
     let file: RemoteFile
+    /// Its number among the message's passes, when there's more than one.
+    var passNumber: Int? = nil
     @State private var data: Data?
     @State private var thumb: UIImage?
     /// The server says it's gone (a 404).
@@ -1833,7 +1838,7 @@ private struct RemoteFileView: View {
                         if opening { ProgressView().controlSize(.small) }
                         else { Image(systemName: missing ? "exclamationmark.triangle" : failed ? "arrow.clockwise" : isPass ? "wallet.pass" : "doc") }
                         if failed { Text.couldntLoad.lineLimit(1) }
-                        else { Text(missing ? "\(file.name) — no longer available" : isPass ? "Add to Apple Wallet" : file.name).lineLimit(1) }
+                        else { Text(missing ? "\(file.name) — no longer available" : isPass ? (passNumber.map { "Add Pass \($0) to Apple Wallet" } ?? "Add to Apple Wallet") : file.name).lineLimit(1) }
                     }
                     .font(size: 15, relativeTo: .subheadline)
                     .padding(.horizontal, 12).padding(.vertical, 9)
@@ -2355,6 +2360,7 @@ private struct BrowserFullScreen: View {
                     }
                     .aspectRatio(shown.shot.map { $0.size.width / max($0.size.height, 1) } ?? 16 / 10, contentMode: .fit)
                     .clipShape(.rect(cornerRadius: 10, style: .continuous))
+                    .padding(.horizontal, 16)
                     .accessibilityHidden(true)
                     Text(shown.tile.caption)
                         .font(size: 15, relativeTo: .subheadline)
@@ -2880,6 +2886,18 @@ private struct AddPassSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: PKAddPassesViewController, context: Context) {}
 }
 
+
+extension Message {
+    /// Otto's "draft:" messages: the first line is the heading, the rest the words that would go out.
+    var draft: (head: String, body: String)? {
+        guard from == .otto, let nl = text.firstIndex(of: "\n") else { return nil }
+        let head = text[..<nl].trimmingCharacters(in: .whitespaces)
+        guard head.lowercased().hasPrefix("draft"), head.hasSuffix(":") else { return nil }
+        var body = text[text.index(after: nl)...].trimmingCharacters(in: .whitespacesAndNewlines)
+        if body.count > 1, body.first == "\"", body.last == "\"" { body = String(body.dropFirst().dropLast()) }
+        return (head, body)
+    }
+}
 
 extension ShapeStyle where Self == Color {
     /// Yours: the slate grey of the user's side in the reference (sampled #60656B in dark mode).

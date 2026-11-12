@@ -12,6 +12,23 @@ struct StudySet: Codable {
     let quiz: [Question]
 
     static func isStudy(_ f: RemoteFile) -> Bool { f.name.hasSuffix(".study.json") }
+
+    #if DEBUG
+    /// For screenshots: `-studyThread` serves it, `-studyOpen cards|flipped|quiz` opens it on that pane.
+    static var debugOpen: String? {
+        let a = ProcessInfo.processInfo.arguments
+        return a.firstIndex(of: "-studyOpen").map { $0 + 1 < a.count ? a[$0 + 1] : "cards" }
+    }
+    static let demo = StudySet(title: "Photosynthesis", source: "Biology, p. 112", cards: [
+        Card(front: "Where does photosynthesis happen?", back: "In the chloroplasts, mostly in the leaf’s mesophyll cells."),
+        Card(front: "What does the light reaction make?", back: "ATP and NADPH, and oxygen as a by-product."),
+        Card(front: "What is the Calvin cycle’s input?", back: "Carbon dioxide, fixed by RuBisCO into sugar."),
+    ], quiz: [
+        Question(q: "Which gas do plants release during photosynthesis?", options: ["Carbon dioxide", "Oxygen", "Nitrogen"], answer: 1,
+                 why: "Splitting water in the light reaction frees oxygen."),
+        Question(q: "Where is chlorophyll found?", options: ["Mitochondria", "Nucleus", "Chloroplasts"], answer: 2, why: nil),
+    ])
+    #endif
 }
 
 /// The bubble for a study set: what it is and how much is in it, like an iMessage app message.
@@ -54,6 +71,9 @@ struct StudyBubble: View {
                 guard let d = try await store.backend.file(file.id) else { missing = true; return }
                 set = try? JSONDecoder().decode(StudySet.self, from: d)
                 failed = set == nil   // a file it can't read isn't gone either
+                #if DEBUG
+                open = set != nil && StudySet.debugOpen != nil
+                #endif
             } catch { failed = !Task.isCancelled }
         }
         .onChange(of: store.connected) { if store.connected && failed { tries += 1 } }
@@ -85,6 +105,12 @@ struct StudyView: View {
                 else { QuizPane(quiz: set.quiz, run: $quiz) }
             }
             .navigationTitle(set.title).navigationBarTitleDisplayMode(.inline)
+            #if DEBUG
+            .onAppear {
+                if StudySet.debugOpen == "flipped" { cards.flipped = true }
+                if StudySet.debugOpen == "quiz" { mode = 1; quiz.answered[0] = 0 }
+            }
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -179,6 +205,9 @@ struct QuizRun {
 private struct QuizPane: View {
     let quiz: [StudySet.Question]
     @Binding var run: QuizRun
+    @Environment(\.colorScheme) private var scheme
+    /// As Pill and BigButton: the colour as is in dark mode, 40% toward black in light.
+    private func ink(_ c: Color) -> Color { scheme == .dark ? c : c.mix(with: .black, by: 0.4) }
 
     var body: some View {
         ScrollView {
@@ -189,10 +218,17 @@ private struct QuizPane: View {
                     Text(q.q).font(size: 22, weight: .semibold, relativeTo: .title2)
                     ForEach(q.options.indices, id: \.self) { o in
                         Button { if picked == nil { withAnimation(.snappy) { run.answered[run.at] = o } } } label: {
-                            Text(q.options[o]).frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 16).padding(.vertical, 13)
-                                .background(fill(o, q, picked), in: .rect(cornerRadius: 16, style: .continuous))
-                        }.tint(.primary)
+                            HStack {
+                                Text(q.options[o])
+                                Spacer(minLength: 8)
+                                if picked != nil, o == q.answer { Image(systemName: "checkmark.circle.fill").foregroundStyle(ink(.green)) }
+                                else if o == picked { Image(systemName: "xmark.circle.fill").foregroundStyle(ink(.red)) }
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 13)
+                            .background(fill(o, q, picked), in: .rect(cornerRadius: 16, style: .continuous))
+                        }
+                        .tint(.primary)
+                        .accessibilityValue(picked == nil ? "" : o == q.answer ? "Correct" : o == picked ? "Wrong" : "")
                     }
                     if let picked {
                         if let why = q.why { Text(why).font(.callout).foregroundStyle(.secondary) }
@@ -218,9 +254,20 @@ private struct QuizPane: View {
 }
 
 private func bigButton(_ title: String, _ color: Color, _ action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-        Text(title).font(.headline).frame(maxWidth: .infinity).frame(height: 50)
-            .background(color.opacity(0.18), in: .rect(cornerRadius: 16, style: .continuous))
-            .foregroundStyle(color)
+    BigButton(title: title, color: color, action: action)
+}
+
+private struct BigButton: View {
+    let title: String
+    let color: Color
+    let action: () -> Void
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(.headline).frame(maxWidth: .infinity).frame(height: 50)
+                .background(color.opacity(0.18), in: .rect(cornerRadius: 16, style: .continuous))
+                // As Pill: the colour as is in dark mode, 40% toward black in light, to read on its pale fill.
+                .foregroundStyle(scheme == .dark ? color : color.mix(with: .black, by: 0.4))
+        }
     }
 }

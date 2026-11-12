@@ -355,7 +355,21 @@ final class KeyView: UIView {
             }
         case .page(let p): label.text = p == .letters ? "ABC" : p == .numbers ? "123" : "#+="; label.font = style.uiFont(17)
         }
-        let textColor = returnAccent && def.kind == .ret ? UIColor.white : style.text.ui
+        // ponytail: untested with VoiceOver on a device; activation relies on the board's own touch handling.
+        isAccessibilityElement = true
+        accessibilityTraits = shift == .locked && def.kind == .shift ? [.keyboardKey, .selected] : .keyboardKey
+        accessibilityLabel = switch def.kind {
+        case .char: label.text
+        case .shift: shift == .locked ? "Caps Lock" : "Shift"
+        case .delete: "Delete"
+        case .globe: "Next keyboard"
+        case .emoji: "Emoji"
+        case .otto: "Ask Otto"
+        case .space: spaceTitle
+        case .ret: returnTitle
+        case .page(let p): p == .letters ? "Letters" : p == .numbers ? "Numbers" : "More symbols"
+        }
+        let textColor = returnAccent && def.kind == .ret ? style.onAccent.ui : style.text.ui
         label.textColor = textColor
         icon.tintColor = shift == .locked && def.kind == .shift ? style.accent.ui : textColor
         paint()
@@ -415,7 +429,7 @@ final class KeyPopup: UIView {
         path.close()
         let shape = CAShapeLayer()
         shape.path = path.cgPath
-        shape.fillColor = (style.key.a < 1 ? UIColor(white: 0.3, alpha: 0.97) : style.key.ui).cgColor
+        shape.fillColor = (style.key.a < 1 ? style.balloon : style.key.ui).cgColor
         shape.shadowColor = UIColor.black.cgColor
         shape.shadowOpacity = 0.22
         shape.shadowRadius = 5
@@ -456,7 +470,7 @@ final class KeyPopup: UIView {
     private func decorate() {
         isUserInteractionEnabled = false
         // A see-through key would show the board through its balloon.
-        backgroundColor = style.key.a < 1 ? UIColor(white: 0.3, alpha: 0.95) : style.key.ui
+        backgroundColor = style.key.a < 1 ? style.balloon : style.key.ui
         layer.cornerRadius = style.corner + 4
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOpacity = 0.28
@@ -469,7 +483,7 @@ final class KeyPopup: UIView {
         let i = cells.firstIndex { x < $0.frame.maxX } ?? cells.count - 1
         for (j, c) in cells.enumerated() {
             c.backgroundColor = j == i ? style.accent.ui : .clear
-            c.textColor = j == i ? .white : style.text.ui
+            c.textColor = j == i ? style.onAccent.ui : style.text.ui
         }
         selected = cells[i].text
     }

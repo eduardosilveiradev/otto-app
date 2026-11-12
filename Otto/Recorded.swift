@@ -50,7 +50,8 @@ struct RecordedChip: View {
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(.blue)
                     .frame(width: 30, height: 30).background(Color.blue.opacity(0.12), in: .circle)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(card.title).font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(2)
+                    Text(card.title.replacingOccurrences(of: "-", with: "\u{2011}"))   // "E-MOTION" breaks at a space, not its hyphen
+                        .font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(2)
                     Text(detailLine ?? card.heading)
                         .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
                 }
