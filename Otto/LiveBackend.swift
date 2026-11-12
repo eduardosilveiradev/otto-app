@@ -23,6 +23,8 @@ import Foundation
 ///                  {"type":"echo","id","text","ts","shared"?}   yours, from the share sheet or the dashboard
 ///                  {"type":"todos","items":[{"text","status":"pending"|"in_progress"|"completed"}]}   Otto's to-do list while it works; [] when done
 ///                  {"type":"open_todos","items":[{"text","status":"pending"|"in_progress"}]}   its open to-dos, idle too; on connect and on change
+///                  {"type":"browser","image":"data:image/jpeg;base64,…"|null,"caption":"example.com · clicks Generate","url","ts":<epoch ms>}
+///                   what Otto is doing in Chrome, whole each time (≤ 1/s; on connect only while live); {"type":"browser","done":true} ends it
 ///                  a "message" (and its history row) may carry "quiet":true: a desktop was focused, so no banner
 ///                  {"type":"notify","id":"<newest held id>","text":"...","count":N}   focus ended: one banner for what was held, no bubble
 ///                  {"type":"reminders","items":[{"id","at":"<ISO>","text"}]}   every upcoming reminder, on connect and on change:
@@ -52,6 +54,7 @@ final class LiveBackend: OttoBackend {
     let statuses: AsyncStream<String>
     let todoLists: AsyncStream<[TodoItem]>
     let openTodoLists: AsyncStream<[TodoItem]>
+    let browserTiles: AsyncStream<BrowserTile?>
     let desktopSync: DesktopSync?
     let reads: AsyncStream<[String]>
     let typing: AsyncStream<Bool>
@@ -68,6 +71,7 @@ final class LiveBackend: OttoBackend {
     private let status: AsyncStream<String>.Continuation
     private let todosOut: AsyncStream<[TodoItem]>.Continuation
     private let openTodosOut: AsyncStream<[TodoItem]>.Continuation
+    private let browserOut: AsyncStream<BrowserTile?>.Continuation
     private let readIDs: AsyncStream<[String]>.Continuation
     private let typingOn: AsyncStream<Bool>.Continuation
     private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
@@ -109,6 +113,7 @@ final class LiveBackend: OttoBackend {
         (statuses, status) = AsyncStream.makeStream()
         (todoLists, todosOut) = AsyncStream.makeStream()
         (openTodoLists, openTodosOut) = AsyncStream.makeStream()
+        (browserTiles, browserOut) = AsyncStream.makeStream()
         (reads, readIDs) = AsyncStream.makeStream()
         (typing, typingOn) = AsyncStream.makeStream()
         (approvalUpdates, approvalOut) = AsyncStream.makeStream()
@@ -315,6 +320,8 @@ final class LiveBackend: OttoBackend {
             do {
                 try await ping(task)                    // handshake done, token accepted
                 lock.withLock { socket = task; live = true; connects += 1; acksOn = nil; acked = [] }
+                // A live tile comes again right after connect; a `done` missed while away must not leave one up.
+                browserOut.yield(nil)
                 delay = 1
                 // Not awaited: the flush waits on acks, which only the loop below reads.
                 Task { [weak self] in await self?.flush(task) }
@@ -376,6 +383,8 @@ final class LiveBackend: OttoBackend {
         if let k = try? JSONDecoder().decode(Kind.self, from: data) {
             if k.type == "approval" { if let a = try? JSONDecoder().decode(ApprovalRequest.self, from: data) { approvalOut.yield(.show(a)) }; return }
             if k.type == "approval_done", let id = k.id { approvalOut.yield(.done(id)); return }
+            // Here, not below: its `ts` is a number, which WireMessage would refuse.
+            if k.type == "browser" { if let f = BrowserFrame(json: data) { browserOut.yield(f.tile) }; return }
             if k.type == "hello" { lock.withLock { acksOn = true }; return }
             if k.type == "reminders" {
                 struct Frame: Decodable { let items: [ReminderItem] }

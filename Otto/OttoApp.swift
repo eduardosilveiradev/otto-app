@@ -138,6 +138,9 @@ final class OttoStore {
     var ottoTodos: [TodoItem] = []
     /// Otto's open to-dos while it isn't working: the pill over the composer.
     var openTodos: [TodoItem] = []
+    /// What Otto is doing in Chrome: the tile over the thinking orb. Memory only, like the frames
+    /// it comes from; the picture is decoded once here, not on every pass of the thread.
+    var browser: LiveBrowser?
     /// Approval screens waiting on you, newest last; `Later` hides one until the next launch.
     var approvals: [ApprovalRequest] = []
     var hiddenApprovals: Set<String> = []
@@ -538,6 +541,16 @@ final class OttoStore {
                              TodoItem(text: "Echoing shares to the open app", status: .in_progress),
                              TodoItem(text: "Build and push", status: .pending)]
             } }
+        // `-browserTile`: Otto in Chrome, over the thinking orb; `-browserTile private` caption only (a sign-in page),
+        // `-browserTile long` the server's 100-character caption. `-browserOpen` opens it full screen.
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-browserTile") {
+            let args = ProcessInfo.processInfo.arguments, kind = i + 1 < args.count ? args[i + 1] : ""
+            let shot = kind == "private" ? nil : Self.fakePage()
+            let caption = kind == "private" ? "accounts.example.com · signing in"
+                : kind == "long" ? "shop.example-hardware.co.uk · compares the three boiler service plans and picks the cheapest annual"
+                : "boilercare.example.com · opens the service booking page"
+            browser = LiveBrowser(tile: BrowserTile(image: shot?.jpegData(compressionQuality: 0.8), caption: caption, url: "https://example.com/", ts: 1), shot: shot)
+        }
         // `-openTodos`: two open to-dos for the pill over the composer (`-todosOpen` opens it);
         // `-openTodos one` just one, `-openTodos many` the server's cap of 30, the one in progress at its 120 characters.
         if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-openTodos") {
@@ -572,6 +585,7 @@ final class OttoStore {
             }
         }
         Task { for await items in backend.openTodoLists { openTodos = items } }
+        Task { for await tile in backend.browserTiles { browser = tile.map { LiveBrowser(tile: $0, shot: $0.image.flatMap(UIImage.init(data:))) } } }
         Task {
             for await items in backend.todoLists {
                 if !items.isEmpty { ottoTyping = true; reconcileVoiceDelivery(); armTypingTimeout() }
@@ -687,6 +701,29 @@ final class OttoStore {
     #endif
 
     #if DEBUG
+    /// A booking page as Chrome would screenshot it, 600×375 like the server's, for `-browserTile`.
+    static func fakePage() -> UIImage {
+        let r = UIGraphicsImageRendererFormat(); r.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 600, height: 375), format: r).image { ctx in
+            func box(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ c: UIColor, _ radius: CGFloat = 6) {
+                c.setFill(); UIBezierPath(roundedRect: CGRect(x: x, y: y, width: w, height: h), cornerRadius: radius).fill()
+            }
+            UIColor.white.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 600, height: 375))
+            box(0, 0, 600, 56, UIColor(red: 0.04, green: 0.32, blue: 0.62, alpha: 1), 0)
+            box(24, 18, 96, 20, .white.withAlphaComponent(0.9))
+            for i in 0..<3 { box(380 + CGFloat(i) * 70, 22, 54, 12, .white.withAlphaComponent(0.6)) }
+            ("Book a boiler service" as NSString).draw(at: CGPoint(x: 24, y: 80), withAttributes: [.font: UIFont.systemFont(ofSize: 28, weight: .bold), .foregroundColor: UIColor(white: 0.1, alpha: 1)])
+            box(24, 128, 360, 12, UIColor(white: 0.85, alpha: 1)); box(24, 150, 300, 12, UIColor(white: 0.85, alpha: 1))
+            for i in 0..<3 {
+                let x = 24 + CGFloat(i) * 188
+                box(x, 186, 172, 120, UIColor(white: 0.95, alpha: 1), 10)
+                box(x + 14, 202, 90, 14, UIColor(white: 0.7, alpha: 1)); box(x + 14, 228, 60, 22, UIColor(white: 0.25, alpha: 1))
+                box(x + 14, 266, 144, 28, i == 1 ? UIColor(red: 0.95, green: 0.45, blue: 0.1, alpha: 1) : UIColor(white: 0.82, alpha: 1), 14)
+            }
+            box(24, 326, 240, 12, UIColor(white: 0.88, alpha: 1))
+        }
+    }
+
     /// `-scriptDemo`: one continuous session, recorded from the simulator for the launch film.
     /// Everything goes straight into the thread, never through the backend, so the mock's
     /// canned "(mock) …" replies can't appear. Timings are tuned for a ~40 s take.
