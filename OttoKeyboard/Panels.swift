@@ -213,6 +213,7 @@ struct TopBar: View {
                     Button { m.ask(m.prompt) } label: {
                         Image(systemName: "arrow.up.circle.fill").font(.system(size: 30)).foregroundStyle(s.accent.color)
                     }
+                    .accessibilityLabel("Ask Otto")
                 }
                 Button { m.otto = .closed; m.prompt = "" } label: {
                     // 44 wide but row-high: a taller frame pushed the chip row up over it and it ate the taps.
@@ -337,6 +338,7 @@ struct EmojiPanel: View {
                     }
                 }
                 Button { m.deleteBackward() } label: { Image(systemName: "delete.left").frame(width: 46, height: 36) }
+                    .accessibilityLabel("Delete")
             }
             .padding(.bottom, 4)
         }

@@ -205,6 +205,9 @@ struct QuizRun {
 private struct QuizPane: View {
     let quiz: [StudySet.Question]
     @Binding var run: QuizRun
+    @Environment(\.colorScheme) private var scheme
+    /// As Pill and BigButton: the colour as is in dark mode, 40% toward black in light.
+    private func ink(_ c: Color) -> Color { scheme == .dark ? c : c.mix(with: .black, by: 0.4) }
 
     var body: some View {
         ScrollView {
@@ -218,8 +221,8 @@ private struct QuizPane: View {
                             HStack {
                                 Text(q.options[o])
                                 Spacer(minLength: 8)
-                                if picked != nil, o == q.answer { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                                else if o == picked { Image(systemName: "xmark.circle.fill").foregroundStyle(.red) }
+                                if picked != nil, o == q.answer { Image(systemName: "checkmark.circle.fill").foregroundStyle(ink(.green)) }
+                                else if o == picked { Image(systemName: "xmark.circle.fill").foregroundStyle(ink(.red)) }
                             }
                             .padding(.horizontal, 16).padding(.vertical, 13)
                             .background(fill(o, q, picked), in: .rect(cornerRadius: 16, style: .continuous))

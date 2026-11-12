@@ -69,7 +69,14 @@ private struct LoopsList: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(r.text).lineLimit(3).strikethrough(closed).foregroundStyle(closed ? .secondary : .primary)
                     let m = meta(r)
-                    if !m.isEmpty { Text(m).font(.footnote).foregroundStyle(late(r) ? .red : .secondary).lineLimit(2) }
+                    // Only the date goes red when it's passed, as in Reminders; the rest stays secondary.
+                    let due = late(r) ? r.due.map { "was due \(day($0))" } : nil
+                    if let due, m.hasPrefix(due) {
+                        Text("\(Text(due).foregroundStyle(.red))\(Text(String(m.dropFirst(due.count))).foregroundStyle(.secondary))")
+                            .font(.footnote).lineLimit(2)
+                    } else if !m.isEmpty {
+                        Text(m).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+                    }
                 }
             }
         }
@@ -341,7 +348,7 @@ struct PackagesList: View {
                     Text(arrival(pkg)).font(.subheadline.weight(.medium))
                         .foregroundStyle(pkg.status == "exception" ? .red : .primary)
                     Spacer()
-                    Text(ago(pkg.updatedAt)).font(.footnote).foregroundStyle(.secondary)
+                    Text("Updated \(ago(pkg.updatedAt))").font(.footnote).foregroundStyle(.secondary)
                 }
             }
             .padding(.vertical, 4)

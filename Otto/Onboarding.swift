@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UserNotifications
 import VisionKit
@@ -255,7 +256,12 @@ private struct ConnectPage: View {
             if manual {
                 Primary(label: "Connect", busy: checking) { Task { await connect(server, token) } }
             } else if canScan {
-                Primary(label: "Scan code", busy: checking) { scanning = true }
+                Primary(label: "Scan code", busy: checking) {
+                    // Denied, the scanner opens black with no word why: say so here instead.
+                    if [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .video)) {
+                        problem = "Otto can’t use the camera. Turn it on in Settings, or type it in."
+                    } else { scanning = true }
+                }
             } else {
                 // No camera scanner: typing it in is the main way, so it gets the big button.
                 Primary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
@@ -277,6 +283,10 @@ private struct ConnectPage: View {
                 Task { await take(code) }
             }
             .ignoresSafeArea()
+            .overlay(alignment: .topTrailing) {
+                Button("Cancel", systemImage: "xmark") { scanning = false }
+                    .labelStyle(.iconOnly).buttonStyle(.glass).controlSize(.large).padding()
+            }
             .presentationDetents([.large])
         }
     }

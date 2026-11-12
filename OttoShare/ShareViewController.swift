@@ -145,6 +145,7 @@ struct ShareView: View {
                                 ForEach(model.images.indices, id: \.self) { i in
                                     Image(uiImage: model.images[i]).resizable().scaledToFill()
                                         .frame(width: 90, height: 90).clipShape(.rect(cornerRadius: 10, style: .continuous))
+                                        .accessibilityLabel("Photo \(i + 1) of \(model.images.count)")
                                 }
                             }
                         }
