@@ -137,19 +137,55 @@ struct Loaded<T: Decodable, Content: View>: View {
             if let value { content(value, load) }
             else if failed {
                 ContentUnavailableView {
-                    Label("Can't reach your Mac", systemImage: "wifi.slash")
+                    Label("Can’t reach your Mac", systemImage: "wifi.slash")
                 } description: {
-                    Text(store.backend.isLive ? "Otto didn't answer." : "This needs the Otto server.")
+                    Text(store.backend.isLive ? "Otto didn’t answer." : "This needs the Otto server.")
                 } actions: {
-                    Button("Try Again") { failed = false; Task { await load() } }
+                    Button("Try again") { failed = false; Task { await load() } }
                 }
-            } else { ProgressView() }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemGroupedBackground))
+            } else {
+                // The grouped grey the list lands on, so light mode doesn't flash white first.
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(.systemGroupedBackground))
+            }
         }
         .task(id: query) { await load() }
     }
 
     private func load() async {
         if let v: T = await store.backend.dash(path, query: query) { value = v; failed = false } else if value == nil { failed = true }
+    }
+}
+
+extension View {
+    /// A screen with nothing in it, drawn the way the system draws one (as "Can't reach your Mac" is), over
+    /// the empty list so pull to refresh still works.
+    func emptyState(_ empty: Bool, _ title: String, systemImage: String, _ description: String? = nil) -> some View {
+        overlay {
+            if empty {
+                ContentUnavailableView(title, systemImage: systemImage, description: description.map(Text.init))
+                    .background(Color(.systemGroupedBackground))   // the list's own grey, not white, in light mode
+            }
+        }
+    }
+}
+
+extension View {
+    /// Behind a sheet's bottom bar: the sheet's grey, faded in over the 24pt above it, so rows scrolled under
+    /// dissolve instead of reading through the buttons (the thread composer's treatment).
+    func bottomBarFade() -> some View {
+        background {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [Color(.systemGroupedBackground).opacity(0), Color(.systemGroupedBackground)],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 24)
+                Color(.systemGroupedBackground)
+            }
+            .padding(.top, -24)
+            .ignoresSafeArea(edges: .bottom)
+            .allowsHitTesting(false)
+        }
     }
 }
 
@@ -195,16 +231,19 @@ struct RowIcon: View {
 struct Pill: View {
     let text: String
     var tint: Color = .secondary
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
-        Text(text)
+        Text(text.prefix(1).uppercased() + text.dropFirst())   // one case for every badge: "Running", "Live"
             .font(.caption.weight(.medium))
-            .foregroundStyle(tint == .secondary ? Color.secondary : tint == .orange ? Color.pillOrange : tint)
+            // Any tint as small text: as is in dark mode, 40% toward black in light, so green, red and
+            // orange all clear 4.5:1 on their pale capsule.
+            .foregroundStyle(tint == .secondary ? Color.secondary : scheme == .dark ? tint : tint.mix(with: .black, by: 0.4))
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(tint == .secondary ? Color(.tertiarySystemFill) : tint.opacity(0.15), in: .capsule)
     }
 }
 
 extension Color {
-    /// Orange text on a 15% orange capsule: system orange in dark mode, a burnt orange in light so it reads.
-    static let pillOrange = Color(UIColor { $0.userInterfaceStyle == .dark ? .systemOrange : UIColor(red: 0.70, green: 0.33, blue: 0, alpha: 1) })
+    /// Orange as small text: system orange in dark mode, a burnt orange in light so it reads on white.
+    static let orangeText = Color(UIColor { $0.userInterfaceStyle == .dark ? .systemOrange : UIColor(red: 0.70, green: 0.33, blue: 0, alpha: 1) })
 }

@@ -35,6 +35,11 @@ struct RecordedCard: Codable, Hashable, Identifiable {
 struct RecordedChip: View {
     let card: RecordedCard
     let message: Message.ID
+    /// The server's detail in the app's style: bare days as "Sat, Nov 7", sentence case ("Eating out · …").
+    private var detailLine: String? {
+        guard let d = card.detail?.replacing(/\d{4}-\d{2}-\d{2}/, with: { day(String($0.output)) }) else { return nil }
+        return d.prefix(1).uppercased() + d.dropFirst()
+    }
     @State private var open = false
     @Environment(OttoStore.self) private var store
 
@@ -45,8 +50,9 @@ struct RecordedChip: View {
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(.blue)
                     .frame(width: 30, height: 30).background(Color.blue.opacity(0.12), in: .circle)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(card.title).font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(1)
-                    Text(card.detail ?? card.heading).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
+                    Text(card.title).font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(2)
+                    Text(detailLine ?? card.heading)
+                        .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right").font(size: 12, weight: .semibold, relativeTo: .caption).foregroundStyle(.tertiary)
@@ -62,7 +68,7 @@ struct RecordedChip: View {
                     Section {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(card.title).font(.headline)
-                            if let d = card.detail { Text(d).font(.subheadline).foregroundStyle(.secondary) }
+                            if let d = detailLine { Text(d).font(.subheadline).foregroundStyle(.secondary) }
                         }
                     }
                     if let b = card.body { Section { Text(b).font(.callout).textSelection(.enabled) } }

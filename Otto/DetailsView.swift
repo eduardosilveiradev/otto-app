@@ -38,9 +38,10 @@ struct DetailsView: View {
                         Text("Otto").font(.title2.weight(.semibold))
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
-                            Text(store.backend is MockBackend ? "mock data"
-                                 : !store.connected ? "asleep — can't reach the server" : "connected")
-                                .font(.subheadline).foregroundStyle(.secondary)
+                            if let line = store.backend is MockBackend ? "Sample data"
+                                : !store.connected ? "Asleep. Can’t reach your Mac." : nil {
+                                Text(line).font(.subheadline).foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -67,7 +68,7 @@ struct DetailsView: View {
                 Section {
                     NavigationLink { StatusScreen() } label: { Label("Status", systemImage: "gauge.with.dots.needle.33percent") }
                     NavigationLink { DevicesScreen() } label: { Label("Devices", systemImage: "iphone") }
-                    NavigationLink { GlassesScreen() } label: { Label("Glasses", systemImage: "eyeglasses") }
+                    NavigationLink { GlassesScreen() } label: { Label { Text("Glasses") } icon: { Image(systemName: "eyeglasses").imageScale(.small) } }
                 }
 
                 Section {
@@ -78,13 +79,15 @@ struct DetailsView: View {
                             }
                         }
                     }
-                    Toggle("Speak replies when I speak", isOn: Binding(
-                        get: { speakReplies ?? true },
-                        set: { on in
-                            speakReplies = on
-                            Task { speakReplies = await store.backend.speakReplies(set: on) ?? !on }
-                        }))
-                        .disabled(speakReplies == nil)
+                    // Only once the server has said: a guessed "on" that can't be changed is worse than no row.
+                    if let speak = speakReplies {
+                        Toggle("Speak replies when I speak", isOn: Binding(
+                            get: { speak },
+                            set: { on in
+                                speakReplies = on
+                                Task { speakReplies = await store.backend.speakReplies(set: on) ?? !on }
+                            }))
+                    }
                     Toggle("Stay connected in background", isOn: $stayAwake)
                     NavigationLink("Settings") { SettingsView() }
                 }
@@ -105,8 +108,8 @@ struct DetailsView: View {
                         if let serverCheck { checkLine(serverCheck) }
                     }
                     .id("server")
-                    labeled("Otto's phone number") {
-                        TextField("Otto's phone number", text: $callNumber, prompt: Text(verbatim: "+1 555 0100")).keyboardType(.phonePad)
+                    labeled("Otto’s phone number") {
+                        TextField("Otto’s phone number", text: $callNumber, prompt: Text(verbatim: "+1 555 0100")).keyboardType(.phonePad)
                     }
                 } header: { Text("Server") } footer: {
                     Text("Over Tailscale. Quit and reopen the app after changing these.")
@@ -139,6 +142,8 @@ struct DetailsView: View {
                 case "Packages": PackagesScreen()
                 case "Activity": ActivityScreen()
                 case "Status": StatusScreen()
+                case "Settings": SettingsView()
+                case "Glasses": GlassesScreen()
                 default: DevicesScreen()
                 }
             }
@@ -150,6 +155,20 @@ struct DetailsView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            // Rows scrolled up blur away under the clock and the back button, as in Settings; no ruled line.
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            // The glass behind has no colour for that edge to fade into, so the rows fade themselves: clear
+            // under the clock and the back button, solid 20pt below the bar. At rest only empty space is there.
+            .mask {
+                GeometryReader { g in
+                    VStack(spacing: 0) {
+                        Color.clear.frame(height: g.safeAreaInsets.top)
+                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 20)
+                        Color.black
+                    }
+                    .ignoresSafeArea()
+                }
+            }
             .scrollContentBackground(.hidden)
             .task {
                 guard checkOnOpen else { return }
@@ -206,37 +225,31 @@ struct DetailsView: View {
         guard !Task.isCancelled else { return }   // edited or submitted again meanwhile
         serverCheck = switch ServerProblem(status: status, error: failure) {
         case nil: .connected
-        case .unreachable?, .timedOut?: .failed("Can't reach that address. Check it, and that Tailscale is on.")
-        case .refused?: .failed("The server didn't accept that token. Check it, or make a new one on your Mac.")
+        case .unreachable?, .timedOut?: .failed("Can’t reach that address. Check it, and that Tailscale is on.")
+        case .refused?: .failed("The server didn’t accept that token. Check it, or make a new one on your Mac.")
         case let problem?: .failed(problem.message)
         }
         if case .failed(let why) = serverCheck { AccessibilityNotification.Announcement(why).post() }
         else { AccessibilityNotification.Announcement("Connected").post() }
     }
 
-    /// The clock while Otto is holding things back, how far through the hold, and what's waiting.
+    /// How long Otto is holding things back, how far through the hold, and what's waiting.
     @ViewBuilder private func snoozed(_ s: Snooze, until: Date) -> some View {
         Section {
             TimelineView(.periodic(from: .now, by: 1)) { tl in
                 let start = s.since ?? tl.date
                 let span = until.timeIntervalSince(start)
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(tl.date, format: .dateTime.hour().minute())
-                            .monospacedDigit().font(size: 44, weight: .light, relativeTo: .largeTitle)
-                        Spacer()
-                        Text("Snoozed until \(until.formatted(date: .omitted, time: .shortened))")
-                            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                            .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(Color(.tertiarySystemFill), in: .capsule)
-                    }
+                    // No clock of its own: the status bar has one.
+                    Text("Snoozed until \(until.formatted(date: .omitted, time: .shortened))")
+                        .font(.title3.weight(.semibold))
                     ProgressView(value: span > 0 ? min(1, max(0, tl.date.timeIntervalSince(start) / span)) : 1)
                         .tint(.orange)
                     HStack(spacing: 10) {
                         Button { Task { await store.setSnooze(.clear) } } label: {
                             Text("Hand them over now").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent).tint(Color(.label)).foregroundStyle(Color(.systemBackground))
+                        .buttonStyle(.borderedProminent)
                         Button { Task { await store.setSnooze(.minutes(60)) } } label: {
                             Text("Another hour").frame(maxWidth: .infinity)
                         }
@@ -267,7 +280,7 @@ struct DetailsView: View {
                 LabeledContent(e.title, value: e.start.formatted(date: .omitted, time: .shortened))
             }
         } header: { Text("Today") } footer: {
-            Text("as of \(b.asOf.formatted(date: .omitted, time: .shortened)) \(TimeZone.current.abbreviation() ?? "")")
+            Text("as of \(b.asOf.formatted(date: .omitted, time: .shortened))")
         }
 
         if !b.inbox.isEmpty || b.bulk > 0 {
@@ -298,15 +311,16 @@ struct DetailsView: View {
                                 Text(l.title).strikethrough(closed).lineLimit(2)
                                     .foregroundStyle(closed ? .secondary : .primary)
                                 if let due = l.due, !closed {
-                                    Text("due \(due.formatted(.dateTime.weekday(.wide)))")
-                                        .font(.footnote).foregroundStyle(.secondary)
+                                    let late = due < Calendar.current.startOfDay(for: .now)
+                                    Text("\(late ? "was due" : "due") \(due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
+                                        .font(.footnote).foregroundStyle(late ? .red : .secondary)
                                 }
                             }
                             Spacer()
-                            Pill(text: closed ? "Closed" : "Open", tint: closed ? .secondary : .orange)
                         }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityValue(closed ? "Closed" : "Open")
                 }
             }
         }

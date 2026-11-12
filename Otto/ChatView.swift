@@ -87,6 +87,10 @@ struct ChatView: View {
     /// Far enough up the thread that the newest messages are out of sight.
     @State private var scrolledUp = false
     @State private var visibleNewest: Message.ID?
+    /// Group members' names by author id, for VoiceOver's "who" on each bubble.
+    private var authorNames: [String: String] {
+        Dictionary((row?.memberStates ?? []).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+    }
     private var newestOtto: Message? { thread.messages.last(where: { $0.from == .otto }) }
     private var seenDate: Date? {
         thread.isOtto && store.foreground && visibleNewest == newestOtto?.id ? newestOtto?.date : nil
@@ -254,7 +258,7 @@ struct ChatView: View {
                               who: { m in m.from == .me || m.from == .terminal ? "You" : row?.memberStates.first { $0.id == m.author }?.name ?? thread.name },
                               retry: fetchOlder, open: show, close: { closeSearch() })
             } else if thread.isOtto && messages.isEmpty && !store.ottoTyping {
-                EmptyChat(asleep: store.asleep, connected: store.connected, lookingAtCursor: focused)
+                EmptyChat(asleep: store.asleep, connected: store.connected)
             }
         }
         .onChange(of: searchWords) {
@@ -290,12 +294,13 @@ struct ChatView: View {
         .sheet(item: Binding(get: { thread.isOtto ? store.shownApproval : nil }, set: { _ in })) {
             ApprovalSheet(request: $0)
         }
-        // The header's fade, mirrored behind the composer: bubbles dissolve into the
-        // edge instead of meeting a solid strip.
+        // The header's fade, mirrored behind the composer: bubbles dissolve over the 16pt above it
+        // and are gone by the top of the field, instead of reading through the glass.
         .overlay(alignment: .bottom) {
-            LinearGradient(colors: [Color(.systemBackground).opacity(0), Color(.systemBackground)],
+            LinearGradient(stops: [.init(color: Color(.systemBackground).opacity(0), location: 0),
+                                   .init(color: Color(.systemBackground), location: 16 / (ui.bottomInset + 16))],
                            startPoint: .top, endPoint: .bottom)
-                .frame(height: ui.bottomInset + 24)
+                .frame(height: ui.bottomInset + 16)
                 .ignoresSafeArea(edges: .bottom)
                 .allowsHitTesting(false)
         }
@@ -326,7 +331,7 @@ struct ChatView: View {
                         .contentTransition(.interpolate)
                         .animation(.snappy, value: step)
                 }
-                .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                .font(size: 12, design: .monospaced, relativeTo: .caption).foregroundStyle(.secondary)
                 .accessibilityElement(children: .ignore).accessibilityLabel("Otto: \(step)")
                 .padding(.leading, 20).padding(.trailing, 72)
                 .padding(.bottom, ui.bottomInset + 6)
@@ -340,10 +345,10 @@ struct ChatView: View {
             DetailsView()
                 .navigationTransition(.zoom(sourceID: "card", in: card))
                 .presentationBackground {
-                    // Liquid Glass over the thread, as Messages does. Light mode adds a wash, so the
-                    // thread's dark bubbles don't show through as smudges.
+                    // Liquid Glass over the thread, as Messages does, with a wash in both modes so the
+                    // thread's bubbles and the header's face don't show through as smudges.
                     Color.clear.glassEffect(.regular, in: .rect)
-                        .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? .clear : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
+                        .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor.black.withAlphaComponent(0.45) : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
                         .ignoresSafeArea()
                 }
         }
@@ -354,7 +359,7 @@ struct ChatView: View {
         }
         .alert("Calling Otto", isPresented: $showCall) {
             Button("OK", role: .cancel) {}
-        } message: { Text("Add Otto's phone number in details (tap Otto's name).") }
+        } message: { Text("Add Otto’s phone number in details (tap Otto’s name).") }
     }
 
     @ViewBuilder private var threadList: some View {
@@ -368,7 +373,7 @@ struct ChatView: View {
                         let prev = i > 0 ? messages[i - 1] : nil
                         let next = i + 1 < messages.count ? messages[i + 1] : nil
                         let newBlock = prev.map { m.date.timeIntervalSince($0.date) > 3600 } ?? true
-                        if newBlock { Stamp(date: m.date, yesterday: pipsOn) }
+                        if newBlock { Stamp(date: m.date) }
                         if m.isPipLine {
                             PipLine(message: m, afterLine: !newBlock && prev?.isPipLine == true, highlighted: flashed == m.id).id(m.id).transition(.opacity)
                         } else if m.from == .terminal {
@@ -380,6 +385,7 @@ struct ChatView: View {
                             GroupChrome(on: isGroup && m.from != .me, author: m.author, member: row?.memberStates.first { $0.id == m.author }, showName: runStarts, showFace: runEnds) {
                             Row(thread: thread, message: m,
                                 quote: quote,
+                                names: authorNames,
                                 tail: runEnds,
                                 receipt: m.id == lastMine && m.pending != true && m.failed != true ? receipt(for: i, in: messages) : nil,
                                 fresh: m.from == .me && m.pending == true && Date.now.timeIntervalSince(m.date) < 1,
@@ -418,19 +424,20 @@ struct ChatView: View {
                     }
                     if thread.typing {
                         Typing(status: thread.typingStatus, todos: thread.typingTodos, connected: thread.connected).padding(.top, 10).id("typing")
-                            .transition(.asymmetric(insertion: .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity),
-                                                    removal: .opacity))
+                            .transition(still ? .opacity : .asymmetric(insertion: .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity),
+                                                                       removal: .opacity))
                     }
                     if !thread.isOtto {
                         ForEach(row?.activity ?? []) { a in
                             ActivityLine(member: a, withFace: isGroup) { store.pips.press($0, in: thread.conversationID) }
                                 .id("activity-\(a.id)")
-                                .transition(.scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity))
+                                .transition(still ? .opacity : .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity))
                         }
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 6)
+                // Past the composer's 16pt fade, so the newest line ("Will send when back online", "Read") sits clear of it.
+                .padding(.bottom, 18)
         }
         // On the scroll view, not the stack: the bottom anchor's offset change then rides the same
         // animation as the rows. On the stack, the rows animated while the offset jumped, and every
@@ -440,13 +447,14 @@ struct ChatView: View {
         .animation(thread.animated && !burst ? .spring(response: 0.42, dampingFraction: 0.82) : nil, value: messages.count)
         // After this update's other handlers have run, so they all still see a burst as one.
         .onChange(of: messages.count, initial: true) { _, n in Task { counted.rows = n } }
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typing)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: row?.activity.map(\.id))
+        // Under Reduce Motion these heights change in one step; the rows' own fades still play.
+        .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: thread.typing)
+        .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: row?.activity.map(\.id))
         // The thinking bubble's to-do list and a tapback's room above a bubble change heights too.
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typingTodos)
+        .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: thread.typingTodos)
         // A new step's line can wrap to two, or back to one: the bubble's height follows smoothly.
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: thread.typingStatus)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: messages.map(\.reaction))
+        .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: thread.typingStatus)
+        .animation(still ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: messages.map(\.reaction))
         // Pinned to the bottom as content grows (new bubbles, typing dots, the keyboard),
         // so nothing has to scroll after the fact and fight the insert animation.
         .scrollPosition($scroll)
@@ -569,7 +577,7 @@ struct ChatView: View {
             try? await Task.sleep(for: .seconds(1))
             say("reduceMotion=\(still)")
             await step("scroll up") { move(nil) { $0.scrollTo(y: offset.y - 1200) } }
-            await step("receive while up") { store.messages.append(Message(from: .otto, text: "this one lands while you're reading up there")) }
+            await step("receive while up") { store.messages.append(Message(from: .otto, text: "this one lands while you’re reading up there")) }
             await step("dots on while up") { store.ottoTyping = true }
             await step("dots off while up") { store.ottoTyping = false }
             await step("keyboard up while up") { store.demoFocus = true }
@@ -613,13 +621,25 @@ struct ChatView: View {
         }
         .animation(.snappy, value: calls.live?.id)
         .animation(.snappy, value: gate.card?.key)
-        // No fill behind the banner: the bar's soft scroll edge already blurs the thread under
-        // the whole bar, banner included. A systemBackground fill here is the solid black band.
+        // The thread fades out under the bar, as in Messages: the soft scroll edge alone blurs only up by the
+        // status bar, so bubbles read sharp behind the face and the banners. Solid under the bar, then a 40pt
+        // fade below it, longer than a line of text so the line there fades instead of looking sliced.
         // A pull down on the bar's empty space opens search too: the top of a long thread is a long way up.
         // Behind the buttons, so they keep their own touches.
         .background {
-            Color.clear.contentShape(.rect)
-                .gesture(DragGesture(minimumDistance: 20).onEnded { if $0.translation.height > 50 { openSearch() } })
+            ZStack {
+                VStack(spacing: 0) {
+                    Color(.systemBackground)
+                    LinearGradient(colors: [Color(.systemBackground), Color(.systemBackground).opacity(0)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: 40)
+                }
+                .padding(.bottom, -40)
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
+                Color.clear.contentShape(.rect)
+                    .gesture(DragGesture(minimumDistance: 20).onEnded { if $0.translation.height > 50 { openSearch() } })
+            }
         }
     }
 
@@ -644,7 +664,7 @@ struct ChatView: View {
         } else {
             Button { showDetails = true } label: {
                 VStack(spacing: -6) {
-                    OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, lookingAtCursor: focused)
+                    OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep)
                     HStack(spacing: 4) {
                         Text("Otto").font(size: 15, weight: .semibold, relativeTo: .subheadline)
                         Image(systemName: "chevron.right").font(size: 11, weight: .semibold, relativeTo: .caption2)
@@ -678,13 +698,14 @@ struct ChatView: View {
                 }
                 if let u = store.update, let link = Self.sideStoreInstall(u.ipa) {
                     // SideStore downloads, re-signs and installs; it asks before replacing the app.
+                    // A glass circle like the bar's others, so it never crowds the face.
                     Button { openURL(link) } label: {
-                        Label("Update", systemImage: "arrow.down.circle.fill")
-                            .font(size: 13, weight: .semibold, relativeTo: .footnote)
-                            .padding(.horizontal, 12).frame(height: 40)
-                            .glassEffect(.regular.interactive(), in: .capsule)
+                        Image(systemName: "arrow.down").font(.system(size: 18, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                            .glassEffect(.regular.tint(.accentColor).interactive(), in: .circle)
                     }
-                    .tint(.accentColor)
+                    .tint(.white)
+                    .accessibilityLabel("Update Otto")
                 }
                 Spacer()
                 Button {
@@ -722,7 +743,9 @@ struct ChatView: View {
                     walkieHint = false
                 }
             }
-            title.tint(.primary)
+            // Hidden while the contact card is up, so the header's face doesn't show through its glass as a
+            // second, blurred Otto; it's back as the card zooms closed.
+            title.tint(.primary).opacity(showDetails ? 0 : 1)
                 // The pull-downs' way in for VoiceOver and Full Keyboard Access.
                 .accessibilityAction(named: "Search messages", openSearch)
         }
@@ -740,6 +763,8 @@ struct ChatView: View {
 /// until you send, like Messages.
 struct Composer: View {
     @Environment(OttoStore.self) private var store
+    /// Reduce Motion: the buttons cross-fade instead of scaling in.
+    @Environment(\.accessibilityReduceMotion) private var still
     let ui: ComposerUI
     let thread: any ChatThread
     @State private var draft = ""
@@ -793,6 +818,7 @@ struct Composer: View {
                     .glassEffect(.regular.interactive(), in: .circle)
             }
             .tint(.secondary)
+            .accessibilityLabel("Add photo")
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -804,6 +830,7 @@ struct Composer: View {
                             Image(systemName: "xmark").frame(width: 36, height: 36)
                         }
                         .tint(.secondary)
+                        .accessibilityLabel("Cancel recording")
                         TimelineView(.periodic(from: started, by: 1)) { tl in
                             let s = Int(tl.date.timeIntervalSince(started))
                             HStack(spacing: 8) {
@@ -821,6 +848,7 @@ struct Composer: View {
                                 .foregroundStyle(.white, Color.red)
                                 .frame(width: 36, height: 36)
                         }
+                        .accessibilityLabel("Send voice message")
                     } else {
                         ComposerTextView(text: $draft, focused: $focused, placeholder: "Message", mentions: members.map(\.name)) { images in
                             // Group and pip threads have no photos on the server.
@@ -834,7 +862,8 @@ struct Composer: View {
                                 Image(systemName: "waveform").frame(width: 36, height: 36)
                             }
                             .tint(.secondary)
-                            .transition(.scale(scale: 0.6).combined(with: .opacity))
+                            .accessibilityLabel("Record voice message")
+                            .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                             }
                         } else {
                             // Messages' send: a 37×27 pill, 6.5pt in from the field's corner (measured off a screenshot).
@@ -846,7 +875,8 @@ struct Composer: View {
                                     .background(Color(red: 0.525, green: 0.553, blue: 0.592), in: .capsule)
                             }
                             .padding(.trailing, 6.5).padding(.bottom, 4.5)   // centred in a one-line field (measured), like Messages
-                            .transition(.scale(scale: 0.6).combined(with: .opacity))
+                            .accessibilityLabel("Send")
+                            .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                         }
                     }
                 }
@@ -892,6 +922,9 @@ struct Composer: View {
         // `-recordDemo` starts a voice note.
         .task {
             let args = ProcessInfo.processInfo.arguments
+            // The seeds land once the thread has settled at the bottom, as typing would, so the
+            // composer growing keeps the newest bubble in view the way it does for real.
+            if args.contains("-seedAttachments") || args.contains("-seedDraft") { try? await Task.sleep(for: .seconds(1)) }
             if args.contains("-seedAttachments") {
                 attachments = [UIColor.systemOrange, .systemTeal].map { c in
                     Attachment(image: UIGraphicsImageRenderer(size: CGSize(width: 300, height: 200)).image { ctx in c.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 300, height: 200)) })
@@ -1109,13 +1142,30 @@ final class PastingTextView: UITextView {
 
 // MARK: - Pieces (Unchanged)
 
+/// A message's day and time the way the thread's stamps write it: "Today 2:19 AM", "Monday 2:19 AM",
+/// then "Nov 3, 2:19 AM", with the year only when it isn't this one.
+func messageWhen(_ d: Date) -> String {
+    "\(messageDay(d)) \(d.formatted(date: .omitted, time: .shortened))"
+}
+
+/// The day half: Today, Yesterday, a weekday within the week, then the date.
+func messageDay(_ d: Date) -> String {
+    let cal = Calendar.current
+    let days = cal.dateComponents([.day], from: cal.startOfDay(for: d), to: cal.startOfDay(for: .now)).day ?? 0
+    switch days {
+    case 0: return "Today"
+    case 1: return "Yesterday"
+    case 2..<7: return d.formatted(.dateTime.weekday(.wide))
+    default: return cal.isDate(d, equalTo: .now, toGranularity: .year)
+        ? d.formatted(.dateTime.month(.abbreviated).day())
+        : d.formatted(.dateTime.month(.abbreviated).day().year())
+    }
+}
+
 struct Stamp: View {
     let date: Date
-    /// The pips mockup says "Yesterday"; the one-thread app keeps its weekday.
-    var yesterday = false
     var body: some View {
-        let day = Calendar.current.isDateInToday(date) ? "Today" : yesterday && Calendar.current.isDateInYesterday(date) ? "Yesterday" : date.formatted(.dateTime.weekday(.wide))
-        (Text(day).fontWeight(.semibold) + Text(" " + date.formatted(date: .omitted, time: .shortened)))
+        (Text(messageDay(date)).fontWeight(.semibold) + Text(" " + date.formatted(date: .omitted, time: .shortened)))
             .font(size: 11, relativeTo: .caption2)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
@@ -1149,6 +1199,8 @@ private struct Row: View {
     let message: Message
     /// The message this one answers, shown small above the bubble.
     let quote: Message?
+    /// In a group, who wrote a message, by author id, so VoiceOver says "Planner:", not the group's name.
+    var names: [String: String] = [:]
     let tail: Bool
     /// Under your newest message: true is "Read", false "Delivered", nil nothing.
     let receipt: Bool?
@@ -1235,7 +1287,8 @@ private struct Row: View {
         } else if message.isVoice || message.audio != nil {
             VStack(alignment: .leading, spacing: 6) {
                 VoiceRow(message: message, mine: mine)
-                if !mine, !message.text.isEmpty { Text(Self.linked(message.text)).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary) }
+                // What Otto said, so it reads as the message: full-strength text, only smaller.
+                if !mine, !message.text.isEmpty { Text(Self.linked(message.text)).font(size: 13, relativeTo: .footnote) }
             }
         } else {
             Text(text)
@@ -1335,9 +1388,11 @@ private struct Row: View {
     private var firstLink: URL? { Self.linked(message.text).runs.lazy.compactMap(\.link).first }
     /// Who put the tapback there: on yours it's Otto's, on Otto's it's yours.
     private var reactor: String { mine ? thread.name : "you" }
+    /// The writer's name: a group member's own, or the thread's.
+    private func name(of m: Message) -> String { names[m.author] ?? thread.name }
     /// What VoiceOver reads for the bubble: who, then what.
     private var spoken: String {
-        let who = mine ? "You" : thread.name
+        let who = mine ? "You" : name(of: message)
         if message.isVoice || message.audio != nil { return "\(who): voice message. \(message.text)" }
         if let d = Self.draft(message) { return "\(who): \(d.head) \(d.body)" }
         return "\(who): \(message.text)"
@@ -1406,7 +1461,7 @@ private struct Row: View {
                 .frame(maxWidth: .infinity, alignment: quote.from == .me ? .trailing : .leading)
                 // Out past the row's inset when it's the other side's, so it lines up with their bubbles.
                 .padding(mine ? .leading : .trailing, quote.from == message.from ? 0 : -89)
-                .accessibilityLabel("In reply to \(quote.from == .me ? "you" : thread.name): \(Self.summary(quote))")
+                .accessibilityLabel("In reply to \(quote.from == .me ? "you" : name(of: quote)): \(Self.summary(quote))")
                 .accessibilityHint("Shows the original message")
             }
             if let img = Thumbs.image(for: message) {
@@ -1414,7 +1469,7 @@ private struct Row: View {
                     .frame(maxWidth: 253, maxHeight: 320)
                     .clipShape(.rect(cornerRadius: 18, style: .continuous))
                     .onTapGesture { MediaViewer.shared.start = message.id.uuidString }
-                    .accessibilityLabel(mine ? "You: photo" : "\(thread.name): photo")
+                    .accessibilityLabel(mine ? "You: photo" : "\(name(of: message)): photo")
                     .accessibilityAddTraits([.isImage, .isButton])
                     .modifier(Reactable(message: message, badge: !textShown, reactor: reactor, react: react, reply: reply, copy: { UIPasteboard.general.image = img }))
             }
@@ -1517,6 +1572,7 @@ private struct Row: View {
                 HStack(spacing: 16) {
                     ForEach(message.buttons) { b in
                         Button { press(b) } label: { Text(b.label).hitSlop() }.font(size: 15, relativeTo: .subheadline).tint(.blue)
+                            .accessibilityLabel(b.label.trimmingCharacters(in: .symbols.union(.whitespaces)))
                     }
                 }
                 .padding(.leading, 12)
@@ -1657,7 +1713,7 @@ private struct GroupChrome<Content: View>: View {
             HStack(alignment: .bottom, spacing: 8) {
                 Group {
                     if showFace, let member {
-                        FaceView(look: member.look.with(.rest), size: otto ? 44 : 34).frame(width: otto ? 44 : 34, height: otto ? 44 : 34)
+                        FaceView(look: member.look.with(.rest), size: 34).frame(width: 34, height: 34)
                     } else {
                         Color.clear.frame(height: 1)
                     }
@@ -2149,30 +2205,18 @@ private struct ScaledFont: ViewModifier {
 }
 
 struct Typing: View {
-    /// What Otto is doing, shown beside the orb; nil is just the orb.
+    /// What Otto is doing, shown beside the dots; nil is just the dots.
     let status: String?
     /// The list Otto is working through, under the step; empty shows nothing.
     var todos: [TodoItem] = []
-    /// Off while the server is unreachable: the orb shows it's reconnecting instead of thinking.
+    /// Off while the server is unreachable: the line says it's reconnecting instead of the step.
     let connected: Bool
 
-    /// The orb that fits the step, read off the label's first word (the server's
-    /// toolstatus.ts): looking things up, writing, running something, remembering.
-    static func orb(for status: String?) -> OrbState {
-        guard let status else { return .breathing }
-        switch status.split(separator: " ").first.map(String.init) ?? "" {
-        case "Searching", "Looking", "Checking", "Reading": return .searching
-        case "Editing", "Writing": return .composing
-        case "Running": return .solving
-        case "Remembering": return .weaving
-        default: return .working
-        }
-    }
-
     var body: some View {
-        // Top-aligned so the orb stays on the first line when a long status wraps.
+        // Top-aligned so the dots stay on the first line when a long status wraps. The same three dots
+        // as a pip's typing line: one typing signal across the app.
         HStack(alignment: .top, spacing: 8) {
-            MorphingOrb(state: !connected ? .connecting : Self.orb(for: status))
+            TypingDots().frame(width: 29, height: 7).padding(.top, 6)
             // A status from before the drop would be stale; say what's actually happening.
             VStack(alignment: .leading, spacing: 8) {
                 if let status = connected ? status : "Reconnecting…" {
@@ -2240,12 +2284,10 @@ struct TodoList: View {
 private struct EmptyChat: View {
     let asleep: Bool
     let connected: Bool
-    // *** ADDED PARAMETER HERE ***
-    let lookingAtCursor: Bool
-    
+
     private var line: String {
-        if !connected { return "Can't reach the server. What you send goes out when it's back." }
-        return "Say hi. Reminders, mail, plans: I'll keep track of the rest."
+        if !connected { return "Can’t reach your Mac. What you send goes out when it’s back." }
+        return "Say hi. Reminders, mail, plans: I’ll keep track of the rest."
     }
     var body: some View {
         VStack(spacing: 14) {
@@ -2655,11 +2697,32 @@ private struct AddPassSheet: UIViewControllerRepresentable {
 extension ShapeStyle where Self == Color {
     /// Yours: the slate grey of the user's side in the reference (sampled #60656B in dark mode).
     /// Light mode is a shade darker than a straight lift, so white text clears 4.5:1.
+    /// Increase Contrast pushes both a step further from the background, as the system greys do.
     static var outgoingBubble: Color {
-        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.376, green: 0.396, blue: 0.420, alpha: 1) : UIColor(red: 0.420, green: 0.443, blue: 0.471, alpha: 1) })
+        Color(UIColor { t in
+            let high = t.accessibilityContrast == .high
+            return t.userInterfaceStyle == .dark
+                ? UIColor(red: 0.376, green: 0.396, blue: 0.420, alpha: 1).adjusted(by: high ? 0.08 : 0)
+                : UIColor(red: 0.420, green: 0.443, blue: 0.471, alpha: 1).adjusted(by: high ? -0.08 : 0)
+        })
     }
     /// Messages' grey for the other side, a shade darker than systemGray5 in dark mode.
     static var incomingBubble: Color {
-        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.149, green: 0.145, blue: 0.165, alpha: 1) : UIColor(red: 0.914, green: 0.914, blue: 0.922, alpha: 1) })
+        Color(UIColor { t in
+            let high = t.accessibilityContrast == .high
+            return t.userInterfaceStyle == .dark
+                ? UIColor(red: 0.149, green: 0.145, blue: 0.165, alpha: 1).adjusted(by: high ? 0.08 : 0)
+                : UIColor(red: 0.914, green: 0.914, blue: 0.922, alpha: 1).adjusted(by: high ? -0.08 : 0)
+        })
+    }
+}
+
+private extension UIColor {
+    /// The same grey, lighter (+) or darker (−) by `d` on each channel.
+    func adjusted(by d: CGFloat) -> UIColor {
+        guard d != 0 else { return self }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        getRed(&r, green: &g, blue: &b, alpha: &a)
+        return UIColor(red: r + d, green: g + d, blue: b + d, alpha: a)
     }
 }

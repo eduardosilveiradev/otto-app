@@ -52,7 +52,7 @@ private struct MemoryList: View {
                     NavigationLink { MemoryDetailScreen(item: it) } label: { MemoryRow(item: it) }
                 }
             } header: {
-                Text(ranked != nil ? "Best matches · \(items.count)" : "\(items.count) of \(m.items.count)")
+                Text(ranked != nil ? "Best matches · \(items.count)" : items.count == m.items.count ? "Everything · \(items.count)" : "\(items.count) of \(m.items.count)")
             } footer: {
                 Text("Indexed \(ago(m.generatedAt))")
             }
@@ -101,7 +101,7 @@ private struct MemoryList: View {
     private func rebuild() async {
         struct Started: Decodable { let started: Bool }
         let r: Started? = await store.backend.dash("memory/rebuild", method: "POST")
-        note = r == nil ? "Already rebuilding, or the Mac didn't take it." : "Rebuilding. Pull to refresh in a minute."
+        note = r == nil ? "Already rebuilding, or the Mac didn’t take it." : "Rebuilding. Pull to refresh in a minute."
     }
 }
 
@@ -153,7 +153,6 @@ struct PeopleScreen: View {
         Loaded(path: "people") { (p: People, reload) in
             let cards = p.cards.filter { q.isEmpty || [$0.name, $0.relationship, $0.city, $0.org].compactMap { $0 }.joined(separator: " ").localizedCaseInsensitiveContains(q) }
             List {
-                if p.cards.isEmpty { Text("Nobody yet. Tell Otto who someone is and they show up here.").foregroundStyle(.secondary) }
                 ForEach(cards) { c in
                     NavigationLink { PersonScreen(card: c) } label: {
                         HStack {
@@ -170,6 +169,7 @@ struct PeopleScreen: View {
                     }
                 }
             }
+            .emptyState(p.cards.isEmpty, "Nobody yet", systemImage: "person.2", "Tell Otto who someone is and they show up here.")
             .searchable(text: $query, prompt: "Search people")
             .refreshable { await reload() }
         }

@@ -6,7 +6,8 @@ import SwiftUI
 /// its background jobs, and what's armed.
 struct ActivityScreen: View {
     enum Tab: String, CaseIterable { case messages = "Unasked", changes = "Changes", jobs = "Jobs", triggers = "Triggers" }
-    @State private var tab = Tab.messages
+    /// `-activityTab Jobs` opens on that tab, for screenshots.
+    @State private var tab = UserDefaults.standard.string(forKey: "activityTab").flatMap(Tab.init(rawValue:)) ?? .messages
     /// Trigger gists, to name "trigger:<id>" sources.
     @State private var gists: [String: String] = [:]
     @Environment(OttoStore.self) private var store
@@ -23,7 +24,7 @@ struct ActivityScreen: View {
             }
         }
         .contentMargins(.top, 4, for: .scrollContent)
-        .safeAreaInset(edge: .top) {
+        .safeAreaBar(edge: .top) {
             Picker("Show", selection: $tab) { ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) } }
                 .pickerStyle(.segmented).padding(.horizontal).padding(.bottom, 6)
         }
@@ -56,7 +57,7 @@ struct ActivityScreen: View {
                             Spacer(minLength: 8)
                             if s.engaged == 0 && s.sent >= 3 { Pill(text: "never answered", tint: .orange) }
                         }
-                        Text("\(s.sent) sent · \(s.engaged) answered\(s.silentStreak > 1 ? " · last \(s.silentStreak) unanswered" : "")\(s.lastSent.map { " · \(ago($0))" } ?? "")")
+                        Text("\(s.sent) sent · \(s.engaged) answered\(s.engaged > 0 && s.silentStreak > 1 ? " · last \(s.silentStreak) unanswered" : "")\(s.lastSent.map { " · \(ago($0))" } ?? "")")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -74,7 +75,9 @@ struct ActivityScreen: View {
                         Spacer(minLength: 8)
                         if e.revertedAt != nil { Pill(text: "undone") }
                     }
-                    Text("\(ago(e.at)) · \(e.by) · \(e.tier) · \(e.origin.replacing("-", with: " "))")
+                    // When and what set it off, in words; not a log line of who, tier and origin.
+                    let how = ["user-message": "you asked", "button-tap": "you tapped"][e.origin] ?? e.origin.replacing("-", with: " ")
+                    Text("\(ago(e.at)) · \(how)")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -83,7 +86,6 @@ struct ActivityScreen: View {
 
     private func jobs(_ j: Jobs) -> some View {
         List {
-            if j.jobs.isEmpty { Text("No background jobs.").foregroundStyle(.secondary) }
             ForEach(j.jobs.sorted { $0.createdAt > $1.createdAt }) { job in
                 NavigationLink {
                     ScrollView {
@@ -108,6 +110,7 @@ struct ActivityScreen: View {
                 }
             }
         }
+        .emptyState(j.jobs.isEmpty, "No background jobs", systemImage: "gearshape.2", "Longer tasks Otto runs on your Mac show up here.")
     }
 
     private func triggers(_ t: Triggers) -> some View {
@@ -120,8 +123,8 @@ struct ActivityScreen: View {
             }
             if !off.isEmpty {
                 Section {
-                    NavigationLink("Spent or paused · \(off.count)") {
-                        List { ForEach(off) { trig($0) } }.navigationTitle("Spent or paused").navigationBarTitleDisplayMode(.inline)
+                    NavigationLink("Done or paused · \(off.count)") {
+                        List { ForEach(off) { trig($0) } }.navigationTitle("Done or paused").navigationBarTitleDisplayMode(.inline)
                     }
                 }
             }
@@ -131,11 +134,8 @@ struct ActivityScreen: View {
     private func trig(_ t: DashTrigger) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(t.gist).lineLimit(3)
-            let when: String = if let n = t.nextRun { "next \(ago(Date(timeIntervalSince1970: n / 1000)))" }
-                else if t.type == "email" { "on matching mail" }
-                else { t.lastFired.map { "fired \(ago($0))" } ?? "" }
-            Text([when, t.repeating ? "repeats" : nil, t.type == "cron" && t.repeating ? t.schedule : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                .font(.footnote).foregroundStyle(.secondary)
+            // The same line Schedules shows for it.
+            Text(t.whenLine).font(.footnote).foregroundStyle(.secondary)
         }
     }
 }
@@ -156,7 +156,7 @@ struct StatusScreen: View {
                 Section("This phone") {
                     HStack(spacing: 10) {
                         Circle().fill(store.connected ? Color.green : Color.red).frame(width: 9, height: 9)
-                        LabeledContent("Live connection", value: store.connected ? "up" : "down")
+                        LabeledContent("Live connection", value: store.connected ? "Connected" : "Not connected")
                     }
                     if let drop = (store.backend as? LiveBackend)?.lastDrop {
                         Text("Last drop \(drop)").font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
@@ -176,7 +176,7 @@ struct StatusScreen: View {
                     }
                 } header: { Text("On the Mac") } footer: {
                     let bad = s.rows.filter { $0.verdict == "down" || $0.verdict == "degraded" }.count
-                    Text(bad == 0 ? "Everything that's on is up." : "\(bad) need\(bad == 1 ? "s" : "") a look.")
+                    Text(bad == 0 ? "Everything that’s on is up." : "\(bad) need\(bad == 1 ? "s" : "") a look.")
                 }
                 if !s.repairs.isEmpty {
                     Section("Recent repairs") {

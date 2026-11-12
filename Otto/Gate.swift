@@ -144,7 +144,8 @@ struct GateBanner: View {
 
     private var subtitle: String {
         let route = [card.from, card.to].compactMap { $0 }.joined(separator: " → ")
-        let time = card.departsEst.map { "departs \($0), was \(card.departs)" } ?? "departs \(card.departs)"
+        // Short enough that "was 08:45", the reason for the line, never truncates.
+        let time = card.departsEst.map { "\($0), was \(card.departs)" } ?? "departs \(card.departs)"
         return route.isEmpty ? time : "\(route) · \(time)"
     }
 
@@ -220,7 +221,7 @@ struct GateSheet: View {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(card.notes, id: \.self) { n in
                                 Label(n, systemImage: "exclamationmark.triangle.fill")
-                                    .font(.footnote).foregroundStyle(.orange)
+                                    .font(.footnote).foregroundStyle(Color.orangeText)
                             }
                         }
                         .frame(maxWidth: 340, alignment: .leading)

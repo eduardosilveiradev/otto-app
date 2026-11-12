@@ -44,9 +44,8 @@ struct PassportScreen: View {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(summary(stamps))
                         .font(.footnote.weight(.medium)).foregroundStyle(.secondary)
-                        .textCase(.uppercase).tracking(0.6)
                     if stamps.isEmpty {
-                        Text("No stamps yet. Forward Otto a booking, or tell it about a place you've been, and the first one lands here.")
+                        Text("No stamps yet. Forward Otto a booking, or tell it about a place you’ve been, and the first one lands here.")
                             .foregroundStyle(.secondary)
                     }
                     LazyVGrid(columns: columns, spacing: 8) {

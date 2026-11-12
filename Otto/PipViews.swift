@@ -129,7 +129,7 @@ struct ConversationsView: View {
         .overlay {
             if searchText.isEmpty && pips.list.isEmpty {
                 ContentUnavailableView {
-                    Text("No other conversations yet")
+                    Text("No other conversations yet").font(.title2.bold())
                 } description: {
                     Text("Tap Otto to open your thread. When a job needs its own pip or a group, Otto starts one and it shows up here.")
                 }
@@ -287,7 +287,7 @@ private struct ConversationCell: View {
         }
         .buttonStyle(CellPress())
         .overlay(alignment: .leading) {
-            if row.unread > 0 { Circle().fill(Color(red: 1, green: 0.478, blue: 0.102)).frame(width: 10, height: 10).padding(.leading, 6) }
+            if row.unread > 0 { Circle().fill(Color.orangeText).frame(width: 10, height: 10).padding(.leading, 6) }
         }
         .overlay(alignment: .top) {
             if divided { Rectangle().fill(Color(.separator)).frame(height: 0.5).padding(.leading, 90) }
@@ -311,10 +311,7 @@ private struct ConversationCell: View {
         if let match {
             Text(match.text).foregroundStyle(.secondary)
         } else if let doing = row.activity.first(where: { $0.activity?.isEmpty == false })?.activity {
-            HStack(spacing: 6) {
-                TypingDots(dot: 5, gap: 3).frame(width: 21, height: 5)
-                Text(doing).foregroundStyle(.secondary)
-            }
+            Text(doing).foregroundStyle(.secondary)
         } else if row.kind == "pip", row.pips.first?.state == .asleep, let wake = row.nextWakeAt {
             Text(PipClock.wake(wake)).foregroundStyle(.secondary)
         } else if let m = row.lastMessage {
@@ -443,12 +440,14 @@ struct ActivityLine: View {
     let member: PipMember
     let withFace: Bool
     let press: (ActionButton) -> Void
+    @Environment(\.accessibilityReduceMotion) private var still
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
             if withFace {
-                FaceView(look: member.look, size: member.isOtto ? 44 : 34)
-                    .frame(width: 40, height: member.isOtto ? 44 : 34)
+                // One size for everyone down the side, Otto too, as Messages does.
+                FaceView(look: member.look.with(.rest), size: 34)
+                    .frame(width: 40, height: 34)
                     .padding(.bottom, -2)
             }
             VStack(alignment: .leading, spacing: 6) {
@@ -473,7 +472,7 @@ struct ActivityLine: View {
             Spacer(minLength: 41)
         }
         .padding(.top, 10)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: member.activity)
+        .animation(still ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: member.activity)
         .accessibilityElement(children: .combine)
     }
 }
@@ -572,16 +571,18 @@ struct HandoffSheet: View {
             Text(text)
                 .font(size: 15, relativeTo: .subheadline)
                 .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(Color.incomingBubble, in: .rect(cornerRadius: 17, style: .continuous))
-            Spacer(minLength: 10)   // the mockup's 86% wide bubble
+                .background(Color(.secondarySystemFill), in: .rect(cornerRadius: 17, style: .continuous))   // the thread's grey vanishes on a sheet
+            Spacer(minLength: 10)   // the mockup’s 86% wide bubble
         }
+        // The face says who on screen; VoiceOver hears the name.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(ring.name): \(text)")
     }
 
     private func stamp(_ h: PipHandoff) -> some View {
         Group {
             if let d = LiveBackend.date(h.askedAt) {
-                let day = Calendar.current.isDateInToday(d) ? "Today" : Calendar.current.isDateInYesterday(d) ? "Yesterday" : d.formatted(.dateTime.weekday(.wide))
-                (Text(day).fontWeight(.semibold) + Text(" " + d.formatted(date: .omitted, time: .shortened)))
+                (Text(messageDay(d)).fontWeight(.semibold) + Text(" " + d.formatted(date: .omitted, time: .shortened)))
                     .font(size: 11, relativeTo: .caption2).foregroundStyle(.secondary)
                     .padding(.top, 2)
             }
@@ -600,7 +601,7 @@ struct HandoffSheet: View {
     @ViewBuilder private func actions(_ h: PipHandoff, to: PipMember) -> some View {
         VStack(spacing: 8) {
             if h.status == "failed" {
-                PillButton(title: "Retry", primary: true) { pips.act("retry", on: h.id) }
+                PillButton(title: "Try again", primary: true) { pips.act("retry", on: h.id) }
                 PillButton(title: "Ask Otto to handle it") { pips.act("ask_otto", on: h.id) }
             } else {
                 let target = to.isOtto ? "app" : to.id
@@ -726,7 +727,8 @@ struct PipDetailSheet: View {
                             line(divided: i > 0) {
                                 Text(s.name)
                                 Spacer(minLength: 8)
-                                Text(s.label).foregroundStyle(.secondary).lineLimit(1)
+                                // From the cron, in the phone's clock style; the stored label is how it was set.
+                                Text(humanCron(s.schedule) ?? s.label).foregroundStyle(.secondary).lineLimit(1)
                             }
                         }
                     }
@@ -841,13 +843,18 @@ private struct FailureLine: ViewModifier {
     let text: String?
     func body(content: Content) -> some View {
         content
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            .scrollEdgeEffectStyle(.soft, for: .bottom)   // the soft edge, never a ruled line through the rows
+            .safeAreaBar(edge: .bottom, spacing: 0) {
                 if let text {
-                    Text(text).font(size: 13, relativeTo: .footnote).foregroundStyle(Color(.systemRed))
+                    // Red on the warning glyph, the words at full strength: small red text on the bar is under 4.5:1.
+                    Label { Text(text).foregroundStyle(.primary) } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color(.systemRed))
+                    }
+                    .font(size: 13, relativeTo: .footnote)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 32).padding(.vertical, 10)
-                        .background(.bar)
+                        .bottomBarFade()
                 }
             }
             .onChange(of: text) { if let text { AccessibilityNotification.Announcement(text).post() } }
@@ -953,18 +960,19 @@ struct GroupDetailSheet: View {
         line(divided: divided) {
             Button { opened = .pip(m.id) } label: {
                 HStack(spacing: 12) {
-                    FaceView(look: m.look, size: 40).frame(width: 40, height: 40)
+                    FaceView(look: m.look.with(.rest), size: 40).frame(width: 40, height: 40)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(m.name).lineLimit(1)
                         if let job = m.isOtto ? String(localized: "Always in the group") : pips.details[m.id]?.job {
-                            Text(job).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
+                            Text(job).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(2)
                         }
                     }
                     Spacer(minLength: 8)
-                    Text(Self.state(m.state)).font(size: 15, relativeTo: .subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .contentShape(.rect)
             }
+            // The face shows the state; VoiceOver hears it.
+            .accessibilityValue(Self.state(m.state))
             .buttonStyle(.plain)
             .allowsHitTesting(!m.isOtto)   // Otto has no pip page
             if !m.isOtto {
@@ -1022,7 +1030,7 @@ private struct NewGroupSheet: View {
                             if picked.remove(p.id) == nil { picked.insert(p.id) }
                         } label: {
                             HStack(spacing: 12) {
-                                FaceView(look: p.look, size: 32).frame(width: 32, height: 32)
+                                FaceView(look: p.look.with(.rest), size: 32).frame(width: 32, height: 32)
                                 Text(p.name).lineLimit(1)
                                 Spacer(minLength: 8)
                                 if picked.contains(p.id) { Image(systemName: "checkmark").fontWeight(.semibold) }
@@ -1246,7 +1254,7 @@ private struct PipEditSheet: View {
                     HStack {
                         Text(s.name.isEmpty ? "New schedule" : s.name).lineLimit(1)
                         Spacer(minLength: 8)
-                        Text(Self.incomplete(s) ? "Incomplete" : s.label).lineLimit(1)
+                        Text(Self.incomplete(s) ? "Incomplete" : humanCron(s.schedule) ?? s.label).lineLimit(1)
                             .foregroundStyle(Self.incomplete(s) ? Color(.systemRed) : .secondary)
                     }
                 }
@@ -1291,6 +1299,8 @@ private struct ScheduleEditor: View {
 
     private let cal = Calendar.current
     private var week: [Int] { (0..<7).map { ($0 + cal.firstWeekday - 1) % 7 } }
+    @ScaledMetric(relativeTo: .subheadline) private var disc: CGFloat = 36
+    @Environment(\.dynamicTypeSize) private var type
 
     init(schedule: Binding<PipSchedule>) {
         _schedule = schedule
@@ -1318,7 +1328,10 @@ private struct ScheduleEditor: View {
                 TextField("What the pip should do each time", text: $schedule.ask, axis: .vertical)
             }
             Section {
-                HStack(spacing: 0) { ForEach(week, id: \.self, content: day) }
+                // At accessibility sizes the days grow, so they take two rows.
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: type.isAccessibilitySize ? 4 : 7), spacing: 4) {
+                    ForEach(week, id: \.self, content: day)
+                }
                 DatePicker("Time", selection: time, displayedComponents: .hourAndMinute)
             } header: {
                 Text("When")
@@ -1338,9 +1351,9 @@ private struct ScheduleEditor: View {
             // A schedule that never runs is a deleted one, and that's the row's swipe.
             if !on { when.days.insert(d) } else if when.days.count > 1 { when.days.remove(d) }
         } label: {
-            Text(cal.veryShortStandaloneWeekdaySymbols[d]).font(.system(size: 15, weight: .medium))
+            Text(cal.veryShortStandaloneWeekdaySymbols[d]).font(size: 15, weight: .medium, relativeTo: .subheadline)
                 .foregroundStyle(on ? Color(.systemBackground) : .primary)
-                .frame(width: 36, height: 36)
+                .frame(width: disc, height: disc)
                 .background(on ? Color.primary : Color(.secondarySystemFill), in: .circle)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .contentShape(.rect)
@@ -1362,7 +1375,8 @@ private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
 
 private func section<C: View>(_ title: String, bottom: CGFloat = 24, @ViewBuilder _ c: () -> C) -> some View {
     VStack(alignment: .leading, spacing: 6) {
-        Text(title).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).padding(.horizontal, 32)
+        // The same header a List section draws (the edit sheet's, the contact card's): 17pt semibold.
+        Text(title).font(size: 17, weight: .semibold, relativeTo: .headline).foregroundStyle(.secondary).padding(.horizontal, 32)
         VStack(spacing: 0) { c() }
             .background(Color(sheetColour), in: .rect(cornerRadius: 26, style: .continuous))
             .padding(.horizontal, 16)
@@ -1414,8 +1428,9 @@ private struct PillButton: View {
             }
             .font(size: 17, weight: .semibold, relativeTo: .headline)
             .frame(maxWidth: .infinity).frame(minHeight: 50)
-            .foregroundStyle(primary ? Color(.systemBackground) : destructive ? Color(.systemRed) : .primary)
-            .background(primary ? Color.primary : Color(.secondarySystemFill), in: .capsule)
+            // Primary is the app's one accent, as Pay, Copy code and Done are.
+            .foregroundStyle(primary ? .white : destructive ? Color(.systemRed) : .primary)
+            .background(primary ? Color.accentColor : Color(.secondarySystemFill), in: .capsule)
             .contentShape(.capsule)
         }
         .buttonStyle(PillPress())

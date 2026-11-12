@@ -125,14 +125,14 @@ struct SearchResults: View {
     /// The app's "Couldn't load · Retry", saying what didn't load.
     private var couldntLoad: some View {
         Button(action: retry) {
-            (Text("Couldn't load older messages\u{00A0}· ").foregroundStyle(.secondary) + Text("Retry").foregroundStyle(.blue))
+            (Text("Couldn’t load older messages\u{00A0}· ").foregroundStyle(.secondary) + Text("Try again").foregroundStyle(.blue))
                 .multilineTextAlignment(.center)
                 .hitSlop()
         }
         .buttonStyle(.plain)
         .font(size: 13, relativeTo: .footnote)
         .padding(.horizontal, 16)
-        .accessibilityLabel("Couldn't load older messages. Retry")
+        .accessibilityLabel("Couldn’t load older messages. Retry")
     }
 }
 
@@ -160,7 +160,7 @@ private struct SearchHit: View {
     var body: some View {
         Button(action: open) {
             VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
-                Text(message.date.formatted(date: .abbreviated, time: .shortened))
+                Text(messageWhen(message.date))
                     .font(size: 11, relativeTo: .caption2)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 4)

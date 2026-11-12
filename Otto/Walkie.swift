@@ -36,6 +36,8 @@ struct WalkieView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var recorder = VoiceRecorder()
     @State private var holding = false
+    /// Reduce Motion: the disc, ring and face hold their size; the ring's colour, the caption and the waveform say it's listening.
+    @Environment(\.accessibilityReduceMotion) private var still
     @State private var sentAt: Date?
     /// The last note sent, offered again if it gets nowhere.
     @State private var note: Message.ID?
@@ -89,7 +91,7 @@ struct WalkieView: View {
                 .frame(height: 44)
                 .padding(.horizontal, 40)
                 .padding(.top, 18)
-                .opacity(phase == .listening || phase == .speaking ? 1 : 0.25)
+                .opacity(phase == .listening || phase == .speaking ? 1 : 0)   // nothing to show at rest
 
             Spacer(minLength: 24)
 
@@ -98,12 +100,12 @@ struct WalkieView: View {
                 if stuck {
                     // The thread's own words for an unsent message, and the same way on.
                     Button(action: retry) {
-                        (Text(sent?.pending == true ? "Not delivered · " : "Otto didn't answer · ").foregroundStyle(.red)
+                        (Text(sent?.pending == true ? "Not delivered · " : "Otto didn’t answer · ").foregroundStyle(.red)
                          + Text("Try again").foregroundStyle(.blue)).hitSlop()
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Text(reply.map { $0.text.isEmpty ? "…" : $0.text } ?? "Hold Otto and talk. Let go to send.")
+                    Text(reply.map { $0.text.isEmpty ? "…" : $0.text } ?? " ")   // one instruction at a time: the caption says it
                         .foregroundStyle(reply == nil ? .secondary : .primary)
                 }
             }
@@ -166,15 +168,15 @@ struct WalkieView: View {
             Circle()
                 .fill(Color.orange.opacity(phase == .listening ? 0.18 : 0.08))
                 .frame(width: 236, height: 236)
-                .scaleEffect(phase == .listening ? 1 + level * 0.35 : 1)
+                .scaleEffect(phase == .listening && !still ? 1 + level * 0.35 : 1)
                 .animation(.easeOut(duration: 0.08), value: level)
             Circle()
                 .strokeBorder(Color.orange.opacity(phase == .listening ? 0.9 : 0), lineWidth: 3)
                 .frame(width: 200, height: 200)
-                .scaleEffect(phase == .listening ? 1 : 0.9)
+                .scaleEffect(phase == .listening || still ? 1 : 0.9)
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: phase == .listening)
-            OttoAvatar(size: 180, thinking: phase == .thinking, lookingAtCursor: phase == .listening)
-                .scaleEffect(holding ? 0.96 : 1)
+            OttoAvatar(size: 180, thinking: phase == .thinking)
+                .scaleEffect(holding && !still ? 0.96 : 1)
                 .animation(.spring(response: 0.25, dampingFraction: 0.7), value: holding)
         }
         .contentShape(.circle)
@@ -184,15 +186,19 @@ struct WalkieView: View {
                 .onEnded { _ in holding = false; end() }
         )
         .accessibilityElement()
-        .accessibilityLabel("Talk to Otto")
-        .accessibilityHint("Touch and hold while you speak, then let go to send.")
+        // VoiceOver and Switch Control can't hold: activate once to talk, again to send.
+        .accessibilityLabel(phase == .listening ? "Send to Otto" : "Talk to Otto")
+        .accessibilityHint(phase == .listening ? "Sends what you said." : "Starts listening. Activate again to send.")
         .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            if holding { holding = false; end() } else { holding = true; Task { await begin() } }
+        }
     }
 
     private var caption: String {
         switch phase {
-        case .listening: "Listening"
-        case .thinking: "Otto's thinking"
+        case .listening: "Let go to send"
+        case .thinking: "Otto’s thinking"
         case .speaking: "Otto"
         case .idle: "Hold to talk"
         }

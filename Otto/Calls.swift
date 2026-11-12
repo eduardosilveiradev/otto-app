@@ -126,10 +126,9 @@ struct CallSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                transcript
-                if canAct { controls }
-            }
+            // The controls float on a system bar over the transcript's soft edge, as the thread's composer does.
+            transcript
+                .safeAreaBar(edge: .bottom, spacing: 0) { if canAct { controls } }
             .navigationTitle(call.to)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -194,28 +193,32 @@ struct CallSheet: View {
 
     private var controls: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                TextField("Something to say on the call", text: $draft, axis: .vertical)
-                    .lineLimit(1...4)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 20))
-                Menu {
-                    Button { Task { await say("say") } } label: { Label("Say it word for word", systemImage: "speaker.wave.2") }
-                    Button { Task { await say("tell") } } label: { Label("Tell the bot", systemImage: "text.bubble") }
-                } label: {
-                    Image(systemName: "arrow.up").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-                        .frame(width: 34, height: 34).background(Color.blue, in: .circle)
-                } primaryAction: { Task { await say("say") } }
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1)
-                .accessibilityLabel("Say it. Hold for more.")
-            }
-            HStack(spacing: 10) {
-                Button { confirmTakeover = true } label: {
-                    Label("Take Over", systemImage: "phone.arrow.right").frame(maxWidth: .infinity)
+            // The thread composer's shape: the send pill inside the field, there once there's something to send.
+            TextField("Something to say on the call", text: $draft, axis: .vertical)
+                .lineLimit(1...4)
+                .padding(.leading, 14).padding(.trailing, 48).padding(.vertical, 9)
+                .overlay(alignment: .bottomTrailing) {
+                    if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Menu {
+                            Button { Task { await say("say") } } label: { Label("Say it word for word", systemImage: "speaker.wave.2") }
+                            Button { Task { await say("tell") } } label: { Label("Tell the bot", systemImage: "text.bubble") }
+                        } label: {
+                            Image(systemName: "arrow.up").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                                .frame(width: 37, height: 27).background(.outgoingBubble, in: .capsule)
+                        } primaryAction: { Task { await say("say") } }
+                        .padding(.trailing, 6.5).padding(.bottom, 5.5)
+                        .accessibilityLabel("Say it. Hold for more.")
+                    }
                 }
-                .buttonStyle(.glass)
-                .disabled(!call.takeover)
+                .glassEffect(.regular, in: .rect(cornerRadius: 20))
+            HStack(spacing: 10) {
+                // Only when the line can be handed over; a disabled one read as a broken button.
+                if call.takeover {
+                    Button { confirmTakeover = true } label: {
+                        Label("Take Over", systemImage: "phone.arrow.right").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                }
                 Button(role: .destructive) { confirmEnd = true } label: {
                     Label("End", systemImage: "phone.down.fill").frame(maxWidth: .infinity)
                 }
@@ -224,7 +227,6 @@ struct CallSheet: View {
             .controlSize(.large)
         }
         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
-        .background(.bar)
     }
 
     private func say(_ action: String) async {
@@ -238,14 +240,14 @@ struct CallSheet: View {
         var body: [String: Any] = ["id": call.id, "action": action]
         if let text { body["text"] = text }
         guard let r: ControlResult = await store.backend.dash("calls/control", method: "POST", body: body) else {
-            note = "Couldn't reach your Mac."
+            note = "Couldn’t reach your Mac."
             return false
         }
         if r.ok {
             note = ["say": "Said on the call.", "tell": "Passed to the bot.", "end": "Hanging up.", "takeover": "Ringing your phone."][action]
             if action == "end" || action == "takeover" { handedOff = true; listener.stop() }
         } else {
-            note = r.error ?? "Otto couldn't do that."
+            note = r.error ?? "Otto couldn’t do that."
         }
         return r.ok
     }
@@ -280,7 +282,8 @@ private struct CallBubble: View {
             Text(line.text)
                 .foregroundStyle(ours ? .white : .primary)
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(ours ? Color.blue : Color(.systemGray5), in: .rect(cornerRadius: 18))
+                // The thread's own bubbles: Otto's side in the slate grey with a tail, theirs in the incoming grey.
+                .background(BubbleShape(mine: ours, tail: true).fill(ours ? Color.outgoingBubble : Color(.secondarySystemFill)))   // the thread grey vanishes on the sheet
                 .opacity(partial ? 0.55 : 1)
                 .frame(maxWidth: 300, alignment: ours ? .trailing : .leading)
         }
@@ -298,10 +301,6 @@ struct CallsScreen: View {
     var body: some View {
         Loaded(path: "calls") { (r: DashCalls, reload) in
             List {
-                if r.calls.isEmpty {
-                    Text("No calls in the last two hours. Ask Otto to call somewhere and it shows up here while it rings.")
-                        .foregroundStyle(.secondary)
-                }
                 ForEach(r.calls) { c in
                     Button { open = c } label: {
                         HStack(spacing: 12) {
@@ -320,6 +319,8 @@ struct CallsScreen: View {
                     .tint(.primary)
                 }
             }
+            .emptyState(r.calls.isEmpty, "No recent calls", systemImage: "phone",
+                        "Calls from the last two hours. Ask Otto to call somewhere and it shows up here while it rings.")
             .refreshable { await reload() }
         }
         .navigationTitle("Calls").navigationBarTitleDisplayMode(.inline)

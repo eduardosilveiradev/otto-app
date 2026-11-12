@@ -21,10 +21,11 @@ private struct LoopsList: View {
     var body: some View {
         let text = Dictionary(l.open.map { ($0.id, $0.text) }, uniquingKeysWith: { a, _ in a })
         List {
-            Section {
-                if l.open.isEmpty { Text("Nothing open.").foregroundStyle(.secondary) }
-                ForEach(l.open) { row($0, closed: flipped.contains($0.id)) }
-            } header: { Text("Open · \(l.open.count)") }
+            if !l.open.isEmpty {
+                Section {
+                    ForEach(l.open) { row($0, closed: flipped.contains($0.id)) }
+                } header: { Text("Open · \(l.open.count)") }
+            }
 
             let p = l.plan
             if !p.close.isEmpty || !p.propose.isEmpty || !p.avoidance.isEmpty {
@@ -33,9 +34,9 @@ private struct LoopsList: View {
                         plan("checkmark.circle", text[c.id] ?? c.id, "closes it: \(c.reason)")
                     }
                     ForEach(p.propose, id: \.id) { c in plan("questionmark.circle", c.text, "asks you: \(c.reason)") }
-                    ForEach(p.avoidance, id: \.id) { c in plan("arrow.uturn.right.circle", c.text, "pushed back \(c.deferrals) times") }
-                } header: { Text("Tonight's hygiene pass") } footer: {
-                    Text("Runs at 05:00. It only closes what the evidence closes; the rest it asks about.")
+                    ForEach(p.avoidance, id: \.id) { c in plan("arrow.uturn.right.circle", c.text, "pushed back \(c.deferrals)×") }
+                } header: { Text("Overnight tidy-up") } footer: {
+                    Text("Runs at \(Self.fiveAM). Closes what’s clearly done, asks you about the rest.")
                 }
             }
 
@@ -45,6 +46,8 @@ private struct LoopsList: View {
                 }
             }
         }
+        .emptyState(l.open.isEmpty && l.recent.isEmpty && l.plan.close.isEmpty && l.plan.propose.isEmpty && l.plan.avoidance.isEmpty,
+                    "Nothing open", systemImage: "checklist", "Things you said you’d do show up here.")
         .refreshable { await reload() }
     }
 
@@ -65,7 +68,7 @@ private struct LoopsList: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(r.text).lineLimit(3).strikethrough(closed).foregroundStyle(closed ? .secondary : .primary)
                     let m = meta(r)
-                    if !m.isEmpty { Text(m).font(.footnote).foregroundStyle(.secondary).lineLimit(2) }
+                    if !m.isEmpty { Text(m).font(.footnote).foregroundStyle(late(r) ? .red : .secondary).lineLimit(2) }
                 }
             }
         }
@@ -74,9 +77,20 @@ private struct LoopsList: View {
         }
     }
 
+    /// The tidy-up's 05:00 in the phone's own clock style ("5:00 AM" or "05:00").
+    private static var fiveAM: String {
+        Calendar.current.date(bySettingHour: 5, minute: 0, second: 0, of: .now)?.formatted(date: .omitted, time: .shortened) ?? "05:00"
+    }
+
+    /// Open and past its day. Compared as calendar days ("2026-11-07"), so a time zone can't shift it.
+    private func late(_ r: LoopRow) -> Bool {
+        guard let due = r.due, r.status == nil || r.status == "open" else { return false }
+        return due.prefix(10) < Date.now.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+    }
+
     private func meta(_ r: LoopRow) -> String {
         var bits: [String] = []
-        if let due = r.due { bits.append("due \(day(due))") }
+        if let due = r.due { bits.append("\(late(r) ? "was due" : "due") \(day(due))") }
         if let n = r.deferrals?.count, n > 0 { bits.append("pushed back \(n)×") }
         if let why = r.closedReason { bits.append(why) } else if let at = r.closedAt { bits.append("closed \(ago(at))") }
         if r.status == nil || r.status == "open" { bits.append("opened \(ago(r.createdAt))") }
@@ -183,7 +197,7 @@ private struct MoneyList: View {
                         Button { category = category == c.category ? nil : c.category } label: {
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack {
-                                    Text(c.category.capitalized)
+                                    Text(c.category.prefix(1).uppercased() + c.category.dropFirst())   // sentence case, "Eating out"
                                     if category == c.category { Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(.orange) }
                                     Spacer()
                                     Text(money(c.total, cur)).monospacedDigit().foregroundStyle(.secondary)
@@ -233,7 +247,7 @@ struct TripsScreen: View {
             let upcoming = t.trips.filter { $0.end >= today }.sorted { $0.start < $1.start }
             let past = t.trips.filter { $0.end < today }.sorted { $0.start > $1.start }
             List {
-                if upcoming.isEmpty { Text(t.trips.isEmpty ? "No bookings on file. Forward a confirmation to Otto." : "Nothing coming up.").foregroundStyle(.secondary) }
+                if upcoming.isEmpty && !past.isEmpty { Text("Nothing coming up.").foregroundStyle(.secondary) }
                 ForEach(upcoming) { trip($0, t) }
                 if !past.isEmpty {
                     Section {
@@ -243,6 +257,7 @@ struct TripsScreen: View {
                     }
                 }
             }
+            .emptyState(t.trips.isEmpty, "No trips", systemImage: "airplane", "Forward a booking confirmation to Otto.")
             .refreshable { await reload() }
         }
         .navigationTitle("Trips").navigationBarTitleDisplayMode(.inline)
@@ -276,7 +291,7 @@ struct TripsScreen: View {
                 if t.current?.id == trip.id { Pill(text: t.current?.mode == "current" ? "Now" : "Next", tint: .orange) }
             }
         } footer: {
-            if let ps = t.problems[trip.id], !ps.isEmpty { Text(ps.joined(separator: "\n")).foregroundStyle(.orange) }
+            if let ps = t.problems[trip.id], !ps.isEmpty { Text(ps.joined(separator: "\n")).foregroundStyle(Color.orangeText) }
         }
     }
 }
@@ -305,7 +320,6 @@ struct PackagesList: View {
         let active = p.packages.filter { $0.status != "delivered" }
         let delivered = p.packages.filter { $0.status == "delivered" }
         List {
-            if p.packages.isEmpty { Text("Packages show up here as shipping emails arrive.").foregroundStyle(.secondary) }
             ForEach(active) { pkg in
                 package(pkg, header: pkg.id == active.first?.id ? "On the way · \(active.count)" : nil)
             }
@@ -313,6 +327,7 @@ struct PackagesList: View {
                 package(pkg, header: pkg.id == delivered.first?.id ? "Delivered" : nil)
             }
         }
+        .emptyState(p.packages.isEmpty, "No packages", systemImage: "shippingbox", "Packages show up here as shipping emails arrive.")
         .refreshable { await reload() }
     }
 
@@ -336,17 +351,12 @@ struct PackagesList: View {
                 }
             }
 
-            Button {
-                if let u = pkg.trackingUrl.flatMap(URL.init(string:)) { openURL(u) }
-            } label: {
-                HStack(spacing: 12) {
-                    RowIcon(symbol: "shippingbox")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(pkg.carrierName).foregroundStyle(.primary)
-                        if let t = pkg.tracking { Text(t).font(.footnote.monospaced()).foregroundStyle(.secondary) }
-                    }
-                    Spacer()
-                    if pkg.trackingUrl != nil { Image(systemName: "arrow.up.right").font(.footnote).foregroundStyle(.tertiary) }
+            Group {
+                // Only a row with somewhere to go is a button.
+                if let u = pkg.trackingUrl.flatMap(URL.init(string:)) {
+                    Button { openURL(u) } label: { carrierRow(pkg, link: true) }.buttonStyle(.plain)
+                } else {
+                    carrierRow(pkg, link: false)
                 }
             }
             .contextMenu {
@@ -370,6 +380,19 @@ struct PackagesList: View {
     }
 
     /// "Arrives Tue 20 Oct", "Arrives 16–20 Oct", "Delivered Mon 19 Oct".
+    private func carrierRow(_ pkg: DashPackages.Package, link: Bool) -> some View {
+        HStack(spacing: 12) {
+            RowIcon(symbol: "shippingbox")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pkg.carrierName).foregroundStyle(.primary)
+                if let t = pkg.tracking { Text(t).font(.footnote.monospaced()).foregroundStyle(.secondary) }
+            }
+            Spacer()
+            if link { Image(systemName: "arrow.up.right").font(.footnote).foregroundStyle(.tertiary) }
+        }
+        .contentShape(.rect)
+    }
+
     private func arrival(_ pkg: DashPackages.Package) -> String {
         if pkg.status == "delivered" {
             let d = dashDate(pkg.deliveredAt) ?? dashDate(pkg.updatedAt)

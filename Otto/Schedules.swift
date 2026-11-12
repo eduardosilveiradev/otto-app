@@ -12,6 +12,14 @@ struct TriggerDetail: Decodable {
 
 extension DashTrigger {
     var next: Date? { nextRun.map { Date(timeIntervalSince1970: $0 / 1000) } }
+    /// When it runs, in words, and how soon: one line for Schedules and Activity alike.
+    var whenLine: String {
+        let line = scheduleLine(type: type, schedule: schedule, repeating: repeating, next: next)
+        if !enabled { return lastFired.map { "ran \(ago($0))" } ?? "paused" }
+        if repeating, let n = next { return "\(line) · next \(ago(n))" }
+        if let n = next { return "\(line) · \(ago(n))" }
+        return line
+    }
     var icon: String { type == "email" ? "envelope.badge" : repeating ? "repeat" : "alarm" }
 }
 
@@ -19,7 +27,14 @@ extension DashTrigger {
 func scheduleLine(type: String, schedule: String?, repeating: Bool, next: Date?) -> String {
     if type == "email" { return "When matching mail arrives" }
     if repeating, let s = schedule { return humanCron(s) ?? s }
-    return next?.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute()) ?? schedule ?? ""
+    guard let next else { return schedule ?? "" }
+    // "Today at 4:35 PM", "Tomorrow at 9:00 AM", as first-party apps say it; later days keep their date.
+    if Calendar.current.isDateInToday(next) || Calendar.current.isDateInTomorrow(next) {
+        let f = DateFormatter()
+        f.dateStyle = .medium; f.timeStyle = .short; f.doesRelativeDateFormatting = true
+        return f.string(from: next)
+    }
+    return next.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
 }
 
 /// The common shapes of a 5-field cron in words; nil for anything else, which then shows as written.
@@ -29,7 +44,9 @@ func humanCron(_ s: String) -> String? {
     if let n = f[0].stepValue, f[1] == "*" { return "Every \(n) minutes" }
     if let n = f[1].stepValue, let m = Int(f[0]) { return "Every \(n) hours at :\(String(format: "%02d", m))" }
     guard let m = Int(f[0]), let h = Int(f[1]) else { return nil }
-    let at = String(format: "%02d:%02d", h, m)
+    // In the phone's own clock style: "7:30 AM" or "07:30", as every other time on screen.
+    let at = Calendar.current.date(from: DateComponents(hour: h, minute: m))?.formatted(date: .omitted, time: .shortened)
+        ?? String(format: "%02d:%02d", h, m)
     let names = Calendar.current.weekdaySymbols   // Sunday first, as cron counts
     switch f[4] {
     case "*": return "Every day at \(at)"
@@ -58,7 +75,7 @@ struct ScheduleChip: View {
                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(.blue)
                     .frame(width: 30, height: 30).background(Color.blue.opacity(0.12), in: .circle)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(trigger.gist).font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(1)
+                    Text(trigger.gist).font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(2)
                     Text(scheduleLine(type: trigger.type, schedule: trigger.schedule, repeating: trigger.repeating, next: trigger.next))
                         .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -130,7 +147,7 @@ struct SchedulesScreen: View {
         let mail = on.filter { $0.type == "email" }
         let off = t.triggers.filter { !$0.enabled }.sorted { ($0.lastFired ?? "") > ($1.lastFired ?? "") }
         return List {
-            if on.isEmpty { Text("Nothing scheduled.").foregroundStyle(.secondary) }
+            if on.isEmpty && !off.isEmpty { Text("Nothing scheduled.").foregroundStyle(.secondary) }
             if !once.isEmpty { Section("Coming up") { ForEach(once) { row($0) } } }
             if !repeating.isEmpty { Section("Repeating") { ForEach(repeating) { row($0) } } }
             if !mail.isEmpty { Section("Watching mail") { ForEach(mail) { row($0) } } }
@@ -142,6 +159,7 @@ struct SchedulesScreen: View {
                 }
             }
         }
+        .emptyState(t.triggers.isEmpty, "Nothing scheduled", systemImage: "calendar.badge.clock", "Ask Otto to remind you, or to check something on a schedule.")
     }
 
     private func row(_ t: DashTrigger) -> some View {
@@ -149,18 +167,11 @@ struct SchedulesScreen: View {
             Label {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(t.gist).lineLimit(2)
-                    Text(sub(t)).font(.footnote).foregroundStyle(.secondary)
+                    Text(t.whenLine).font(.footnote).foregroundStyle(.secondary)
                 }
             } icon: { RowIcon(symbol: t.icon) }
             .opacity(t.enabled ? 1 : 0.5)
         }
     }
 
-    private func sub(_ t: DashTrigger) -> String {
-        let line = scheduleLine(type: t.type, schedule: t.schedule, repeating: t.repeating, next: t.next)
-        if !t.enabled { return t.lastFired.map { "ran \(ago($0))" } ?? "paused" }
-        if t.repeating, let n = t.next { return "\(line) · next \(ago(n))" }
-        if let n = t.next { return "\(line) · \(ago(n))" }
-        return line
-    }
 }

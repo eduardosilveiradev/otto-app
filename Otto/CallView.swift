@@ -59,16 +59,17 @@ final class CallManager {
                     try? await vapi.startLocalAudioLevelObserver()
                 }
             // Ended before it started: a room that can't be joined says "left" before its error.
-            case .callDidEnd: if phase == .connecting { fail("Couldn't connect.") } else { phase = .ended }
+            case .callDidEnd: if phase == .connecting { fail("Couldn’t connect.") } else { phase = .ended }
             case .speechUpdate(let s): if s.role == .assistant { ottoSpeaking = s.status == .started }
-            case .error(let e): fail(e.localizedDescription)
+            // The app's own words, not the system's ("Could not connect to the server.").
+            case .error: fail("Can’t reach your Mac.")
             default: break
             }
         }.store(in: &bag)
         // "calling…" doesn't wait forever: a call that hasn't connected in 20 seconds won't.
         Task {
             try? await Task.sleep(for: .seconds(20))
-            if self.vapi === vapi && phase == .connecting { fail("Couldn't connect.") }
+            if self.vapi === vapi && phase == .connecting { fail("Couldn’t connect.") }
         }
 
         var overrides: [String: Any] = [:]
@@ -135,7 +136,7 @@ struct CallView: View {
                     .padding(.top, 8)
                 status.font(.headline).foregroundStyle(.white.opacity(0.6)).padding(.top, 4)
                 if let e = call.error {
-                    Text(e).font(.footnote).foregroundStyle(.red.opacity(0.8)).multilineTextAlignment(.center)
+                    Text(e).font(.footnote).foregroundStyle(.white.opacity(0.6)).multilineTextAlignment(.center)   // one status with "call failed"
                         .padding(.top, 8).padding(.horizontal, 40)
                 }
                 Spacer()

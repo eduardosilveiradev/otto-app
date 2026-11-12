@@ -41,6 +41,8 @@ struct OTPDrawer: View {
     @Environment(\.dismiss) private var dismiss
     @State private var shown = false
     @State private var copied = false
+    /// Fits what's in it, so a large text size grows the drawer instead of clipping the button.
+    @State private var height: CGFloat = 250
 
     var body: some View {
         VStack(spacing: 20) {
@@ -63,7 +65,8 @@ struct OTPDrawer: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 24)
-        .presentationDetents([.height(250)])
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = max(250, $0 + 24) }
+        .presentationDetents([.height(height)])
         .presentationDragIndicator(.visible)
         .onAppear { shown = true }
         .transaction { if UIAccessibility.isReduceMotionEnabled { $0.animation = nil } }

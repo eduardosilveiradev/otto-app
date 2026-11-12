@@ -54,7 +54,8 @@ struct ApprovalSheet: View {
                 }
             }
             // "Approved", not "Paid": the Mac has the go-ahead; the payment itself is Otto's to report in the chat.
-            .navigationTitle(paid ? "Approved" : request.title)
+            // The amount the way the sheet writes it ("€17.00"), not the server's "17.00 EUR".
+            .navigationTitle(paid ? "Approved" : request.payment.map { "Pay \($0.money($0.total))" } ?? request.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if !paid {
@@ -63,12 +64,14 @@ struct ApprovalSheet: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .bottom) {
+            // A system bar: the sheet's soft scroll edge under the buttons, not a ruled strip across the rows.
+            .scrollEdgeEffectStyle(.soft, for: .bottom)
+            .safeAreaBar(edge: .bottom) {
+                Group {
                 if paid {
                     Button { store.closeApproval(request.id) } label: { Text("Done").frame(maxWidth: .infinity) }
                         .buttonStyle(.borderedProminent).controlSize(.large)
                         .padding(.horizontal, 20).padding(.vertical, 12)
-                        .background(.bar)
                 } else if let tried = unconfirmed {
                     // The first answer may have landed: only the same one can be sent again, never the other.
                     Button { Task { await decide(tried) } } label: {
@@ -76,7 +79,6 @@ struct ApprovalSheet: View {
                     }
                     .buttonStyle(.borderedProminent).controlSize(.large)
                     .padding(.horizontal, 20).padding(.vertical, 12)
-                    .background(.bar)
                 } else {
                 HStack(spacing: 12) {
                     Button(role: .destructive) { Task { await decide(false) } } label: {
@@ -91,8 +93,9 @@ struct ApprovalSheet: View {
                 .controlSize(.large)
                 .disabled(busy)
                 .padding(.horizontal, 20).padding(.vertical, 12)
-                .background(.bar)
                 }
+                }
+                .bottomBarFade()
             }
         }
         .interactiveDismissDisabled()
@@ -153,11 +156,7 @@ struct ApprovalSheet: View {
                     HStack(spacing: 6) {
                         Text(f.path).font(.system(.subheadline, design: .monospaced)).lineLimit(2)
                         Spacer(minLength: 4)
-                        Text(f.tier)
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(f.tier == "guarded" ? Color.orange.opacity(0.2) : Color.secondary.opacity(0.15), in: .capsule)
-                            .foregroundStyle(f.tier == "guarded" ? Color.orange : Color.secondary)
+                        Pill(text: f.tier, tint: f.tier == "guarded" ? .orange : .secondary)
                     }
                     Text(f.why).font(.caption).foregroundStyle(.secondary)
                 }
@@ -167,9 +166,8 @@ struct ApprovalSheet: View {
 
         if let stat = request.stat {
             Section {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(stat).font(.system(.caption, design: .monospaced)).fixedSize()
-                }
+                // Wrapped, not a sideways scroll nothing hinted at.
+                Text(stat).font(.system(.caption, design: .monospaced))
             } header: { Text(request.branch.map { "Diff against main · \($0)" } ?? "Diff") }
         }
     }
@@ -196,7 +194,7 @@ struct ApprovalSheet: View {
         // The decision may have landed and only its answer been lost: trying again is safe (same decision),
         // but saying "nothing was paid" might not be true.
         case .unknown:
-            failed = "Couldn't confirm with your Mac. Check the chat, or try again."
+            failed = "Couldn’t confirm with your Mac. Check the chat, or try again."
             unconfirmed = approve
         }
     }
@@ -221,17 +219,16 @@ struct PrintedReceipt: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            machine.zIndex(2)
+            machine.zIndex(2).accessibilityHidden(true)   // the printer is decoration; the paper carries the facts
             output.padding(.top, -16).zIndex(1)
         }
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
-        // Printed: its longest row ("Paid with … 6983") is already the paper's width at the default
-        // size, so the receipt shrinks with smaller text but doesn't grow. VoiceOver reads it whole.
-        .dynamicTypeSize(...DynamicTypeSize.large)
+        // Grows with the text size like everything else; a row too wide for the paper stacks its value
+        // under its label (see row). VoiceOver walks the paper row by row, as it's printed.
         .task { await run() }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Receipt for \(payment.money(payment.total)) to \(payment.merchant)")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Receipt")
     }
 
     private func run() async {
@@ -359,6 +356,7 @@ struct PrintedReceipt: View {
             .foregroundStyle(Color(white: 0.35))
             .padding(.vertical, 6)
             Barcode(seed: payment.merchant + payment.money(payment.total)).frame(height: 34).padding(.top, 10).padding(.horizontal, 30)
+                .accessibilityHidden(true)
             Text(payment.test == true ? "TEST · NOTHING CHARGED" : "THANK YOU").font(size: 9, design: .monospaced, relativeTo: .caption2)
                 .foregroundStyle(Color(white: 0.5)).frame(maxWidth: .infinity).padding(.top, 4)
         }
@@ -375,7 +373,11 @@ struct PrintedReceipt: View {
     }
 
     private func row(_ l: String, _ r: String) -> some View {
-        HStack(alignment: .firstTextBaseline) { Text(l).lineLimit(1); Spacer(minLength: 12); Text(r).lineLimit(1) }
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline) { Text(l).lineLimit(1); Spacer(minLength: 12); Text(r).lineLimit(1) }
+            VStack(alignment: .leading, spacing: 2) { Text(l); Text(r) }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)   // "Total, €17.00", one stop
     }
 
     private struct Line: Shape { func path(in r: CGRect) -> Path { Path { $0.move(to: CGPoint(x: 0, y: r.midY)); $0.addLine(to: CGPoint(x: r.maxX, y: r.midY)) } } }

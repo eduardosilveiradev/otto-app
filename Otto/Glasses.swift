@@ -48,7 +48,7 @@ final class Glasses {
             }
             // .low is 360×640, already the size the Mac wants, so frames go out unscaled.
             guard let cam = try s.addCamera(config: StreamConfiguration(videoCodec: .raw, resolution: .low, frameRate: 15)) else {
-                error = "The glasses didn't offer a camera."
+                error = "The glasses didn’t offer a camera."
                 return stop()
             }
             camera = cam
@@ -108,7 +108,8 @@ struct GlassesScreen: View {
 
     var body: some View {
         List {
-            Section {
+            // No black box before there's a camera to show: the connect button leads until then.
+            if g.session != nil || g.frame != nil { Section {
                 ZStack {
                     Color.black
                     if let f = g.frame { Image(uiImage: f).resizable().scaledToFit() }
@@ -119,7 +120,7 @@ struct GlassesScreen: View {
                 .listRowInsets(EdgeInsets())
             } footer: {
                 if g.stream == .streaming { Text(receiver.isEmpty ? "Preview only" : "\(g.sent) frames sent") }
-            }
+            } }
             Section {
                 if g.registration != .registered {
                     Button("Connect glasses") { Task { await g.register() } }
@@ -134,10 +135,11 @@ struct GlassesScreen: View {
                 TextField("http://your-mac.local:8787", text: $receiver)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
             } header: { Text("Send frames to") } footer: {
-                Text("The Mac's receiver. Empty keeps it on the phone.")
+                Text("The Mac’s receiver. Empty keeps it on the phone.")
             }
             if let e = g.error { Section { Text(e).foregroundStyle(.secondary) } }
         }
         .navigationTitle("Glasses")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
