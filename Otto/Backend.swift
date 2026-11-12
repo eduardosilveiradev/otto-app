@@ -173,6 +173,8 @@ protocol OttoBackend: AnyObject {
     var statuses: AsyncStream<String> { get }
     /// Otto's to-do list for the reply on its way, whole each time; empty when it's over.
     var todoLists: AsyncStream<[TodoItem]> { get }
+    /// Otto's open to-dos (pending, in progress) between turns too, whole each time; empty when none.
+    var openTodoLists: AsyncStream<[TodoItem]> { get }
     /// wireIDs of your messages Otto has just taken in.
     var reads: AsyncStream<[String]> { get }
     var desktopSync: DesktopSync? { get }
@@ -234,6 +236,7 @@ extension OttoBackend {
     var voices: AsyncStream<(String, RemoteFile?)> { AsyncStream { _ in } }
     var edits: AsyncStream<(String, String)> { AsyncStream { _ in } }
     var notifies: AsyncStream<(String, String)> { AsyncStream { _ in } }
+    var openTodoLists: AsyncStream<[TodoItem]> { AsyncStream { _ in } }
     func release() async -> Release? { nil }
     func snooze(_ change: SnoozeChange?) async -> Snooze? { nil }
     func setLoop(_ id: String, done: Bool) async -> Bool { !isLive }

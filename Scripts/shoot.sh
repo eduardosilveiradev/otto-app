@@ -122,6 +122,12 @@ shot chat schedule-recorded 6 "Schedule chip, recorded chips (money, loop, memor
 shot chat long-bubbles 6 "Long wrapping bubbles, links, terminal line" $O -seedThread
 shot chat thinking 6 "Otto typing with its live status line" $O -demoThread -thinking
 shot chat thinking-todos 6 "Typing bubble with a to-do list" $O -demoThread -thinking -todos
+shot chat todos-none 6 "No open to-dos: nothing over the composer" $O -demoThread
+shot chat todos-two 6 "Two open to-dos while Otto is idle: the pill over the composer" $O -demoThread -openTodos
+shot chat todos-one 6 "A single open to-do" $O -demoThread -openTodos one
+shot chat todos-many 6 "Worst case opened: 30 to-dos, a 120-character one in progress; six shown, the rest counted" $O -demoThread -openTodos many -todosOpen
+shot chat todos-expanded 6 "To-do pill tapped open: the one in progress first" $O -demoThread -openTodos -todosOpen
+shot chat todos-while-typing 6 "Otto working: the list is in the bubble, the pill steps aside" $O -demoThread -thinking -todos -openTodos
 shot chat offline 6 "Server unreachable: Otto asleep, reconnecting" $O -demoThread -offline
 shot chat offline-pending 6 "Dead server with a send waiting: Will send when back online" $DEAD $N -longThread b
 shot chat offline-empty 15 "Real dead server: empty thread, asleep" $DEAD $N -emptyThread

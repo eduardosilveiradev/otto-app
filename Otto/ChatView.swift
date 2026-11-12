@@ -776,6 +776,10 @@ struct Composer: View {
     @State private var recorder = VoiceRecorder()
     /// The field's blue flash as a message leaves it (Messages fills the field, then lets go).
     @State private var flash = false
+    /// The to-do pill opened into its list.
+    @State private var todosOpen = ProcessInfo.processInfo.arguments.contains("-todosOpen")
+    /// Otto's open to-dos, over the box while it isn't working; the thinking bubble has them while it is.
+    private var todos: [TodoItem] { thread.isOtto && !thread.typing && recorder.started == nil ? store.openTodos : [] }
 
     struct Attachment: Identifiable { let id = UUID(); let image: UIImage }
 
@@ -805,6 +809,9 @@ struct Composer: View {
         VStack(alignment: .leading, spacing: 8) {
         if !mentionMatches.isEmpty {
             MentionBar(members: mentionMatches, pick: mention).transition(.opacity)
+        }
+        if !todos.isEmpty {
+            TodoPill(items: todos, open: $todosOpen).transition(.opacity)
         }
         HStack(alignment: .bottom, spacing: 12) {
             if thread.isOtto {
@@ -889,6 +896,8 @@ struct Composer: View {
         }
         }
         .animation(.snappy(duration: 0.22), value: mentionMatches.map(\.id))
+        .animation(.snappy(duration: 0.22), value: todos)
+        .animation(.snappy(duration: 0.22), value: todosOpen)
         }
         // Messages pulls the bar in toward the edges while the keyboard is up.
         .padding(.horizontal, focused ? 15 : 27)
@@ -906,7 +915,9 @@ struct Composer: View {
         .allowsHitTesting(!ui.searching)
         .accessibilityHidden(ui.searching)
         .onChange(of: ui.searching) { ui.relayout() }
-        .onChange(of: focused) { ui.focused = focused }
+        .onChange(of: focused) { ui.focused = focused; if focused { todosOpen = false } }
+        .onChange(of: todos) { if todos.isEmpty { todosOpen = false }; ui.relayout() }
+        .onChange(of: todosOpen) { ui.relayout() }
         .onChange(of: draft) { ui.relayout() }
         #if DEBUG
         .onChange(of: store.demoDraft) { if let d = store.demoDraft { draft = d } }
@@ -2260,6 +2271,8 @@ struct Typing: View {
 /// Otto's to-do list inside the thinking bubble: done ones ticked and faded, the current one in full ink.
 struct TodoList: View {
     let items: [TodoItem]
+    /// Off for the idle list over the composer: nothing pulses, and nothing is done.
+    var working = true
 
     var body: some View {
         let done = items.filter { $0.status == .completed }.count
@@ -2269,7 +2282,7 @@ struct TodoList: View {
                     Image(systemName: icon(item.status))
                         .font(size: 12, weight: .semibold, relativeTo: .caption)
                         .foregroundStyle(item.status == .in_progress ? Color.accentColor : .secondary)
-                        .symbolEffect(.pulse, isActive: item.status == .in_progress)
+                        .symbolEffect(.pulse, isActive: working && item.status == .in_progress)
                         .frame(minWidth: 14)
                     Text(item.text)
                         .font(size: 13, weight: item.status == .in_progress ? .medium : .regular, relativeTo: .footnote)
@@ -2281,7 +2294,7 @@ struct TodoList: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityHint("\(done) of \(items.count) done")
+        .accessibilityHint(working ? "\(done) of \(items.count) done" : "")
     }
 
     private func icon(_ s: TodoItem.Status) -> String {
@@ -2290,6 +2303,54 @@ struct TodoList: View {
         case .in_progress: "circle.dotted.circle"
         case .pending: "circle"
         }
+    }
+}
+
+/// Otto's open to-dos over the composer while it isn't working: a quiet "2 to-dos" that opens
+/// in place into the list, the one in progress first. Six at most; the rest are counted.
+struct TodoPill: View {
+    let items: [TodoItem]
+    @Binding var open: Bool
+    @Environment(\.accessibilityReduceMotion) private var still
+
+    var body: some View {
+        // Two filters, not a sort: the order Otto gave stays within each group.
+        let list = items.filter { $0.status == .in_progress } + items.filter { $0.status != .in_progress }
+        let label = items.count == 1 ? "1 to-do" : "\(items.count) to-dos"
+        VStack(alignment: .leading, spacing: 8) {
+            Button { withAnimation(.snappy(duration: 0.22)) { open.toggle() } } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "checklist")
+                    Text(label).monospacedDigit()
+                    Image(systemName: "chevron.down")
+                        .font(size: 10, weight: .semibold, relativeTo: .caption2)
+                        .rotationEffect(.degrees(open && !still ? 180 : 0))
+                        .opacity(open && still ? 0 : 1)
+                }
+                .font(size: 13, weight: .medium, relativeTo: .footnote)
+                .foregroundStyle(.secondary)
+                .frame(minHeight: 34)
+                // 44pt to tap, reaching into the gap above the box rather than up into the thread's strip.
+                .padding(.bottom, 10).contentShape(.rect).padding(.bottom, -10)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label)
+            .accessibilityValue(open ? "Shown" : "Hidden")
+            .accessibilityHint(open ? "Hides the list" : "Shows the list")
+            if open {
+                VStack(alignment: .leading, spacing: 6) {
+                    TodoList(items: Array(list.prefix(6)), working: false)
+                    if list.count > 6 {
+                        Text("\(list.count - 6) more").font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.bottom, 12)
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 12)
+        .glassEffect(.regular, in: .rect(cornerRadius: 17, style: .continuous))
+        .sensoryFeedback(.selection, trigger: open)
     }
 }
 
