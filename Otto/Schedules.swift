@@ -142,7 +142,7 @@ struct SchedulesScreen: View {
                 }
             }
         }
-        .emptyState(t.triggers.isEmpty, "Nothing scheduled", systemImage: "calendar.badge.clock")
+        .emptyState(t.triggers.isEmpty, "Nothing scheduled", systemImage: "calendar.badge.clock", "Ask Otto to remind you, or to check something on a schedule.")
     }
 
     private func row(_ t: DashTrigger) -> some View {

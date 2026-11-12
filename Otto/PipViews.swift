@@ -129,7 +129,7 @@ struct ConversationsView: View {
         .overlay {
             if searchText.isEmpty && pips.list.isEmpty {
                 ContentUnavailableView {
-                    Text("No other conversations yet")
+                    Text("No other conversations yet").font(.title2.bold())
                 } description: {
                     Text("Tap Otto to open your thread. When a job needs its own pip or a group, Otto starts one and it shows up here.")
                 }
@@ -447,8 +447,9 @@ struct ActivityLine: View {
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
             if withFace {
-                FaceView(look: member.look, size: member.isOtto ? 44 : 34)
-                    .frame(width: 40, height: member.isOtto ? 44 : 34)
+                // One size for everyone down the side, Otto too, as Messages does.
+                FaceView(look: member.look, size: 34)
+                    .frame(width: 40, height: 34)
                     .padding(.bottom, -2)
             }
             VStack(alignment: .leading, spacing: 6) {
@@ -843,7 +844,11 @@ private struct FailureLine: ViewModifier {
         content
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if let text {
-                    Text(text).font(size: 13, relativeTo: .footnote).foregroundStyle(Color(.systemRed))
+                    // Red on the warning glyph, the words at full strength: small red text on the bar is under 4.5:1.
+                    Label { Text(text).foregroundStyle(.primary) } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color(.systemRed))
+                    }
+                    .font(size: 13, relativeTo: .footnote)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 32).padding(.vertical, 10)

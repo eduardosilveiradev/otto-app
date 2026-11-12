@@ -108,7 +108,7 @@ struct ActivityScreen: View {
                 }
             }
         }
-        .emptyState(j.jobs.isEmpty, "No background jobs", systemImage: "gearshape.2")
+        .emptyState(j.jobs.isEmpty, "No background jobs", systemImage: "gearshape.2", "Longer tasks Otto runs on your Mac show up here.")
     }
 
     private func triggers(_ t: Triggers) -> some View {

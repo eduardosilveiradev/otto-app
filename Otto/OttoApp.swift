@@ -47,8 +47,8 @@ private struct MainRoot: View {
     /// Offline at launch: stop waiting on the connection and open the chat. 12s, not less: a phone
     /// reaching the Mac through the tunnel can take several seconds, and that is still loading.
     @State private var gaveUp = false
-    @State private var splash = Splash.loading
-    enum Splash { case loading, loaded, gone }
+    /// Up only until there is something to show: the saved thread is there at once, as Messages opens on it.
+    @State private var splashing = true
 
     private var ready: Bool { store.connected || !store.backend.isLive || gaveUp }
 
@@ -73,22 +73,14 @@ private struct MainRoot: View {
             }
         }
             // Over the content, so it is already laid out underneath when the splash fades.
-            .overlay { if splash != .gone { Connecting(loaded: splash == .loaded).transition(.opacity) } }
+            .overlay { if splashing { Connecting().transition(.opacity) } }
             .task {
-                do {
-                    // The reconnecting orb gets at least a second, even on a fast connect, so it reads.
-                    try await Task.sleep(for: .seconds(1))
-                    #if DEBUG
-                    if CommandLine.arguments.contains("-holdSplash") { return }   // screenshots: the splash stays up
-                    #endif
-                    while !ready { try await Task.sleep(for: .milliseconds(100)) }
-                    // Offline there is nothing loaded to show off: just fade to the single chat.
-                    if store.connected {
-                        withAnimation(.easeInOut(duration: 0.25)) { splash = .loaded }
-                        try await Task.sleep(for: .seconds(1.7))   // the 0.9s morph, then the still globe for 0.8s
-                    }
-                } catch { return }   // cancelled: leave the splash to whoever runs next
-                withAnimation(.easeOut(duration: 0.4)) { splash = .gone }
+                #if DEBUG
+                if CommandLine.arguments.contains("-holdSplash") { return }   // screenshots: the splash stays up
+                #endif
+                do { while !ready { try await Task.sleep(for: .milliseconds(100)) } }
+                catch { return }   // cancelled: leave the splash to whoever runs next
+                withAnimation(.easeOut(duration: 0.25)) { splashing = false }
             }
             .environment(store)
             // Notifications are asked for once, in onboarding, where "Not now" stays not now.
@@ -104,17 +96,12 @@ private struct MainRoot: View {
     }
 }
 
-/// The orb reconnects until the server answers, then holds still on the searching globe once it is
-/// in, so the screen says "loaded" for a beat before it fades.
+/// While there's nothing to show yet: the orb reconnecting until the server answers.
 private struct Connecting: View {
-    let loaded: Bool
-
     var body: some View {
         VStack(spacing: 14) {
-            // The reconnecting web draws in and the globe blooms out of it, then holds still.
-            MorphingOrb(state: loaded ? .searching : .connecting, size: .px64, morph: 0.9, paused: loaded, displaySize: 96)
+            MorphingOrb(state: .connecting, size: .px64, displaySize: 96)
             Text("Connecting…").font(.footnote).foregroundStyle(.secondary)
-                .opacity(loaded ? 0 : 1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))

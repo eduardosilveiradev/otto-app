@@ -135,7 +135,7 @@ private struct Secondary: View {
         Button(label, action: action)
             .font(size: 15, weight: .medium, relativeTo: .subheadline)
             .foregroundStyle(.secondary)
-            .frame(minHeight: 40)
+            .frame(minHeight: 44)
     }
 }
 
@@ -194,13 +194,16 @@ private struct ConnectPage: View {
         } content: {
             VStack(spacing: 12) {
                 if manual {
-                    VStack(spacing: 10) {
+                    // Two fields with a hairline between, so filled in they still read as two.
+                    VStack(spacing: 0) {
                         TextField("https://your-mac.your-tailnet.ts.net", text: $server)
                             .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                            .padding(14)
+                        Divider().padding(.leading, 14)
                         SecureField("App token", text: $token)
+                            .padding(14)
                     }
                     .textFieldStyle(.plain)
-                    .padding(14)
                     .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 14, style: .continuous))
                 } else {
                     // The whole command, as it runs: a shell line continuation keeps "--server" in one piece,
@@ -213,10 +216,11 @@ private struct ConnectPage: View {
                         .padding(.horizontal, 14).padding(.vertical, 10)
                         .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
                 }
-                // Right under what it's about, not down by the buttons.
-                if let problem {
-                    Text(problem).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
-                }
+                // Right under what it's about, not down by the buttons. Its line is always held, so the
+                // page doesn't re-centre and jump when an error arrives.
+                Text(problem ?? " ").font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
+                    .opacity(problem == nil ? 0 : 1)
+                    .accessibilityHidden(problem == nil)
             }
         } footer: {
             if manual {
@@ -234,7 +238,6 @@ private struct ConnectPage: View {
                     Task { @MainActor in await take(s) }
                 }
                 .buttonBorderShape(.capsule)
-                .tint(.secondary)
                 .labelStyle(.titleAndIcon)
                 if canScan {
                     Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } }

@@ -34,9 +34,9 @@ private struct LoopsList: View {
                         plan("checkmark.circle", text[c.id] ?? c.id, "closes it: \(c.reason)")
                     }
                     ForEach(p.propose, id: \.id) { c in plan("questionmark.circle", c.text, "asks you: \(c.reason)") }
-                    ForEach(p.avoidance, id: \.id) { c in plan("arrow.uturn.right.circle", c.text, "pushed back \(c.deferrals) times") }
-                } header: { Text("Tonight's hygiene pass") } footer: {
-                    Text("Runs at 05:00. It only closes what the evidence closes; the rest it asks about.")
+                    ForEach(p.avoidance, id: \.id) { c in plan("arrow.uturn.right.circle", c.text, "pushed back \(c.deferrals)×") }
+                } header: { Text("Overnight tidy-up") } footer: {
+                    Text("Runs at \(Self.fiveAM). Closes what's clearly done, asks you about the rest.")
                 }
             }
 
@@ -47,7 +47,7 @@ private struct LoopsList: View {
             }
         }
         .emptyState(l.open.isEmpty && l.recent.isEmpty && l.plan.close.isEmpty && l.plan.propose.isEmpty && l.plan.avoidance.isEmpty,
-                    "Nothing open", systemImage: "checklist")
+                    "Nothing open", systemImage: "checklist", "Things you said you'd do show up here.")
         .refreshable { await reload() }
     }
 
@@ -75,6 +75,11 @@ private struct LoopsList: View {
         .swipeActions {
             Button(closed ? "Reopen" : "Done") { flip(r.id, done: !closed) }.tint(closed ? .orange : .green)
         }
+    }
+
+    /// The tidy-up's 05:00 in the phone's own clock style ("5:00 AM" or "05:00").
+    private static var fiveAM: String {
+        Calendar.current.date(bySettingHour: 5, minute: 0, second: 0, of: .now)?.formatted(date: .omitted, time: .shortened) ?? "05:00"
     }
 
     private func meta(_ r: LoopRow) -> String {

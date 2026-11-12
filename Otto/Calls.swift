@@ -204,7 +204,7 @@ struct CallSheet: View {
                     Button { Task { await say("tell") } } label: { Label("Tell the bot", systemImage: "text.bubble") }
                 } label: {
                     Image(systemName: "arrow.up").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-                        .frame(width: 34, height: 34).background(Color.blue, in: .circle)
+                        .frame(width: 34, height: 34).background(.outgoingBubble, in: .circle)
                 } primaryAction: { Task { await say("say") } }
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.4 : 1)
@@ -282,7 +282,8 @@ private struct CallBubble: View {
             Text(line.text)
                 .foregroundStyle(ours ? .white : .primary)
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(ours ? Color.blue : Color(.systemGray5), in: .rect(cornerRadius: 18))
+                // The thread's own bubbles: Otto's side in the slate grey with a tail, theirs in the incoming grey.
+                .background(BubbleShape(mine: ours, tail: true).fill(ours ? .outgoingBubble : .incomingBubble))
                 .opacity(partial ? 0.55 : 1)
                 .frame(maxWidth: 300, alignment: ours ? .trailing : .leading)
         }

@@ -341,10 +341,10 @@ struct ChatView: View {
             DetailsView()
                 .navigationTransition(.zoom(sourceID: "card", in: card))
                 .presentationBackground {
-                    // Liquid Glass over the thread, as Messages does. Light mode adds a wash, so the
-                    // thread's dark bubbles don't show through as smudges.
+                    // Liquid Glass over the thread, as Messages does, with a wash in both modes so the
+                    // thread's bubbles and the header's face don't show through as smudges.
                     Color.clear.glassEffect(.regular, in: .rect)
-                        .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? .clear : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
+                        .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor.black.withAlphaComponent(0.45) : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
                         .ignoresSafeArea()
                 }
         }
@@ -691,13 +691,14 @@ struct ChatView: View {
                 }
                 if let u = store.update, let link = Self.sideStoreInstall(u.ipa) {
                     // SideStore downloads, re-signs and installs; it asks before replacing the app.
+                    // A glass circle like the bar's others, so it never crowds the face.
                     Button { openURL(link) } label: {
-                        Label("Update", systemImage: "arrow.down.circle.fill")
-                            .font(size: 13, weight: .semibold, relativeTo: .footnote)
-                            .padding(.horizontal, 12).frame(height: 40)
-                            .glassEffect(.regular.interactive(), in: .capsule)
+                        Image(systemName: "arrow.down").font(.system(size: 18, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                            .glassEffect(.regular.tint(.accentColor).interactive(), in: .circle)
                     }
-                    .tint(.accentColor)
+                    .tint(.white)
+                    .accessibilityLabel("Update Otto")
                 }
                 Spacer()
                 Button {
@@ -1681,7 +1682,7 @@ private struct GroupChrome<Content: View>: View {
             HStack(alignment: .bottom, spacing: 8) {
                 Group {
                     if showFace, let member {
-                        FaceView(look: member.look.with(.rest), size: otto ? 44 : 34).frame(width: otto ? 44 : 34, height: otto ? 44 : 34)
+                        FaceView(look: member.look.with(.rest), size: 34).frame(width: 34, height: 34)
                     } else {
                         Color.clear.frame(height: 1)
                     }
@@ -2173,30 +2174,18 @@ private struct ScaledFont: ViewModifier {
 }
 
 struct Typing: View {
-    /// What Otto is doing, shown beside the orb; nil is just the orb.
+    /// What Otto is doing, shown beside the dots; nil is just the dots.
     let status: String?
     /// The list Otto is working through, under the step; empty shows nothing.
     var todos: [TodoItem] = []
-    /// Off while the server is unreachable: the orb shows it's reconnecting instead of thinking.
+    /// Off while the server is unreachable: the line says it's reconnecting instead of the step.
     let connected: Bool
 
-    /// The orb that fits the step, read off the label's first word (the server's
-    /// toolstatus.ts): looking things up, writing, running something, remembering.
-    static func orb(for status: String?) -> OrbState {
-        guard let status else { return .breathing }
-        switch status.split(separator: " ").first.map(String.init) ?? "" {
-        case "Searching", "Looking", "Checking", "Reading": return .searching
-        case "Editing", "Writing": return .composing
-        case "Running": return .solving
-        case "Remembering": return .weaving
-        default: return .working
-        }
-    }
-
     var body: some View {
-        // Top-aligned so the orb stays on the first line when a long status wraps.
+        // Top-aligned so the dots stay on the first line when a long status wraps. The same three dots
+        // as a pip's typing line: one typing signal across the app.
         HStack(alignment: .top, spacing: 8) {
-            MorphingOrb(state: !connected ? .connecting : Self.orb(for: status))
+            TypingDots().frame(width: 29, height: 7).padding(.top, 6)
             // A status from before the drop would be stale; say what's actually happening.
             VStack(alignment: .leading, spacing: 8) {
                 if let status = connected ? status : "Reconnecting…" {
