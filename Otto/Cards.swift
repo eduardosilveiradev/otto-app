@@ -152,10 +152,11 @@ private struct BlockView: View {
 }
 
 /// "12.5" with its unit: a currency sign before, anything else after.
-private func amount(_ v: Double, _ unit: String?) -> String {
+/// `cents`: the chart's call, so one chart never mixes €31 with €72.40.
+private func amount(_ v: Double, _ unit: String?, cents: Bool? = nil) -> String {
     guard let u = unit, !u.isEmpty else { return v.formatted(.number.precision(.fractionLength(0...2))) }
     // Money shows its cents or none: €72.40, €31.
-    if u.count == 1 && !u.first!.isLetter { return u + v.formatted(.number.precision(.fractionLength(v == v.rounded() ? 0 : 2))) }
+    if u.count == 1 && !u.first!.isLetter { return u + v.formatted(.number.precision(.fractionLength(cents ?? (v != v.rounded()) ? 2 : 0))) }
     return "\(v.formatted(.number.precision(.fractionLength(0...2)))) \(u)"
 }
 
@@ -282,12 +283,13 @@ private struct BarsBlock: View {
     let bars: Block.Bars
     @ScaledMetric private var row: CGFloat = 30
     var body: some View {
+        let cents = bars.items.contains { $0.value != $0.value.rounded() }
         Chart(Array(bars.items.enumerated()), id: \.offset) { _, b in
             BarMark(x: .value("Value", b.value), y: .value("Label", b.label), height: .ratio(0.6))
                 .foregroundStyle(Color.blue)
                 .cornerRadius(4)
                 .annotation(position: .trailing, spacing: 6) {
-                    Text(amount(b.value, bars.unit)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    Text(amount(b.value, bars.unit, cents: cents)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
                 }
         }
         .chartXAxis(.hidden)
@@ -297,7 +299,7 @@ private struct BarsBlock: View {
         .frame(height: row * CGFloat(max(bars.items.count, 1)))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Bar chart")
-        .accessibilityValue(bars.items.map { "\($0.label), \(amount($0.value, bars.unit))" }.joined(separator: "; "))
+        .accessibilityValue(bars.items.map { "\($0.label), \(amount($0.value, bars.unit, cents: cents))" }.joined(separator: "; "))
     }
 }
 

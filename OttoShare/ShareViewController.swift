@@ -136,35 +136,45 @@ struct ShareView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if model.loading { busy("Getting what you shared…") }
-                if !model.images.isEmpty {
-                    ScrollView(.horizontal) {
-                        HStack {
-                            ForEach(model.images.indices, id: \.self) { i in
-                                Image(uiImage: model.images[i]).resizable().scaledToFill()
-                                    .frame(width: 90, height: 90).clipShape(.rect(cornerRadius: 10))
+                // What's going, then your words, then how it went: one group each.
+                Section {
+                    if model.loading { busy("Getting what you shared…") }
+                    if !model.images.isEmpty {
+                        ScrollView(.horizontal) {
+                            HStack {
+                                ForEach(model.images.indices, id: \.self) { i in
+                                    Image(uiImage: model.images[i]).resizable().scaledToFill()
+                                        .frame(width: 90, height: 90).clipShape(.rect(cornerRadius: 10, style: .continuous))
+                                }
                             }
                         }
+                        .scrollIndicators(.hidden)
+                    }
+                    if model.unreadable > 0 {
+                        Text(model.unreadable == 1 ? "One photo couldn’t be read and won’t be sent." : "\(model.unreadable) photos couldn’t be read and won’t be sent.")
+                            .font(.footnote).foregroundStyle(.red)
+                    }
+                    if !model.text.isEmpty {
+                        Text(model.text).font(.callout).foregroundStyle(.secondary).lineLimit(6)
                     }
                 }
-                if model.unreadable > 0 {
-                    Text(model.unreadable == 1 ? "One photo couldn't be read and won't be sent." : "\(model.unreadable) photos couldn't be read and won't be sent.")
-                        .font(.footnote).foregroundStyle(.red)
+                Section {
+                    TextField("Add a message", text: $model.note, axis: .vertical)
+                        .focused($focused)
                 }
-                if !model.text.isEmpty {
-                    Text(model.text).font(.callout).foregroundStyle(.secondary).lineLimit(6)
-                }
-                TextField("Add a message", text: $model.note, axis: .vertical)
-                    .focused($focused)
-                switch model.state {
-                case .editing: EmptyView()
-                case .sending: busy("Sending to Otto…")
-                case .sent:
-                    Label { Text("Sent") } icon: { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                case .queued: Label("Otto will send it when the app next opens.", systemImage: "tray.and.arrow.up").foregroundStyle(.secondary)
-                case .failed(let problem):
-                    Label(problem.message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                    Button("Try again") { model.send() }
+                if model.state != .editing {
+                    Section {
+                        switch model.state {
+                        case .editing: EmptyView()
+                        case .sending: busy("Sending to Otto…")
+                        case .sent:
+                            Label { Text("Sent") } icon: { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                        case .queued: Label("Otto will send it when the app next opens.", systemImage: "tray.and.arrow.up").foregroundStyle(.secondary)
+                        case .failed(let problem):
+                            Label(problem.message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                            Button("Try again") { model.send() }
+                        }
+                    }
                 }
             }
             .navigationTitle("Otto")

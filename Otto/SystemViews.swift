@@ -87,25 +87,35 @@ struct ActivityScreen: View {
     private func jobs(_ j: Jobs) -> some View {
         List {
             ForEach(j.jobs.sorted { $0.createdAt > $1.createdAt }) { job in
+                let pill = Pill(text: job.state, tint: job.state == "running" ? .orange : job.state == "failed" ? .red : .secondary)
+                let meta = Text([ago(job.createdAt), job.costUsd.map { $0.formatted(.currency(code: "USD")) }].compactMap { $0 }.joined(separator: " · "))
+                    .font(.footnote).foregroundStyle(.secondary)
                 NavigationLink {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text(job.task).font(.headline)
-                            if let r = job.result { MarkdownText(text: r).textSelection(.enabled) }
-                            if let e = job.error { Text(e).foregroundStyle(.red) }
+                            Text(job.task).font(.title3.weight(.semibold))
+                            HStack(spacing: 8) { pill; meta }
+                            if let r = job.result { MarkdownText(text: r).textSelection(.enabled).padding(.top, 8) }
+                            if let e = job.error {
+                                Label { Text(e).textSelection(.enabled) } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red) }
+                                    .padding(.top, 8)
+                            }
+                            if job.result == nil && job.error == nil,
+                               let wait = ["queued": "Waiting to start.", "running": "Still running. The result shows up here when it’s done."][job.state] {
+                                Text(wait).foregroundStyle(.secondary).padding(.top, 8)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading).padding()
                     }
-                    .navigationTitle(job.state.capitalized).navigationBarTitleDisplayMode(.inline)
+                    .navigationTitle("Job").navigationBarTitleDisplayMode(.inline)
                 } label: {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(alignment: .firstTextBaseline) {
                             Text(job.task).lineLimit(2)
                             Spacer(minLength: 8)
-                            Pill(text: job.state, tint: job.state == "running" ? .orange : job.state == "failed" ? .red : .secondary)
+                            pill
                         }
-                        Text([ago(job.createdAt), job.costUsd.map { $0.formatted(.currency(code: "USD")) }].compactMap { $0 }.joined(separator: " · "))
-                            .font(.footnote).foregroundStyle(.secondary)
+                        meta
                     }
                 }
             }
