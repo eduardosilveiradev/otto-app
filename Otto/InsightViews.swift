@@ -31,9 +31,9 @@ private struct LoopsList: View {
             if !p.close.isEmpty || !p.propose.isEmpty || !p.avoidance.isEmpty {
                 Section {
                     ForEach(p.close, id: \.id) { c in
-                        plan("checkmark.circle", text[c.id] ?? c.id, "closes it: \(c.reason)")
+                        plan("checkmark.circle", text[c.id] ?? c.id, "Will close it · \(c.reason)")
                     }
-                    ForEach(p.propose, id: \.id) { c in plan("questionmark.circle", c.text, "asks you: \(c.reason)") }
+                    ForEach(p.propose, id: \.id) { c in plan("questionmark.circle", c.text, "Will ask you · \(c.reason)") }
                     ForEach(p.avoidance, id: \.id) { c in plan("arrow.uturn.right.circle", c.text, "pushed back \(c.deferrals)×") }
                 } header: { Text("Overnight tidy-up") } footer: {
                     Text("Runs at \(Self.fiveAM). Closes what’s clearly done, asks you about the rest.")
@@ -64,7 +64,7 @@ private struct LoopsList: View {
             .toolbar { Button(closed ? "Reopen" : "Done") { flip(r.id, done: !closed) } }
         } label: {
             HStack(spacing: 12) {
-                RowIcon(symbol: closed ? "checkmark" : r.text.contains("€") ? "eurosign" : "arrow.turn.up.left")
+                RowIcon(symbol: closed ? "checkmark" : "circle")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(r.text).lineLimit(3).strikethrough(closed).foregroundStyle(closed ? .secondary : .primary)
                     let m = meta(r)

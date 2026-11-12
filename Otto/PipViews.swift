@@ -725,10 +725,11 @@ struct PipDetailSheet: View {
                     section("Schedules") {
                         ForEach(Array(p.schedules.enumerated()), id: \.element.id) { i, s in
                             line(divided: i > 0) {
-                                Text(s.name)
-                                Spacer(minLength: 8)
-                                // From the cron, in the phone's clock style; the stored label is how it was set.
-                                Text(humanCron(s.schedule) ?? s.label).foregroundStyle(.secondary).lineLimit(1)
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(s.name)
+                                    // From the cron, in the phone's clock style; the stored label is how it was set.
+                                    Text(humanCron(s.schedule) ?? s.label).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }

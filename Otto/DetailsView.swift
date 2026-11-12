@@ -306,7 +306,7 @@ struct DetailsView: View {
                         Task { if !(await store.backend.setLoop(l.id, done: !closed)) { done.formSymmetricDifference([l.id]) } }
                     } label: {
                         HStack(spacing: 12) {
-                            RowIcon(symbol: closed ? "checkmark" : l.title.contains("€") ? "eurosign" : "arrow.turn.up.left")
+                            RowIcon(symbol: closed ? "checkmark" : "circle")
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(l.title).strikethrough(closed).lineLimit(2)
                                     .foregroundStyle(closed ? .secondary : .primary)

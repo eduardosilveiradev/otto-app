@@ -229,7 +229,9 @@ struct DictationListeningView: View {
                 DictationBridge.write(.init(action: .stop, id: DictationBridge.readRequest()?.id ?? ""))
                 DictationBridge.post(DictationBridge.toApp)
             }
-            .buttonStyle(.borderedProminent).tint(.orange).padding(.bottom, 30)
+            .buttonStyle(.borderedProminent).tint(.orange)
+            .foregroundStyle(Color(white: 0.12))   // white on this orange is ~2:1
+            .padding(.bottom, 30)
         }
         .frame(maxWidth: .infinity)
     }

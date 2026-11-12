@@ -106,7 +106,7 @@ final class ShareModel {
             try? await Task.sleep(for: .seconds(1))
             if taken { await sent(); return }
             state = .queued
-            try? await Task.sleep(for: .seconds(1.5))
+            try? await Task.sleep(for: .seconds(2.5))   // long enough to read the line before the sheet goes
             finish()
         }
     }

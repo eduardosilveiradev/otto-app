@@ -93,10 +93,10 @@ private struct Page<Hero: View, Content: View, Footer: View>: View {
                     }
                     if Content.self != EmptyView.self { content.padding(.top, 24) }
                     Spacer(minLength: 32)
-                    // Room for two links under the button on every step (Connect has two), so the button doesn't
-                    // jump between them: a hidden button and links set the height, at whatever size the text is.
+                    // Room for one link under the button on every step, so the button doesn't jump between them:
+                    // a hidden button and link set the height, at whatever size the text is.
                     ZStack(alignment: .top) {
-                        VStack(spacing: 6) { Primary(label: " ") {}; Secondary(label: " ") {}; Secondary(label: " ") {} }.hidden()
+                        VStack(spacing: 6) { Primary(label: " ") {}; Secondary(label: " ") {} }.hidden()
                         VStack(spacing: 6) { footer }
                     }
                     .padding(.bottom, 8)
@@ -216,6 +216,7 @@ private struct ConnectPage: View {
                     }
                     .textFieldStyle(.plain)
                     .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 14, style: .continuous))
+                    Secondary(label: "Scan a code instead") { withAnimation { manual = false; problem = nil } }
                 } else {
                     // The whole command, as it runs: a shell line continuation keeps "--server" in one piece,
                     // and the address is an example to swap for the Mac's own.
@@ -236,6 +237,8 @@ private struct ConnectPage: View {
                         .labelStyle(.titleAndIcon)
                         .tint(.orange)   // the page's one accent
                     }
+                    // The other way in, beside the one it replaces; with no camera it's the big button instead.
+                    if canScan { Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } } }
                 }
                 // Right under what it's about, not down by the buttons. Its line is always held, so the
                 // page doesn't re-centre and jump when an error arrives.
@@ -246,17 +249,11 @@ private struct ConnectPage: View {
         } footer: {
             if manual {
                 Primary(label: "Connect", busy: checking) { Task { await connect(server, token) } }
-                Secondary(label: "Scan a code instead") { withAnimation { manual = false; problem = nil } }
+            } else if canScan {
+                Primary(label: "Scan code", busy: checking) { scanning = true }
             } else {
                 // No camera scanner: typing it in is the main way, so it gets the big button.
-                if canScan {
-                    Primary(label: "Scan code", busy: checking) { scanning = true }
-                } else {
-                    Primary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
-                }
-                if canScan {
-                    Secondary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
-                }
+                Primary(label: "Type it in") { withAnimation { manual = true; problem = nil } }
             }
             Secondary(label: "Look around with sample data") { next() }
         }
@@ -362,7 +359,7 @@ private struct TalkPage: View {
     var body: some View {
         Page(title: "Talk to me anywhere",
              line: "You don’t have to open the app.") {
-            EmptyView()
+            Glyph(name: "person.wave.2.fill")
         } content: {
             VStack(spacing: 0) {
                 row("mic.fill", "\u{201C}Hey Siri, ask Otto\u{2026}\u{201D}", "I answer out loud.")

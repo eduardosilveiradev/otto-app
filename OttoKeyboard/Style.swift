@@ -29,6 +29,10 @@ struct KeyStyle: Codable, Equatable {
         return 1.05 / (l + 0.05) >= 3 ? RGBA(1, 1, 1) : RGBA(0.12, 0.12, 0.12)
     }
 
+    /// A see-through key's balloon and accent strip, which can't show the board through: dark grey under
+    /// light letters (Smoke, Glass), near-white under dark ones (Frost), where the grey was 2.5:1.
+    var balloon: UIColor { text.r + text.g + text.b > 1.5 ? UIColor(white: 0.3, alpha: 0.96) : UIColor(white: 0.97, alpha: 0.97) }
+
     /// Nothing painted behind the keys, so the keyboard and the system's globe/mic strip share one backdrop.
     var seeThrough: Bool { background.isEmpty }
 

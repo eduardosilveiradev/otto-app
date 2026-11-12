@@ -415,7 +415,7 @@ final class KeyPopup: UIView {
         path.close()
         let shape = CAShapeLayer()
         shape.path = path.cgPath
-        shape.fillColor = (style.key.a < 1 ? UIColor(white: 0.3, alpha: 0.97) : style.key.ui).cgColor
+        shape.fillColor = (style.key.a < 1 ? style.balloon : style.key.ui).cgColor
         shape.shadowColor = UIColor.black.cgColor
         shape.shadowOpacity = 0.22
         shape.shadowRadius = 5
@@ -456,7 +456,7 @@ final class KeyPopup: UIView {
     private func decorate() {
         isUserInteractionEnabled = false
         // A see-through key would show the board through its balloon.
-        backgroundColor = style.key.a < 1 ? UIColor(white: 0.3, alpha: 0.95) : style.key.ui
+        backgroundColor = style.key.a < 1 ? style.balloon : style.key.ui
         layer.cornerRadius = style.corner + 4
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOpacity = 0.28

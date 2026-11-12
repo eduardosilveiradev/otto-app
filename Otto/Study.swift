@@ -244,9 +244,20 @@ private struct QuizPane: View {
 }
 
 private func bigButton(_ title: String, _ color: Color, _ action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-        Text(title).font(.headline).frame(maxWidth: .infinity).frame(height: 50)
-            .background(color.opacity(0.18), in: .rect(cornerRadius: 16, style: .continuous))
-            .foregroundStyle(color)
+    BigButton(title: title, color: color, action: action)
+}
+
+private struct BigButton: View {
+    let title: String
+    let color: Color
+    let action: () -> Void
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(.headline).frame(maxWidth: .infinity).frame(height: 50)
+                .background(color.opacity(0.18), in: .rect(cornerRadius: 16, style: .continuous))
+                // As Pill: the colour as is in dark mode, 40% toward black in light, to read on its pale fill.
+                .foregroundStyle(scheme == .dark ? color : color.mix(with: .black, by: 0.4))
+        }
     }
 }

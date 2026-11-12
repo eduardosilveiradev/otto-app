@@ -1552,6 +1552,14 @@ private struct Row: View {
                     Button("Less of this", role: .destructive) { onTap(ActionButton(label: "Less of this", data: Self.lessOfThis(message))) }
                     Button("OK", role: .cancel) {}
                 } message: { Text($0) }
+                // Messages' mark for a send that didn't make it, beside the bubble; the line under it has the retry.
+                .overlay(alignment: .trailing) {
+                    if mine, message.failed == true {
+                        Image(systemName: "exclamationmark.circle.fill").font(.system(size: 20)).foregroundStyle(.red)
+                            .offset(x: 30).accessibilityHidden(true)
+                    }
+                }
+                .padding(.trailing, mine && message.failed == true ? 30 : 0)
             }
             if let g = message.groupLink { GroupLinkBubble(group: g) { store.pips.open(g.id) } }
             if !mine, let card = message.card, !card.shown.isEmpty {
