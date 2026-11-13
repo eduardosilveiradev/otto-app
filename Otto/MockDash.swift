@@ -12,6 +12,9 @@ enum MockDash {
         return json[path].map { Data($0.utf8) }
     }
 
+    /// The money screen's combined total without the network: EUR→USD at the ECB rate of 12 Nov 2026.
+    static let rates = ECB.Rates(base: "EUR", date: "2026-11-12", rates: ["USD": 1.1081])
+
     #if DEBUG
     private static let empty: [String: String] = [
         "loops": #"{"open":[],"plan":{"close":[],"propose":[],"avoidance":[]},"recent":[]}"#,

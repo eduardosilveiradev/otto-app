@@ -126,7 +126,8 @@ private struct LoopsList: View {
 
 // MARK: - Money
 
-/// Spend from receipts and bank mail, by month and category. Never converted between currencies.
+/// Spend from receipts and bank mail, by month and category. Totals stay per currency; the one
+/// combined figure is marked approximate and names its ECB rates.
 struct MoneyScreen: View {
     @State private var month: String?
     @State private var currency: String?
@@ -152,6 +153,8 @@ private struct MoneyList: View {
     @Binding var month: String?
     @Binding var currency: String?
     @Binding var category: String?
+    @Environment(OttoStore.self) private var store
+    @State private var rates: ECB.Rates?
 
     var body: some View {
         // byCategory is in the requested currency, else the most used one.
@@ -168,6 +171,13 @@ private struct MoneyList: View {
                     if !others.isEmpty {
                         Text("plus " + others.map { money($0.total, $0.currency) }.joined(separator: ", "))
                             .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if let r = rates, m.byCurrency.count > 1, m.byCurrency.first?.currency == r.base,
+                       let all = ECB.combined(m.byCurrency, in: r) {
+                        let on = dashDate(r.date)?.formatted(.dateTime.day().month(.abbreviated)) ?? r.date
+                        Text("≈ \(money(all, r.base)) total · ECB \(on)")
+                            .monospacedDigit().font(.footnote).foregroundStyle(.secondary)
+                            .accessibilityLabel("About \(money(all, r.base)) in all, at European Central Bank rates of \(on)")
                     }
                 }
                 .padding(.vertical, 4)
@@ -237,6 +247,12 @@ private struct MoneyList: View {
             }
         }
         .refreshable { await reload() }
+        // The main currency is the most used one, first in byCurrency; it can change with the month.
+        .task(id: m.byCurrency.map(\.currency)) {
+            let codes = m.byCurrency.map(\.currency)
+            guard codes.count > 1 else { return }
+            rates = store.backend is MockBackend ? MockDash.rates : await ECB.rates(codes[0], Array(codes.dropFirst()))
+        }
     }
 
     private func monthName(_ ym: String) -> String {

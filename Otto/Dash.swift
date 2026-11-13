@@ -2,7 +2,8 @@ import SwiftUI
 
 // The web dashboard's views, on the phone. Everything comes from the Mac's
 // dashboard API (/app/dash/*, wire contract in otto/dash-types.ts) with the
-// app's own token; nothing here is computed on the phone.
+// app's own token; nothing here is computed on the phone, except the money
+// screen's combined total, from public ECB rates (see ECB below).
 
 // MARK: - Wire types (the parts the app shows)
 
@@ -213,6 +214,41 @@ func wallClock(_ local: String) -> String {
 }
 
 func money(_ amount: Double, _ currency: String) -> String { amount.formatted(.currency(code: currency)) }
+
+/// ECB reference rates from frankfurter.dev, for the money screen's combined total. Only currency
+/// codes go out: no amounts, no token.
+enum ECB {
+    /// Units of each currency per 1 `base`, as published on `date` (the last ECB working day).
+    struct Rates: Decodable, Equatable { let base: String; let date: String; let rates: [String: Double] }
+
+    /// Every total in `base`, or nil when a rate is missing or odd: a guessed rate is a wrong number.
+    static func combined(_ totals: [DashMoney.Total], in r: Rates) -> Double? {
+        var sum = 0.0
+        for t in totals {
+            if t.currency == r.base { sum += t.total; continue }
+            guard let rate = r.rates[t.currency], rate.isFinite, rate > 0 else { return nil }
+            sum += t.total / rate
+        }
+        return sum
+    }
+
+    @MainActor private static var cache: [String: Rates] = [:]
+
+    /// Once a day per base and set of currencies. Nil when offline or the answer is incomplete, and never cached then.
+    @MainActor static func rates(_ base: String, _ others: [String]) async -> Rates? {
+        let to = others.sorted().joined(separator: ",")
+        let key = "\(Date.now.formatted(.iso8601.year().month().day())) \(base) \(to)"
+        if let hit = cache[key] { return hit }
+        var u = URLComponents(string: "https://api.frankfurter.dev/v1/latest")!
+        u.queryItems = [URLQueryItem(name: "from", value: base), URLQueryItem(name: "to", value: to)]
+        guard let url = u.url, let (data, res) = try? await URLSession.shared.data(from: url),
+              (res as? HTTPURLResponse)?.statusCode == 200,
+              let r = try? JSONDecoder().decode(Rates.self, from: data),
+              r.base == base, others.allSatisfy({ r.rates[$0] != nil }) else { return nil }
+        cache[key] = r
+        return r
+    }
+}
 
 /// A grey rounded square with a symbol, the way the contact card draws its rows.
 struct RowIcon: View {
