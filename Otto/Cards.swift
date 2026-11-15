@@ -97,7 +97,7 @@ struct CardView: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 16) {
                 if let t = card.title, !t.isEmpty {
-                    Text(t).font(.subheadline.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                    Text(t).font(size: 13, weight: .semibold, relativeTo: .footnote).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
                 }
                 ForEach(Array(card.shown.enumerated()), id: \.offset) { _, b in BlockView(block: b) }
             }
@@ -112,15 +112,14 @@ struct CardView: View {
                 .padding(.horizontal, 14)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.incomingBubble, in: .rect(cornerRadius: 18, style: .continuous))
+        .ottoCard(width: nil)
         .accessibilityElement(children: .contain)
     }
 
     private func buttons(_ a: [ActionButton]) -> some View {
         ForEach(a) { b in
             Button(b.label) { press(b) }
-                .font(.subheadline).tint(.blue)
+                .font(.subheadline).tint(.actionInk)
                 .frame(minHeight: 44)
         }
     }
@@ -204,15 +203,12 @@ private struct StatBlock: View {
 
 private struct ListBlock: View {
     let items: [Block.ListItem]
-    @ScaledMetric private var dot: CGFloat = 30
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, i in
                 HStack(spacing: 10) {
                     if let icon = i.icon {
-                        Image(systemName: icon).font(.subheadline.weight(.semibold)).foregroundStyle(.blue)
-                            .frame(width: dot, height: dot).background(Color.blue.opacity(0.12), in: .circle)
-                            .accessibilityHidden(true)
+                        GlyphDisc(symbol: icon)
                     }
                     Row {
                         VStack(alignment: .leading, spacing: 1) {
@@ -286,7 +282,7 @@ private struct BarsBlock: View {
         let cents = bars.items.contains { $0.value != $0.value.rounded() }
         Chart(Array(bars.items.enumerated()), id: \.offset) { _, b in
             BarMark(x: .value("Value", b.value), y: .value("Label", b.label), height: .ratio(0.6))
-                .foregroundStyle(Color.blue)
+                .foregroundStyle(Color.primary)
                 .cornerRadius(4)
                 .annotation(position: .trailing, spacing: 6) {
                     Text(amount(b.value, bars.unit, cents: cents)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
@@ -319,9 +315,9 @@ private struct SparkBlock: View {
                 LineMark(x: .value("Index", i), y: .value("Value", y))
                     .interpolationMethod(.monotone)
                     .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                    .foregroundStyle(Color.blue)
+                    .foregroundStyle(Color.primary)
                 if i == v.count - 1 {
-                    PointMark(x: .value("Index", i), y: .value("Value", y)).symbolSize(30).foregroundStyle(Color.blue)
+                    PointMark(x: .value("Index", i), y: .value("Value", y)).symbolSize(30).foregroundStyle(Color.primary)
                 }
             }
             .chartXAxis(.hidden).chartYAxis(.hidden)
@@ -342,7 +338,7 @@ private struct ProgressBlock: View {
             Row { Text(progress.label).font(.subheadline) } trail: {
                 Text(p.formatted(.percent.precision(.fractionLength(0)))).font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
             }
-            ProgressView(value: p).tint(.blue)
+            ProgressView(value: p).tint(.primary)
             if let d = progress.detail { Text(d).font(.footnote).foregroundStyle(.secondary) }
         }
         .accessibilityElement(children: .ignore)
@@ -375,7 +371,7 @@ private struct TimelineBlock: View {
                             if n < items.count - 1 {
                                 Rectangle().fill(.quaternary).frame(width: 1.5).padding(.top, dotTop + 9)
                             }
-                            Circle().strokeBorder(done ? Color.secondary : Color.blue, lineWidth: 1.5)
+                            Circle().strokeBorder(done ? Color.secondary : Color.primary, lineWidth: 1.5)
                                 .background(Circle().fill(done ? Color.secondary : .clear))
                                 .frame(width: 9, height: 9).padding(.top, dotTop)
                         }
@@ -413,7 +409,7 @@ private struct ChecklistBlock: View {
                     Text(c.text).strikethrough(c.done).foregroundStyle(c.done ? .secondary : .primary)
                 } icon: {
                     Image(systemName: c.done ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(c.done ? Color.blue : Color.secondary)
+                        .foregroundStyle(c.done ? Color.primary : Color.secondary)
                 }
                 .font(.subheadline)
                 .accessibilityElement(children: .ignore)

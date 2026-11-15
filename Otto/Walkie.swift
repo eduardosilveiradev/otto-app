@@ -87,7 +87,7 @@ struct WalkieView: View {
                 .animation(.easeInOut(duration: 0.2), value: caption)
                 .padding(.top, 28)
 
-            Waveform(levels: levels, tint: phase == .listening ? Color.orange : Color.secondary)
+            Waveform(levels: levels, tint: phase == .listening ? Color.primary : Color.secondary)
                 .frame(height: 44)
                 .padding(.horizontal, 40)
                 .padding(.top, 18)
@@ -100,8 +100,8 @@ struct WalkieView: View {
                 if stuck {
                     // The thread's own words for an unsent message, and the same way on.
                     Button(action: retry) {
-                        (Text(sent?.pending == true ? "Not delivered · " : "Otto didn’t answer · ").foregroundStyle(.red)
-                         + Text("Try again").foregroundStyle(.blue)).hitSlop()
+                        (Text(sent?.pending == true ? "Not delivered · " : "Otto didn’t answer · ").foregroundStyle(Color.redInk)
+                         + Text("Try again").foregroundStyle(Color.actionInk)).hitSlop()
                     }
                     .buttonStyle(.plain)
                 } else {
@@ -166,12 +166,12 @@ struct WalkieView: View {
         let level = levels.last ?? 0
         return ZStack {
             Circle()
-                .fill(Color.orange.opacity(phase == .listening ? 0.18 : 0.08))
+                .fill(Color.primary.opacity(phase == .listening ? 0.14 : 0.08))   // a plain ring: nothing orange but Otto
                 .frame(width: 236, height: 236)
                 .scaleEffect(phase == .listening && !still ? 1 + level * 0.35 : 1)
                 .animation(.easeOut(duration: 0.08), value: level)
             Circle()
-                .strokeBorder(Color.orange.opacity(phase == .listening ? 0.9 : 0), lineWidth: 3)
+                .strokeBorder(Color.primary.opacity(phase == .listening ? 0.9 : 0), lineWidth: 3)
                 .frame(width: 200, height: 200)
                 .scaleEffect(phase == .listening || still ? 1 : 0.9)
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: phase == .listening)

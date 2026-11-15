@@ -71,9 +71,7 @@ struct ScheduleChip: View {
     var body: some View {
         Button { open = true } label: {
             HStack(spacing: 10) {
-                Image(systemName: trigger.icon)
-                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(.blue)
-                    .frame(width: 30, height: 30).background(Color.blue.opacity(0.12), in: .circle)
+                GlyphDisc(symbol: trigger.icon)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(trigger.gist).font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(2)
                     Text(scheduleLine(type: trigger.type, schedule: trigger.schedule, repeating: trigger.repeating, next: trigger.next))
@@ -83,7 +81,7 @@ struct ScheduleChip: View {
                 Image(systemName: "chevron.right").font(size: 12, weight: .semibold, relativeTo: .caption).foregroundStyle(.tertiary)
             }
             .padding(10)
-            .background(Color(.systemBackground).opacity(0.7), in: .rect(cornerRadius: 12, style: .continuous))
+            .background(Color.chip, in: .rect(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Scheduled: \(trigger.gist)")

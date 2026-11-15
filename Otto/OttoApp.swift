@@ -117,6 +117,9 @@ final class OttoStore {
     let backend: OttoBackend
     /// Pips and groups. Empty until the server says there's a second conversation.
     let pips: PipStore
+    /// Coding jobs on the Mac, by id: the cards under Otto's messages read them (Jobs.swift).
+    let jobs = JobStore()
+    private var refreshingJobs = false
     /// While false, Otto's messages also go out as local notifications.
     var foreground = true
     var messages: [Message] = [] { didSet { save() } }
@@ -172,6 +175,25 @@ final class OttoStore {
     var demoDraft: String?
     var demoFocus = false
     #endif
+
+    /// Asks the Mac for its jobs. A miss keeps what's on screen; a second ask while one is out waits for it.
+    func refreshJobs() async {
+        guard !refreshingJobs else { return }
+        refreshingJobs = true
+        defer { refreshingJobs = false }
+        if let list = await backend.jobs() { jobs.set(list) }
+    }
+
+    /// One action on a job (answer, steer, stop, merge, resolve): nil when it went through, or the words for why not.
+    func jobAction(_ verb: JobVerb, id: String, text: String?) async -> String? {
+        switch await backend.jobAction(verb, id: id, text: text) {
+        case .done(let job):
+            if let job { jobs.put(job) }
+            await refreshJobs()
+            return nil
+        case .failed(let why): return why
+        }
+    }
 
     /// The thread lives on the phone, one file per backend so mock data never mixes
     /// with the real conversation. The server only keeps the last 50.
@@ -361,9 +383,12 @@ final class OttoStore {
         if ProcessInfo.processInfo.arguments.contains("-approvalDemo") {
             approvals = [ApprovalRequest(id: "demo-change", title: "Change Otto’s core",
                 summary: "Adds a Sunday digest of the links you saved that week, one message, normal priority.",
-                files: [.init(path: "otto/digest.ts", tier: "guarded", why: "the new digest"),
-                        .init(path: "otto/server.ts", tier: "guarded", why: "runs it on Sundays at 10:00"),
-                        .init(path: "otto/tests/digest.test.ts", tier: "free", why: "an empty week sends nothing")],
+                files: [.init(path: "otto/digest.ts", tier: "guarded", why: "the new digest",
+                              lines: ["+export async function sundayDigest() {", "+  const links = await savedThisWeek()", "+  if (links.length) await send(digest(links))"]),
+                        .init(path: "otto/server.ts", tier: "guarded", why: "runs it on Sundays at 10:00",
+                              lines: ["-  schedule(weekly, review)", "+  schedule(weekly, review, sundayDigest)"]),
+                        .init(path: "otto/tests/digest.test.ts", tier: "free", why: "an empty week sends nothing",
+                              lines: ["+test('an empty week sends nothing', async () => {"])],
                 branch: "otto/sunday-digest", stat: "3 files changed, 142 insertions(+), 6 deletions(-)", expires: nil)]
         }
         // `-longThread`: one of everything a thread can hold, for the design review.
@@ -403,6 +428,19 @@ final class OttoStore {
             let args = ProcessInfo.processInfo.arguments, i = args.firstIndex(of: "-longThread")! + 1
             if i < args.count, args[i] == "a" { messages = Array(messages.prefix(8)) }
             if i < args.count, args[i] == "b" { messages = Array(messages.dropFirst(8)) }
+        }
+        // `-jobsThread`: coding jobs under Otto's messages (Jobs.swift); `-jobOpen <id>` opens one's sheet.
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-jobsThread"), i + 1 < ProcessInfo.processInfo.arguments.count,
+           ProcessInfo.processInfo.arguments[i + 1] == "worst" {
+            // `-jobsThread worst`: the realistic worst case for every value a job's card and sheet draw.
+            jobs.set(CodeJob.worst)
+            messages = [Message(from: .otto, text: "four jobs, none of them tidy.", jobs: ["worst-script", "worst-failed", "worst-unknown", "worst-input", "gone-from-the-mac"])]
+        } else if ProcessInfo.processInfo.arguments.contains("-jobsThread") {
+            jobs.set(CodeJob.demo)
+            messages = [Message(from: .otto, text: "the quieter route is up for review.", jobs: ["demo-review"]),
+                        Message(from: .me, text: "can you compare the three insurance quotes", read: true),
+                        Message(from: .otto, text: "on it. that one takes a while.", jobs: ["demo-running"]),
+                        Message(from: .otto, text: "and the settings rename has a question for you.", jobs: ["demo-input"])]
         }
         // `-studyThread`: a study set's bubble (MockBackend serves it); `-studyOpen [quiz]` opens it.
         if ProcessInfo.processInfo.arguments.contains("-studyThread") {
@@ -591,6 +629,7 @@ final class OttoStore {
             }
         }
         Task { for await items in backend.openTodoLists { openTodos = items } }
+        Task { for await list in backend.jobLists { jobs.set(list) } }
         Task { for await tile in backend.browserTiles { browser = tile.map { LiveBrowser(tile: $0, shot: $0.image.flatMap(UIImage.init(data:))) } } }
         Task {
             for await items in backend.todoLists {

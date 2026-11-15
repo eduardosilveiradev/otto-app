@@ -1304,14 +1304,31 @@ private struct Row: View {
     /// What goes in the bubble: a draft card, a voice note, or the text.
     @ViewBuilder private var content: some View {
         if let d = message.draft {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(d.head).font(size: 15, weight: .semibold, relativeTo: .subheadline)
+            // A draft is a card: what it is and that it waits on you, who it's for, the words in a
+            // well, and its buttons inside the frame. The first button is the one that sends.
+            VStack(alignment: .leading, spacing: 0) {
+                CardHead(symbol: "square.and.pencil", kind: String(localized: "Draft")) { if !message.buttons.isEmpty { NeedsMark() } }
+                if let to = Self.draftTitle(d.head) {
+                    Text(to).font(size: 16, weight: .semibold, relativeTo: .callout).padding(.top, 6)
+                }
                 Text(Self.linked(d.body))
+                    .font(size: 15, relativeTo: .subheadline)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color(.systemBackground).opacity(0.55), in: .rect(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(Color.well, in: .rect(cornerRadius: 8, style: .continuous))
+                    .padding(.top, 10)
+                if !message.buttons.isEmpty {
+                    HStack(spacing: 8) {
+                        ForEach(Array(message.buttons.enumerated()), id: \.element.id) { i, b in
+                            let button = Button(Self.buttonTitle(b.label)) { press(b) }
+                                .font(size: 15, weight: .semibold, relativeTo: .subheadline).buttonBorderShape(.capsule)
+                            if i == 0 { button.buttonStyle(.borderedProminent) } else { button.quietButton() }
+                        }
+                    }
+                    .padding(.top, 12)
+                }
             }
-            .padding(.vertical, 3)
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if message.isVoice || message.audio != nil {
             VStack(alignment: .leading, spacing: 6) {
                 VoiceRow(message: message, mine: mine)
@@ -1324,6 +1341,19 @@ private struct Row: View {
     }
 
     /// The tap "Less of this" sends: self-contained, like any button data, so it still reads days later.
+    /// "draft to Luca:" as the card's title, "To Luca"; a bare "draft:" has none.
+    static func draftTitle(_ head: String) -> String? {
+        var t = Substring(head)
+        if t.lowercased().hasPrefix("draft") { t = t.dropFirst(5) }
+        let s = t.trimmingCharacters(in: CharacterSet(charactersIn: ":").union(.whitespaces))
+        return s.isEmpty ? nil : s.prefix(1).uppercased() + s.dropFirst()
+    }
+    /// A button's label for a capsule: "send ✓" is "Send".
+    static func buttonTitle(_ label: String) -> String {
+        let s = label.trimmingCharacters(in: .symbols.union(.whitespaces))
+        return s.isEmpty ? label : s.prefix(1).uppercased() + s.dropFirst()
+    }
+
     static func lessOfThis(_ m: Message) -> String {
         "less of this: \(m.src ?? "unknown") — re: \"\(m.text.prefix(40))\""
     }
@@ -1512,7 +1542,7 @@ private struct Row: View {
                 OTPChip(message: message)
             }
                 .font(.body.leading(.tight))
-                .tint(mine ? .white : .blue)
+                .tint(mine ? .white : .actionInk)
                 // A tapped link asks what to do with it rather than leaving the app.
                 .environment(\.openURL, OpenURLAction { url in link = url; return .handled })
                 .confirmationDialog(link?.absoluteString ?? "", isPresented: Binding(get: { link != nil }, set: { if !$0 { link = nil } }), titleVisibility: .visible) {
@@ -1522,9 +1552,16 @@ private struct Row: View {
                         Button("Share…") { sharing = url }
                     }
                 }
-                .padding(.horizontal, 14).padding(.vertical, 9.5)
+                .padding(.horizontal, 14).padding(.vertical, message.draft != nil ? 14 : 9.5)
                 .foregroundStyle(mine ? .white : .primary)
-                .background(BubbleShape(mine: mine, tail: tail).fill(mine ? .outgoingBubble : .incomingBubble))
+                .background {
+                    if message.draft != nil {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.card)
+                            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+                    } else {
+                        BubbleShape(mine: mine, tail: tail).fill(mine ? Color.outgoingBubble : Color.incomingBubble)
+                    }
+                }
                 // Before the menu, so the bubble lifts with its tapback (and its tail), as it looks in the thread.
                 .overlay(alignment: mine ? .topLeading : .topTrailing) {
                     if let r = message.reaction { Tapback(emoji: r, mine: mine) }
@@ -1565,6 +1602,16 @@ private struct Row: View {
             if !mine, let card = message.card, !card.shown.isEmpty {
                 CardView(card: card, press: press)
             }
+            if !mine, let ids = message.jobs, !ids.isEmpty {
+                // Each coding job this message started, as the Mac has it now. One it hasn't told us about
+                // yet is asked for; one it no longer lists draws nothing.
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(ids, id: \.self) { id in
+                        if let job = store.jobs.byID[id] { JobCard(job: job) }
+                    }
+                }
+                .task(id: ids) { if ids.contains(where: { store.jobs.byID[$0] == nil }) { await store.refreshJobs() } }
+            }
             if let md = preview {
                 // No frame here: a maxWidth frame is 280 wide and centres a narrower card in it.
                 // LinkPreview already caps itself at 280 and hugs its content.
@@ -1599,10 +1646,11 @@ private struct Row: View {
             }
 
             // Otto's buttons read as suggested replies: plain blue text, no chrome.
-            if !message.buttons.isEmpty {
+            // A draft keeps its buttons inside its card.
+            if !message.buttons.isEmpty, message.draft == nil {
                 HStack(spacing: 16) {
                     ForEach(message.buttons) { b in
-                        Button { press(b) } label: { Text(b.label).hitSlop() }.font(size: 15, relativeTo: .subheadline).tint(.blue)
+                        Button { press(b) } label: { Text(b.label).hitSlop() }.font(size: 15, relativeTo: .subheadline).tint(.actionInk)
                             .accessibilityLabel(b.label.trimmingCharacters(in: .symbols.union(.whitespaces)))
                     }
                 }
@@ -1616,7 +1664,7 @@ private struct Row: View {
             } else if message.failed == true && message.pending == true {
                 // Still retried on its own at the next connection; the tap just doesn't wait for one.
                 Button { thread.retry(message.id) } label: {
-                    (Text("Not delivered · ").foregroundStyle(.red) + Text("Try again").foregroundStyle(.blue)).hitSlop()
+                    (Text("Not delivered · ").foregroundStyle(Color.redInk) + Text("Try again").foregroundStyle(Color.actionInk)).hitSlop()
                 }
                 .font(size: 11, relativeTo: .caption2).buttonStyle(.plain)
                 .multilineTextAlignment(.trailing)
@@ -2478,13 +2526,14 @@ private struct EmptyChat: View {
     let asleep: Bool
     let connected: Bool
 
+    private var title: LocalizedStringKey { connected ? "Say hi" : "Can’t reach your Mac" }
     private var line: String {
-        if !connected { return "Can’t reach your Mac. What you send goes out when it’s back." }
-        return "Say hi. Reminders, mail, plans: I’ll keep track of the rest."
+        if !connected { return "What you send goes out when it’s back." }
+        return "Reminders, mail, plans: I’ll keep track of the rest."
     }
     var body: some View {
-        VStack(spacing: 14) {
-            Text("Otto").font(.title2.weight(.semibold))
+        VStack(spacing: 10) {
+            Text(title).font(.title2.weight(.semibold))
             Text(line)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

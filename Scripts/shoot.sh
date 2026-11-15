@@ -160,6 +160,10 @@ shot study bubble 6 "Study set Otto sent, in the thread" $O -studyThread
 shot study cards 7 "Study set open on its cards" $O -studyThread -studyOpen cards
 shot study flipped 7 "A card turned over: Again or Knew it" $O -studyThread -studyOpen flipped
 shot study quiz 7 "Quiz with a wrong answer picked" $O -studyThread -studyOpen quiz
+shot chat jobs 6 "Coding jobs under Otto's messages: one at work, one waiting on an answer" $O -jobsThread
+shot sheet job 7 "Job detail sheet: a job up for review, with its pull request" $O -jobsThread -jobOpen demo-review
+shot chat jobs-worst 6 "Worst case: a long title and question with five answers, a state this build doesn't know, a job the Mac no longer lists" $O -jobsThread worst
+shot sheet job-worst 7 "Worst case opened: a failure with a long error, thirty steps and a pull request in the thousands" $O -jobsThread worst -jobOpen worst-failed
 shot walkie open 9 "Walkie-talkie" $O -demoThread -walkie
 shot call web-call-failed 25 "Web call that couldn't connect" $O -demoThread -call -vapiPublicKey demo -vapiAssistantId demo -vapiHost 127.0.0.1
 

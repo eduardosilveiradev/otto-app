@@ -30,7 +30,7 @@ struct DashCall: Decodable, Identifiable, Equatable {
         default: "Dialing"
         }
     }
-    var statusTint: Color { status == "in-progress" ? .green : live ? .orange : .secondary }
+    var statusTint: Color { status == "in-progress" ? .green : .secondary }
 }
 
 struct DashCalls: Decodable { let calls: [DashCall] }
@@ -74,9 +74,9 @@ struct CallBanner: View {
             HStack(spacing: 10) {
                 Image(systemName: "phone.fill")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(width: 28, height: 28)
-                    .background(call.statusTint, in: .circle)
+                    .background(Color(.tertiarySystemFill), in: .circle)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Calling \(call.to)").font(.subheadline.weight(.semibold)).monospacedDigit()
                     Text(call.task).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -220,9 +220,9 @@ struct CallSheet: View {
                     .buttonStyle(.glass)
                 }
                 Button(role: .destructive) { confirmEnd = true } label: {
-                    Label("End", systemImage: "phone.down.fill").frame(maxWidth: .infinity)
+                    Label("End call", systemImage: "phone.down.fill").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.glassProminent).tint(.red)
+                .quietButton(ink: .redInk)
             }
             .controlSize(.large)
         }

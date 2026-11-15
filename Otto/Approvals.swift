@@ -6,7 +6,12 @@ import LocalAuthentication
 /// tier, and a diff stat it computed itself); Approve sits behind Face ID. A payment
 /// (`ask_payment`) rides the same screen: merchant, every line, the total and the card.
 struct ApprovalRequest: Decodable, Identifiable, Hashable {
-    struct File: Decodable, Hashable { let path: String; let tier: String; let why: String }
+    struct File: Decodable, Hashable {
+        let path: String; let tier: String; let why: String
+        /// A few of the file's changed lines, each led by "+", "-" or a space as git writes them.
+        /// Optional: a server that sends none shows the file with its reason alone.
+        var lines: [String]? = nil
+    }
     struct Payment: Decodable, Hashable {
         struct Item: Decodable, Hashable { let name: String; let detail: String?; let quantity: Int; let unit: Double }
         let merchant: String
@@ -50,7 +55,7 @@ struct ApprovalSheet: View {
                 } else if let p = request.payment { paymentRows(p) } else { changeRows }
 
                 if let failed {
-                    Section { Text(failed).foregroundStyle(.red).font(.footnote) }
+                    Section { Text(failed).foregroundStyle(Color.redInk).font(.footnote) }
                 }
             }
             // "Approved", not "Paid": the Mac has the go-ahead; the payment itself is Otto's to report in the chat.
@@ -81,15 +86,16 @@ struct ApprovalSheet: View {
                     .padding(.horizontal, 20).padding(.vertical, 12)
                 } else {
                 HStack(spacing: 12) {
-                    Button(role: .destructive) { Task { await decide(false) } } label: {
+                    Button { Task { await decide(false) } } label: {
                         Text("Decline").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .quietButton()
                     Button { Task { await decide(true) } } label: {
                         Label(request.payment.map { "Pay \($0.money($0.total))" } ?? "Approve", systemImage: "faceid").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
                 }
+                .font(.headline)
                 .controlSize(.large)
                 .disabled(busy)
                 .padding(.horizontal, 20).padding(.vertical, 12)
@@ -153,23 +159,34 @@ struct ApprovalSheet: View {
         Section {
             ForEach(request.files, id: \.path) { f in
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(f.path).font(.system(.subheadline, design: .monospaced)).lineLimit(2)
                         Spacer(minLength: 4)
-                        Pill(text: f.tier, tint: f.tier == "guarded" ? .orange : .secondary)
+                        // Guarded is why this needs you, so it wears the mark; any other tier is only named.
+                        if f.tier == "guarded" { NeedsMark(text: f.tier) }
+                        else { Text(f.tier.prefix(1).uppercased() + f.tier.dropFirst()).font(.footnote).foregroundStyle(.secondary) }
                     }
-                    Text(f.why).font(.caption).foregroundStyle(.secondary)
+                    Text(f.why.prefix(1).uppercased() + f.why.dropFirst()).font(.footnote).foregroundStyle(.secondary)
+                    if let lines = f.lines, !lines.isEmpty { DiffPreview(lines: lines).padding(.top, 6) }
                 }
-                .accessibilityElement(children: .combine)
+                .padding(.vertical, 2)
             }
-        } header: { Text("Files") }
-
-        if let stat = request.stat {
-            Section {
-                // Wrapped, not a sideways scroll nothing hinted at.
-                Text(stat).font(.system(.caption, design: .monospaced))
-            } header: { Text(request.branch.map { "Diff against main · \($0)" } ?? "Diff") }
+        } header: {
+            Text(request.files.count == 1 ? "Changes · 1 file" : "Changes · \(request.files.count) files")
+        } footer: {
+            if let totals { Text(totals) }
         }
+    }
+
+    /// The diff's size in words, read off the stat the server computed. The raw `git diff --stat` is never shown.
+    private var totals: String? {
+        guard let stat = request.stat else { return nil }
+        let added = stat.firstMatch(of: #/(\d+) insertion/#).flatMap { Int($0.1) }
+        let removed = stat.firstMatch(of: #/(\d+) deletion/#).flatMap { Int($0.1) }
+        guard added != nil || removed != nil else { return nil }
+        let size = [added.map { "\($0) added" }, removed.map { "\($0) removed" }].compactMap { $0 }.joined(separator: " and ")
+        let preview = request.files.contains { !($0.lines ?? []).isEmpty }
+        return (preview ? "A few lines from each file. " : "") + "In all, \(size) against main" + (request.branch.map { ", on \($0)." } ?? ".")
     }
 
     private func decide(_ approve: Bool) async {
@@ -197,6 +214,27 @@ struct ApprovalSheet: View {
             failed = "Couldn’t confirm with your Mac. Check the chat, or try again."
             unconfirmed = approve
         }
+    }
+}
+
+/// A few changed lines of one file: removed on the red tint, added on the green. The sign leads each
+/// line, so the tint is never the only cue.
+private struct DiffPreview: View {
+    let lines: [String]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(lines.prefix(6).enumerated()), id: \.offset) { _, l in
+                let removed = l.hasPrefix("-"), added = l.hasPrefix("+")
+                let code = l.dropFirst(removed || added || l.hasPrefix(" ") ? 1 : 0)
+                Text(verbatim: (removed ? "− " : added ? "+ " : "  ") + code)
+                    .font(.system(.caption, design: .monospaced)).lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10).padding(.vertical, 2)
+                    .background(removed ? Color.redTint : added ? Color.greenTint : Color.clear)
+                    .accessibilityLabel((removed ? "Removed: " : added ? "Added: " : "") + code)
+            }
+        }
+        .clipShape(.rect(cornerRadius: 8, style: .continuous))
     }
 }
 

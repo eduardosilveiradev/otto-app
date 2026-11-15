@@ -81,7 +81,7 @@ private struct LoopsList: View {
             }
         }
         .swipeActions {
-            Button(closed ? "Reopen" : "Done") { flip(r.id, done: !closed) }.tint(closed ? .orange : .green)
+            Button(closed ? "Reopen" : "Done") { flip(r.id, done: !closed) }.tint(closed ? .gray : .blue)
         }
     }
 
@@ -199,7 +199,7 @@ private struct MoneyList: View {
                 Section("By month · \(cur)") {
                     Chart(Array(series), id: \.0) { mo, total in
                         BarMark(x: .value("Month", String(monthName(mo).prefix(3))), y: .value("Spent", total), width: .ratio(0.45))
-                            .foregroundStyle(month == nil || mo == month ? Color.orange : Color.orange.opacity(0.3))
+                            .foregroundStyle(month == nil || mo == month ? Color.primary : Color.primary.opacity(0.3))
                             .cornerRadius(5)
                     }
                     .chartXAxis { AxisMarks { AxisValueLabel() } }   // month names, no vertical rules
@@ -215,12 +215,12 @@ private struct MoneyList: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack {
                                     Text(c.category.prefix(1).uppercased() + c.category.dropFirst())   // sentence case, "Eating out"
-                                    if category == c.category { Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(.orange) }
+                                    if category == c.category { Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(.primary) }
                                     Spacer()
                                     Text(money(c.total, cur)).monospacedDigit().foregroundStyle(.secondary)
                                 }
                                 GeometryReader { g in
-                                    Capsule().fill(Color.orange.opacity(category == nil || category == c.category ? 1 : 0.25))
+                                    Capsule().fill(Color.primary.opacity(category == nil || category == c.category ? 1 : 0.25))
                                         .frame(width: top > 0 ? max(4, g.size.width * c.total / top) : 4)
                                 }
                                 .frame(height: 4)
@@ -311,10 +311,10 @@ struct TripsScreen: View {
         } header: {
             HStack {
                 Text(trip.start == trip.end ? day(trip.start) : "\(day(trip.start)) – \(day(trip.end))")
-                if t.current?.id == trip.id { Pill(text: t.current?.mode == "current" ? "Now" : "Next", tint: .orange) }
+                if t.current?.id == trip.id { Pill(text: t.current?.mode == "current" ? "Now" : "Next") }
             }
         } footer: {
-            if let ps = t.problems[trip.id], !ps.isEmpty { Text(ps.joined(separator: "\n")).foregroundStyle(Color.orangeText) }
+            if let ps = t.problems[trip.id], !ps.isEmpty { Text(ps.joined(separator: "\n")).foregroundStyle(Color.ottoInk) }
         }
     }
 }

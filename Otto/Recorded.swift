@@ -46,9 +46,7 @@ struct RecordedChip: View {
     var body: some View {
         Button { open = true } label: {
             HStack(spacing: 10) {
-                Image(systemName: card.icon)
-                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(.blue)
-                    .frame(width: 30, height: 30).background(Color.blue.opacity(0.12), in: .circle)
+                GlyphDisc(symbol: card.icon)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(card.title.replacingOccurrences(of: "-", with: "\u{2011}"))   // "E-MOTION" breaks at a space, not its hyphen
                         .font(size: 15, weight: .semibold, relativeTo: .subheadline).foregroundStyle(.primary).lineLimit(2)
@@ -59,7 +57,7 @@ struct RecordedChip: View {
                 Image(systemName: "chevron.right").font(size: 12, weight: .semibold, relativeTo: .caption).foregroundStyle(.tertiary)
             }
             .padding(10)
-            .background(Color(.systemBackground).opacity(0.7), in: .rect(cornerRadius: 12, style: .continuous))
+            .background(Color.chip, in: .rect(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(card.heading): \(card.title)")

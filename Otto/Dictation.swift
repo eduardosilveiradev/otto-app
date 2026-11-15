@@ -216,7 +216,7 @@ struct DictationListeningView: View {
             Text(d.phase == .working ? "Cleaning it up…" : "Listening").font(.title2.weight(.semibold))
             HStack(spacing: 4) {
                 ForEach(0..<14, id: \.self) { i in
-                    Capsule().fill(Color.orange)
+                    Capsule().fill(Color.primary)
                         .frame(width: 5, height: 8 + CGFloat(d.level) * 46 * CGFloat(0.4 + 0.6 * abs(sin(Double(i) * 0.9))))
                 }
             }
@@ -229,10 +229,9 @@ struct DictationListeningView: View {
                 DictationBridge.write(.init(action: .stop, id: DictationBridge.readRequest()?.id ?? ""))
                 DictationBridge.post(DictationBridge.toApp)
             } label: {
-                // On the label, where the prominent style can't repaint it: white on this orange is ~2:1.
-                Text("Stop").foregroundStyle(Color(white: 0.12))
+                Text("Stop")
             }
-            .buttonStyle(.borderedProminent).tint(.orange)
+            .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
             .padding(.bottom, 30)
         }
         .frame(maxWidth: .infinity)

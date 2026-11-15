@@ -17,16 +17,14 @@ struct OTPChip: View {
         if let otp = message.otp {
             Button { store.otpDrawer = message } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "key.fill")
-                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(.blue)
-                        .frame(width: 30, height: 30).background(Color.blue.opacity(0.12), in: .circle)
+                    GlyphDisc(symbol: "key.fill")
                     Text(String(repeating: "•", count: otp.code.count))
                         .font(size: 17, weight: .semibold, design: .rounded, relativeTo: .headline).foregroundStyle(.primary)
                     Spacer(minLength: 4)
-                    Text("Show").font(size: 15, relativeTo: .subheadline).foregroundStyle(.blue)
+                    Text("Show").font(size: 15, relativeTo: .subheadline).foregroundStyle(Color.actionInk)
                 }
                 .padding(10)
-                .background(Color(.systemBackground).opacity(0.7), in: .rect(cornerRadius: 12, style: .continuous))
+                .background(Color.chip, in: .rect(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Verification code\(otp.sender.map { " from \($0)" } ?? ""). Show")
