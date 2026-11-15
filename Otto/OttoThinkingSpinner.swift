@@ -379,7 +379,7 @@ enum OttoThinkingSpinnerCheck {
         let hop = { (u: Double) in OttoThinkingSpinner.loops(.do, t: u * 1.15, blink: 0) }
         assert(near(hop(0.5).jump, -0.17) && near(hop(0.13).sqX, 1.1) && near(hop(0.13).sqY, 0.87) && near(hop(0.24).sqY, 1.08))
         assert(near(hop(0).jump, 0) && near(hop(0.999).sqX, 1), "a loop starts and ends on the rest face")
-        assert(OttoThinkingSpinner.spring.value(at: 0.5) > 1, "--spring overshoots")
+        assert(OttoThinkingSpinner.spring.value(at: 0.7) > 1, "--spring overshoots, past 1 near 0.7")
         let m = OttoThinkingSpinner.mull(0, az: OttoThinkingSpinner.mullAZ)
         assert(near(m.dx, 0) && near(m.sx, 1), "Mull starts on the rest face")
         let half = OttoThinkingSpinner.mull(1, az: OttoThinkingSpinner.mullAZ)
