@@ -1322,7 +1322,7 @@ private struct Row: View {
                         ForEach(Array(message.buttons.enumerated()), id: \.element.id) { i, b in
                             let button = Button(Self.buttonTitle(b.label)) { press(b) }
                                 .font(size: 15, weight: .semibold, relativeTo: .subheadline).buttonBorderShape(.capsule)
-                            if i == 0 { button.buttonStyle(.borderedProminent) } else { button.quietButton() }
+                            if i == 0 { button.buttonStyle(.borderedProminent).tint(.blue) } else { button.quietButton() }
                         }
                     }
                     .padding(.top, 12)
@@ -1671,7 +1671,7 @@ private struct Row: View {
                 .padding(.trailing, 4)
             } else if message.failed == true {
                 // Nothing left to send (a voice note whose audio is gone).
-                Text("Not delivered").font(size: 11, relativeTo: .caption2).foregroundStyle(.red)
+                Text("Not delivered").font(size: 11, relativeTo: .caption2).foregroundStyle(Color.redInk)
                     .padding(.trailing, 4)
             } else if message.pending == true {
                 Text("Sending…").font(size: 11, relativeTo: .caption2).foregroundStyle(.secondary)

@@ -316,7 +316,7 @@ struct DetailsView: View {
                                 if let due = l.due, !closed {
                                     let late = due < Calendar.current.startOfDay(for: .now)
                                     Text("\(late ? "was due" : "due") \(due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
-                                        .font(.footnote).foregroundStyle(late ? .red : .secondary)
+                                        .font(.footnote).foregroundStyle(late ? Color.redInk : .secondary)
                                 }
                             }
                             Spacer()

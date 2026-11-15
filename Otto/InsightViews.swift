@@ -72,7 +72,7 @@ private struct LoopsList: View {
                     // Only the date goes red when it's passed, as in Reminders; the rest stays secondary.
                     let due = late(r) ? r.due.map { "was due \(day($0))" } : nil
                     if let due, m.hasPrefix(due) {
-                        Text("\(Text(due).foregroundStyle(.red))\(Text(String(m.dropFirst(due.count))).foregroundStyle(.secondary))")
+                        Text("\(Text(due).foregroundStyle(Color.redInk))\(Text(String(m.dropFirst(due.count))).foregroundStyle(.secondary))")
                             .font(.footnote).lineLimit(2)
                     } else if !m.isEmpty {
                         Text(m).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
@@ -362,7 +362,7 @@ struct PackagesList: View {
                 StageBar(status: pkg.status, events: pkg.events)
                 HStack {
                     Text(arrival(pkg)).font(.subheadline.weight(.medium))
-                        .foregroundStyle(pkg.status == "exception" ? .red : .primary)
+                        .foregroundStyle(pkg.status == "exception" ? Color.redInk : .primary)
                     Spacer()
                     Text("Updated \(ago(pkg.updatedAt))").font(.footnote).foregroundStyle(.secondary)
                 }
@@ -392,7 +392,7 @@ struct PackagesList: View {
                 DisclosureGroup("Updates · \(pkg.events.count)") {
                     ForEach(pkg.events.sorted { (dashDate($0.at) ?? .distantPast) > (dashDate($1.at) ?? .distantPast) }, id: \.self) { e in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(e.text).foregroundStyle(e.status == "exception" ? .red : .primary)
+                            Text(e.text).foregroundStyle(e.status == "exception" ? Color.redInk : .primary)
                             Text(dashDate(e.at)?.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute()) ?? e.at)
                                 .font(.footnote).foregroundStyle(.secondary)
                         }

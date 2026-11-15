@@ -169,11 +169,14 @@ struct JobCard: View {
                             .multilineTextAlignment(.leading).lineLimit(4).padding(.top, 4)
                     }
                     // Its age moves with the clock, like the desktop's.
-                    TimelineView(.periodic(from: .now, by: 30)) { tl in
-                        Text(job.meta(now: tl.date)).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary)
-                            .monospacedDigit().lineLimit(2).multilineTextAlignment(.leading)
+                    // A job with no dates and no pull request has no line to show.
+                    if !job.meta().isEmpty {
+                        TimelineView(.periodic(from: .now, by: 30)) { tl in
+                            Text(job.meta(now: tl.date)).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary)
+                                .monospacedDigit().lineLimit(2).multilineTextAlignment(.leading)
+                        }
+                        .padding(.top, 2)
                     }
-                    .padding(.top, 2)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding([.horizontal, .top], 14)
@@ -215,7 +218,8 @@ struct JobCard: View {
                 Task { _ = await store.jobAction(.answer, id: job.id, text: a); answering = false }
             }
             .font(size: 15, weight: .semibold, relativeTo: .subheadline)
-            .buttonBorderShape(.capsule)
+            // A pill on one line, a rounded box when a long answer wraps.
+            .buttonBorderShape(.roundedRectangle(radius: 18))
             // The first is what it suggested, so it gets the blue; the others stay beside it.
             if i == 0 { button.buttonStyle(.borderedProminent) } else { button.quietButton() }
         }
@@ -246,7 +250,7 @@ struct JobSheet: View {
             }
             .navigationTitle("Job").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close", systemImage: "xmark") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button("Close", systemImage: "xmark") { dismiss() } }
             }
         }
         .presentationDetents([.medium, .large])
@@ -289,7 +293,7 @@ struct JobSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20).padding(.top, 4).padding(.bottom, 24)
         }
-        .confirmationDialog(confirming == .merge ? "Merge PR #\(job.pr?.n ?? 0)?" : "Stop this job?", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), titleVisibility: .visible) {
+        .confirmationDialog(confirming == .merge ? "Merge PR #\(String(job.pr?.n ?? 0))?" : "Stop this job?", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), titleVisibility: .visible) {
             if confirming == .merge { Button("Merge pull request") { Task { await act(.merge) } } }
             else { Button("Stop job", role: .destructive) { Task { await act(.stop) } } }
             Button("Cancel", role: .cancel) {}
@@ -318,7 +322,7 @@ struct JobSheet: View {
 
     @ViewBuilder private func answers(_ answers: [String]) -> some View {
         ForEach(Array(answers.enumerated()), id: \.offset) { i, a in
-            let button = Button(a) { Task { await act(.answer, text: a) } }.font(.subheadline.weight(.semibold)).buttonBorderShape(.capsule)
+            let button = Button(a) { Task { await act(.answer, text: a) } }.font(.subheadline.weight(.semibold)).buttonBorderShape(.roundedRectangle(radius: 18))
             if i == 0 { button.buttonStyle(.borderedProminent) } else { button.quietButton() }
         }
     }
@@ -326,7 +330,7 @@ struct JobSheet: View {
     private func pullRequest(_ job: CodeJob, _ pr: CodeJob.PR) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(pr.title.map { "PR #\(pr.n) · \($0)" } ?? "PR #\(pr.n)").font(.subheadline.weight(.semibold))
+                Text(verbatim: pr.title.map { "PR #\(pr.n) · \($0)" } ?? "PR #\(pr.n)").font(.subheadline.weight(.semibold))
                 let facts = [pr.add.map { "\($0.formatted()) added" }, pr.del.map { "\($0.formatted()) removed" }, pr.files.map { $0 == 1 ? "1 file" : "\($0.formatted()) files" }, pr.checks.flatMap { $0.isEmpty ? nil : "checks \($0)" }].compactMap { $0 }
                 if !facts.isEmpty { Text(facts.joined(separator: " · ")).font(.footnote).foregroundStyle(.secondary).monospacedDigit() }
                 if job.conflicts { Text("It has conflicts with \(pr.base ?? "its base branch").").font(.footnote).foregroundStyle(Color.ottoInk) }
