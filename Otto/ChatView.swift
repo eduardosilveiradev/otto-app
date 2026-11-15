@@ -330,7 +330,7 @@ struct ChatView: View {
         .overlay(alignment: .bottomLeading) {
             if scrolledUp && !showingResults && thread.typing && thread.connected, let step = thread.typingStatus, !step.isEmpty {
                 HStack(spacing: 6) {
-                    OttoAvatar(size: 13, thinking: true)
+                    OttoThinkingSpinner(kind: OttoThinkingSpinner.Kind(step: step) ?? .think, size: 13)
                     Text(step).lineLimit(1).truncationMode(.tail)
                         .contentTransition(.interpolate)
                         .animation(.snappy, value: step)

@@ -288,7 +288,8 @@ struct OttoThinkingSpinner: View {
 
     // MARK: Look
 
-    static let otto = Color(red: 1, green: 0x7a / 255, blue: 0x1a / 255)              // #ff7a1a on both grounds
+    /// The redesign's tangerine (Theme.swift), so the mark matches every other mark of Otto's in the thread.
+    static let otto = Color.otto
     static let eye = Color(red: 0x20 / 255, green: 0x20 / 255, blue: 0x20 / 255)      // #202020
 
     /// The eyes are drawn per optical size: thicker and moving further at text size.
