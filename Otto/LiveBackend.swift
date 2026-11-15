@@ -150,7 +150,12 @@ final class LiveBackend: OttoBackend {
     func history(background: Bool, limit: Int, since: Date?) async -> [Message]? {
         let q = since.map { [URLQueryItem(name: "since", value: $0.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: true)))] }
             ?? [URLQueryItem(name: "limit", value: String(limit))]
-        guard let rows: [WireHistory] = await get("app/history", background: background, query: q) else { return nil }
+        guard let (data, resp) = await fetch("app/history", background: background, query: q),
+              let rows = try? JSONDecoder().decode([WireHistory].self, from: data) else { return nil }
+        // Messages the server took back: a "delete" patch each, so the thread drops its copy.
+        let gone = (resp.value(forHTTPHeaderField: "X-Otto-Deleted") ?? "").split(separator: ",").map { id -> Message in
+            var m = Message(from: .otto, text: "", date: .distantPast, serverID: String(id)); m.patch = "delete"; return m   // dated nowhere, so the sync cursor never moves for it
+        }
         // Ids make the merge exact: yours come back under the UUID this phone sent them with.
         // One of yours without an id (written before they had one) can't be matched, so it's left out.
         return rows.filter { $0.dir != "in" || $0.id != nil || $0.kind == "terminal" }.map { r in
@@ -167,7 +172,7 @@ final class LiveBackend: OttoBackend {
             m.reaction = r.reaction
             if r.kind == "edit" || r.kind == "reaction" { m.patch = r.kind }
             return m
-        }
+        } + gone
     }
 
     /// Straight onto the open socket, no outbox: the store keeps unsent messages
@@ -572,14 +577,20 @@ final class LiveBackend: OttoBackend {
     // MARK: HTTP
 
     private func get<T: Decodable>(_ path: String, background: Bool = false, query: [URLQueryItem] = []) async -> T? {
+        guard let (data, _) = await fetch(path, background: background, query: query) else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
+    }
+
+    /// A 200's body and response, for the one read that needs a header (history's X-Otto-Deleted).
+    private func fetch(_ path: String, background: Bool = false, query: [URLQueryItem] = []) async -> (Data, HTTPURLResponse)? {
         var c = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { c.queryItems = query }
         var req = URLRequest(url: c.url!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if background { req.setValue("1", forHTTPHeaderField: "X-Otto-Background") }
         guard let (data, resp) = try? await session.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return try? JSONDecoder().decode(T.self, from: data)
+              let http = resp as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+        return (data, http)
     }
 
     /// Uploads go over plain HTTP, not the socket: its frames are capped at 64 KB.

@@ -115,7 +115,7 @@ struct Message: Identifiable, Codable {
     var isPhoto: Bool { image != nil || photo == true }
     /// The JPEG, from memory or from disk.
     var imageData: Data? { image ?? (photo == true ? ImageStore.data(id) : nil) }
-    /// Only from history: not a message but an "edit" or "reaction" for one older than the page,
+    /// Only from history: not a message but an "edit", "reaction" or "delete" for one older than the page,
     /// applied to the message it names and never shown on its own.
     var patch: String? = nil
     /// Who wrote it, in a conversation: "otto" or a pip id. Nil in Otto's own transport.

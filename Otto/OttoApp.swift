@@ -910,7 +910,9 @@ final class OttoStore {
         let lastOtto = messages.last(where: { $0.from == .otto })?.date ?? .distantPast
         let index = Dictionary(messages.indices.map { (messages[$0].wireID, $0) }, uniquingKeysWith: { a, _ in a })
         var fresh: [Message] = []
+        var gone = Set<String>()
         for h in all {
+            if h.patch == "delete" { gone.insert(h.wireID); continue }
             if let kind = h.patch {   // an edit or tapback for a message older than the page
                 guard let i = index[h.wireID] else { continue }
                 // Otto's tapback, only ever on yours: the one on Otto's is your own, and one you took off stays off.
@@ -935,6 +937,7 @@ final class OttoStore {
                 if messages[i].text != h.text && !(h.text.count >= 8000 && messages[i].text.hasPrefix(h.text)) { messages[i].text = h.text }
             }
         }
+        if !gone.isEmpty, messages.contains(where: { gone.contains($0.wireID) }) { messages.removeAll { gone.contains($0.wireID) }; save() }
         guard !fresh.isEmpty else { reconcileDesktop(); return }
         if !serverTyping && fresh.contains(where: { $0.from == .otto }) { ottoTyping = false }
         for m in fresh { messages.insert(m, at: messages.lastIndex { $0.date <= m.date }.map { $0 + 1 } ?? 0) }
