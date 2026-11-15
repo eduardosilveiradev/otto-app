@@ -20,6 +20,7 @@ parts += ['''
 struct DashTrigger: Codable {}
 struct RecordedCard: Codable {}
 struct OTPCode: Codable {}
+struct GroupLink: Codable {}
 struct Card: Codable { var actions: [ActionButton]? }
 enum ImageStore { static func data(_ id: UUID) -> Data? { nil } }
 enum VoiceStore { static var audio: Data? = Data([1]); static func data(_ id: UUID) -> Data? { audio } }
@@ -140,7 +141,7 @@ cat >> "$T/check.swift" <<'SWIFT'
         await store.voiceReconcile?.value
         assert(store.messages[0].pending == true)
         // Server thinking + matching history proves receipt BEFORE HTTP completes.
-        backend.rows = rows
+        backend.rows = rows ?? []
         await store.status("Working")
         await store.voiceReconcile?.value
         assert(store.messages[0].pending == nil, "server activity/history left voice note Sending")

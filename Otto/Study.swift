@@ -45,22 +45,28 @@ struct StudyBubble: View {
 
     var body: some View {
         Button { if set == nil { tries += 1 } else { open = true } } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(set?.title ?? (missing ? "Study set — no longer available" : "Study set"))
-                    .font(size: 16, weight: .semibold, relativeTo: .callout).lineLimit(2)
-                if let set {
-                    Text([set.source, count(set)].compactMap { $0 }.joined(separator: " · "))
-                        .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1)
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    CardHead(symbol: "book", kind: String(localized: "Study set")) {
+                        if let set { Text(count(set)).font(size: 13, relativeTo: .footnote).lineLimit(1) }
+                    }
+                    Text(set?.title ?? (missing ? "No longer available" : "Study set"))
+                        .font(size: 16, weight: .semibold, relativeTo: .callout).lineLimit(2).multilineTextAlignment(.leading).padding(.top, 6)
+                    if let source = set?.source {
+                        Text(source).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(1).padding(.top, 2)
+                    }
                 }
+                .padding([.horizontal, .top], 14)
+                Divider().padding(.top, 12)
                 Group {
                     if failed { Text.couldntLoad }
-                    else { Text("Study").foregroundStyle(.blue) }
+                    else { Text("Study").foregroundStyle(set == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.actionInk)) }
                 }
-                .font(size: 15, weight: .medium, relativeTo: .subheadline).padding(.top, 6)
+                .font(size: 15, relativeTo: .subheadline)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(.horizontal, 14)
             }
-            .frame(width: 230, alignment: .leading)
-            .padding(.horizontal, 14).padding(.vertical, 11)
-            .background(Color(.systemGray5), in: .rect(cornerRadius: 18, style: .continuous))
+            .ottoCard()
+            .contentShape(.rect)
         }
         .tint(.primary)
         .disabled(set == nil && !failed)
@@ -166,9 +172,11 @@ private struct CardsPane: View {
                     .padding(.horizontal)
                 if run.flipped {
                     HStack(spacing: 12) {
-                        bigButton("Again", .orange) { next(queue, knew: false) }
-                        bigButton("Knew it", .green) { next(queue, knew: true) }
-                    }.padding(.horizontal)
+                        Button { next(queue, knew: false) } label: { Text("Again").frame(maxWidth: .infinity) }.quietButton()
+                        Button { next(queue, knew: true) } label: { Text("Knew it").frame(maxWidth: .infinity) }
+                            .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+                    }
+                    .font(.headline).controlSize(.large).padding(.horizontal)
                 } else {
                     Text("Tap to flip").font(.subheadline).foregroundStyle(.secondary).frame(height: 50)
                 }
@@ -205,9 +213,6 @@ struct QuizRun {
 private struct QuizPane: View {
     let quiz: [StudySet.Question]
     @Binding var run: QuizRun
-    @Environment(\.colorScheme) private var scheme
-    /// As Pill and BigButton: the colour as is in dark mode, 40% toward black in light.
-    private func ink(_ c: Color) -> Color { scheme == .dark ? c : c.mix(with: .black, by: 0.4) }
 
     var body: some View {
         ScrollView {
@@ -221,8 +226,8 @@ private struct QuizPane: View {
                             HStack {
                                 Text(q.options[o])
                                 Spacer(minLength: 8)
-                                if picked != nil, o == q.answer { Image(systemName: "checkmark.circle.fill").foregroundStyle(ink(.green)) }
-                                else if o == picked { Image(systemName: "xmark.circle.fill").foregroundStyle(ink(.red)) }
+                                if picked != nil, o == q.answer { Image(systemName: "checkmark.circle").foregroundStyle(Color.greenInk) }
+                                else if o == picked { Image(systemName: "xmark.circle").foregroundStyle(Color.redInk) }
                             }
                             .padding(.horizontal, 16).padding(.vertical, 13)
                             .background(fill(o, q, picked), in: .rect(cornerRadius: 16, style: .continuous))
@@ -232,7 +237,10 @@ private struct QuizPane: View {
                     }
                     if let picked {
                         if let why = q.why { Text(why).font(.callout).foregroundStyle(.secondary) }
-                        bigButton(run.at + 1 < quiz.count ? "Next" : "See score", .blue) { withAnimation(.snappy) { run.at += 1 } }
+                        Button { withAnimation(.snappy) { run.at += 1 } } label: {
+                            Text(run.at + 1 < quiz.count ? "Next" : "See score").font(.headline).frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).controlSize(.large)
                             .padding(.top, 6)
                             .sensoryFeedback(picked == q.answer ? .success : .error, trigger: picked)
                     }
@@ -248,26 +256,7 @@ private struct QuizPane: View {
 
     private func fill(_ o: Int, _ q: StudySet.Question, _ picked: Int?) -> Color {
         guard let picked else { return Color(.secondarySystemBackground) }
-        if o == q.answer { return .green.opacity(0.3) }
-        return o == picked ? .red.opacity(0.3) : Color(.secondarySystemBackground)
-    }
-}
-
-private func bigButton(_ title: String, _ color: Color, _ action: @escaping () -> Void) -> some View {
-    BigButton(title: title, color: color, action: action)
-}
-
-private struct BigButton: View {
-    let title: String
-    let color: Color
-    let action: () -> Void
-    @Environment(\.colorScheme) private var scheme
-    var body: some View {
-        Button(action: action) {
-            Text(title).font(.headline).frame(maxWidth: .infinity).frame(height: 50)
-                .background(color.opacity(0.18), in: .rect(cornerRadius: 16, style: .continuous))
-                // As Pill: the colour as is in dark mode, 40% toward black in light, to read on its pale fill.
-                .foregroundStyle(scheme == .dark ? color : color.mix(with: .black, by: 0.4))
-        }
+        if o == q.answer { return .greenTint }
+        return o == picked ? .redTint : Color(.secondarySystemBackground)
     }
 }

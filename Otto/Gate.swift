@@ -118,9 +118,9 @@ struct GateBanner: View {
             HStack(spacing: 10) {
                 Image(systemName: "airplane.departure")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(width: 28, height: 28)
-                    .background(GateStatus(card).tint, in: .circle)
+                    .background(Color(.tertiarySystemFill), in: .circle)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(card.gate.map { "\(card.flightLabel) · Gate \($0)" } ?? card.flightLabel)
                         .font(.subheadline.weight(.semibold))
@@ -192,9 +192,6 @@ struct GateStatus: Equatable {
         case .quiet: Color(light: 0x6B6B73, dark: 0xA1A1AA)
         }
     }
-    var tint: Color {
-        switch tone { case .ok: .green; case .late: .orange; case .bad: .red; case .quiet: .gray }
-    }
 }
 
 private extension Color {
@@ -221,7 +218,7 @@ struct GateSheet: View {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(card.notes, id: \.self) { n in
                                 Label(n, systemImage: "exclamationmark.triangle.fill")
-                                    .font(.footnote).foregroundStyle(Color.orangeText)
+                                    .font(.footnote).foregroundStyle(Color.ottoInk)
                             }
                         }
                         .frame(maxWidth: 340, alignment: .leading)
@@ -307,14 +304,18 @@ struct BoardingPass: View {
                 Text("\(card.flightLabel) · \(Self.day(card.date))")
                     .font(size: 12, relativeTo: .caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 0)
-                Text(status.label)
+                Group {
+                    if status.tone == .late { NeedsMark(text: status.label) } else {
+                        Text(status.label)
+                            .font(size: 11, weight: .medium, relativeTo: .caption2)
+                            .padding(.horizontal, 6).frame(minHeight: 18)
+                            .foregroundStyle(status.ink)
+                            .background(status.fill, in: .capsule)
+                            .overlay { Capsule().strokeBorder(status.ink.opacity(0.14), lineWidth: 1) }
+                    }
+                }
                     .id(status.label)
                     .transition(.blurReplace(.upUp))   // exits up, the new word rises in from below
-                    .font(size: 11, weight: .medium, relativeTo: .caption2)
-                    .padding(.horizontal, 6).frame(minHeight: 18)
-                    .foregroundStyle(status.ink)
-                    .background(status.fill, in: .capsule)
-                    .overlay { Capsule().strokeBorder(status.ink.opacity(0.14), lineWidth: 1) }
                     .animation(.easeInOut(duration: 0.15), value: status)
             }
             HStack(alignment: .top, spacing: 8) {
@@ -437,8 +438,8 @@ struct BoardingPass: View {
             .lineLimit(1)
             .padding(.leading, action == .add ? 12 : 10).padding(.trailing, 12)
             .frame(minHeight: 36)
-            .foregroundStyle(action == .show ? Color.primary : Color(.systemBackground))
-            .background(action == .show ? Color(uiColor: .label).opacity(scheme == .dark ? 0.07 : 0.04) : Color(uiColor: .label), in: .capsule)
+            .foregroundStyle(action == .show ? Color.primary : Color.white)
+            .background(action == .show ? Color(uiColor: .label).opacity(scheme == .dark ? 0.07 : 0.04) : Color.blue, in: .capsule)
             .shadow(color: .black.opacity(action == .show ? 0 : (scheme == .dark ? 0.4 : 0.2)), radius: 1, y: 1)
             .animation(.spring(response: 0.3, dampingFraction: 0.85), value: action)
         }

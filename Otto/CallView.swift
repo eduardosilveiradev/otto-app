@@ -108,8 +108,7 @@ struct CallView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.16, green: 0.1, blue: 0.06), .black], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
+            Color.black.ignoresSafeArea()   // plain black: nothing glows behind the face
 
             // The same glow as a recording voice note, rising from the screen's edge with either voice.
             Color.clear
@@ -144,18 +143,18 @@ struct CallView: View {
                 HStack(spacing: 40) {
                     if call.error != nil {
                         // A failed call keeps its screen with the two ways on, as FaceTime does.
-                        RoundButton(symbol: "xmark", fill: .white.opacity(0.18), tint: .white, label: "close") { dismiss() }
-                        RoundButton(symbol: "phone.fill", fill: .green, tint: .white, label: "try again") { call.start(context: context) }
+                        RoundButton(symbol: "xmark", fill: .white.opacity(0.18), tint: .white, label: "Close") { dismiss() }
+                        RoundButton(symbol: "phone.fill", fill: .blue, tint: .white, label: "Try again") { call.start(context: context) }
                     } else {
                         RoundButton(symbol: call.speaker ? "speaker.wave.3.fill" : "speaker.fill",
                                     fill: call.speaker ? .white : .white.opacity(0.18),
                                     tint: call.speaker ? .black : .white,
-                                    label: "speaker") { call.toggleSpeaker() }
+                                    label: "Speaker") { call.toggleSpeaker() }
                         RoundButton(symbol: call.muted ? "mic.slash.fill" : "mic.fill",
                                     fill: call.muted ? .white : .white.opacity(0.18),
                                     tint: call.muted ? .black : .white,
-                                    label: "mute") { call.toggleMute() }
-                        RoundButton(symbol: "phone.down.fill", fill: .red, tint: .white, label: "end") {
+                                    label: "Mute") { call.toggleMute() }
+                        RoundButton(symbol: "phone.down.fill", fill: .red, tint: .white, label: "End") {
                             call.hangUp(); dismiss()
                         }
                     }

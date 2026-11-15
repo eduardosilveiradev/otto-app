@@ -41,7 +41,7 @@ struct OnboardingFlow: View {
         HStack(spacing: 6) {
             ForEach(Step.allCases.dropFirst().dropLast(), id: \.self) { s in
                 Capsule()
-                    .fill(s == step ? Color.orange : Color(.tertiarySystemFill))
+                    .fill(s == step ? Color.primary : Color(.tertiarySystemFill))
                     .frame(width: s == step ? 18 : 6, height: 6)
             }
         }
@@ -84,7 +84,7 @@ private struct Page<Hero: View, Content: View, Footer: View>: View {
             ScrollView {
                 VStack(spacing: 0) {
                     // A fixed start, not a centring spacer: the picture and headline sit at the same height on every step.
-                    Color.clear.frame(height: max(24, g.size.height * 0.1))
+                    Color.clear.frame(height: max(24, g.size.height * 0.15))
                     if Hero.self != EmptyView.self { hero.padding(.bottom, 32) }
                     VStack(spacing: 10) {
                         Text(title).font(size: 28, weight: .bold, relativeTo: .title).multilineTextAlignment(.center)
@@ -123,14 +123,13 @@ private struct Primary: View {
         Button(action: action) {
             ZStack {
                 Text(label).opacity(busy ? 0 : 1)
-                if busy { ProgressView().tint(Color(white: 0.12)) }
+                if busy { ProgressView().tint(.white) }
             }
             .font(size: 17, weight: .semibold, relativeTo: .headline)
-            .foregroundStyle(Color(white: 0.12))   // white on this orange is ~2:1
-            .frame(maxWidth: .infinity).frame(minHeight: 52)
+            .frame(maxWidth: .infinity).frame(minHeight: 36)
         }
-        .buttonStyle(.glassProminent)
-        .tint(.orange)
+        // The one button that moves on is the system's blue; orange never fills a button.
+        .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).controlSize(.large)
         .disabled(busy)
     }
 }
@@ -153,9 +152,9 @@ private struct Glyph: View {
     var body: some View {
         Image(systemName: name)
             .font(.system(size: 52, weight: .regular))
-            .foregroundStyle(.primary)   // white in dark, black in light; the circle keeps the orange
+            .foregroundStyle(.primary)   // white in dark, black in light, on a plain disc
             .frame(width: 128, height: 128)
-            .background(Color.orange.opacity(0.12), in: .circle)
+            .background(Color(.tertiarySystemFill), in: .circle)
             .symbolEffect(.bounce, options: .nonRepeating, isActive: !still)
     }
 }
@@ -200,7 +199,7 @@ private struct ConnectPage: View {
     /// Right under what it's about (the fields, or the command and Paste), not under a link or down by the
     /// buttons. Its line is always held, so the page doesn't re-centre and jump when an error arrives.
     private var problemLine: some View {
-        Text(problem ?? " ").font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
+        Text(problem ?? " ").font(.footnote).foregroundStyle(Color.redInk).multilineTextAlignment(.center)
             .opacity(problem == nil ? 0 : 1)
             .accessibilityHidden(problem == nil)
     }
@@ -245,7 +244,7 @@ private struct ConnectPage: View {
                         }
                         .buttonBorderShape(.capsule)
                         .labelStyle(.titleAndIcon)
-                        .tint(.orange)   // the page's one accent
+                        .tint(.outgoingBubble)   // beside the blue button, not a second one
                     }
                     problemLine
                     // The other way in, beside the one it replaces; with no camera it's the big button instead.

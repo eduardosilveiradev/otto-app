@@ -287,7 +287,7 @@ private struct ConversationCell: View {
         }
         .buttonStyle(CellPress())
         .overlay(alignment: .leading) {
-            if row.unread > 0 { Circle().fill(Color.orangeText).frame(width: 10, height: 10).padding(.leading, 6) }
+            if row.unread > 0 { Circle().fill(Color.ottoInk).frame(width: 10, height: 10).padding(.leading, 6) }
         }
         .overlay(alignment: .top) {
             if divided { Rectangle().fill(Color(.separator)).frame(height: 0.5).padding(.leading, 90) }
@@ -464,7 +464,7 @@ struct ActivityLine: View {
                 let buttons = Message.actionButtons(member.buttons)
                 if !buttons.isEmpty {
                     HStack(spacing: 16) {
-                        ForEach(buttons) { b in Button { press(b) } label: { Text(b.label).hitSlop() }.font(size: 15, relativeTo: .subheadline).tint(.blue) }
+                        ForEach(buttons) { b in Button { press(b) } label: { Text(b.label).hitSlop() }.font(size: 15, relativeTo: .subheadline).tint(.actionInk) }
                     }
                     .padding(.leading, 12)
                 }
@@ -640,7 +640,8 @@ private struct HandoffPath: View {
         }
     }
 
-    private var line: LinearGradient { LinearGradient(colors: [from.map { Color($0.tint) } ?? Color(.systemGray2), Color(to.tint)], startPoint: .leading, endPoint: .trailing) }
+    /// One grey for the line between them: the faces carry the colour.
+    private var line: Color { Color(.systemGray2) }
     private let style = StrokeStyle(lineWidth: 3, lineCap: .round)
 
     var body: some View {
@@ -737,9 +738,8 @@ struct PipDetailSheet: View {
                 if !p.canReach.isEmpty {
                     section("Can reach") {
                         ForEach(Array(p.canReach.enumerated()), id: \.element.id) { i, r in
-                            let (symbol, colour) = Self.reach(r.name)
                             line(divided: i > 0) {
-                                tile(symbol, colour)
+                                tile(Self.reach(r.name))
                                 Text(r.name)
                                 Spacer(minLength: 8)
                                 if r.sharedWithOtto { Text("Shared with Otto").foregroundStyle(.secondary).lineLimit(1) }
@@ -749,7 +749,7 @@ struct PipDetailSheet: View {
                 }
                 section("Runs on", bottom: 16) {
                     line(divided: false) {
-                        tile("arrow.left.arrow.right", Color(UIColor(rgb: 0x46526B)))
+                        tile("arrow.left.arrow.right")
                         VStack(alignment: .leading, spacing: 0) {
                             Text(Self.model(p.runsOn))
                             if let note = Self.note(p.runsOn) { Text(note).font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary) }
@@ -782,14 +782,14 @@ struct PipDetailSheet: View {
     }
 
     /// The server names what a pip may touch; this picks its tile.
-    private static func reach(_ name: String) -> (String, Color) {
+    private static func reach(_ name: String) -> String {
         let n = name.lowercased()
-        if n.contains("calendar") { return ("calendar", Color(UIColor(rgb: 0xE5484D))) }
-        if n.contains("place") || n.contains("route") { return ("point.topleft.down.to.point.bottomright.curvepath", Color(UIColor(rgb: 0x3B6FD4))) }
-        if n.contains("web") { return ("globe", Color(UIColor(rgb: 0x2A9AA8))) }
-        if n.contains("memory") { return ("brain", Color(UIColor(rgb: 0x9A5BC8))) }
-        if n.contains("mail") || n.contains("inbox") { return ("envelope", Color(UIColor(rgb: 0x3B6FD4))) }
-        return ("square.grid.2x2", Color(UIColor(rgb: 0x46526B)))
+        if n.contains("calendar") { return "calendar" }
+        if n.contains("place") || n.contains("route") { return "point.topleft.down.to.point.bottomright.curvepath" }
+        if n.contains("web") { return "globe" }
+        if n.contains("memory") { return "brain" }
+        if n.contains("mail") || n.contains("inbox") { return "envelope" }
+        return "square.grid.2x2"
     }
 
     /// Never claims a model that isn't running: nil means nothing is.
@@ -1395,10 +1395,11 @@ private func line<C: View>(divided: Bool, @ViewBuilder _ c: () -> C) -> some Vie
         .overlay(alignment: .top) { if divided { Rectangle().fill(Color(.separator)).frame(height: 0.5).padding(.leading, 16) } }
 }
 
-private func tile(_ symbol: String, _ colour: Color) -> some View {
-    Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
+/// A glyph in the text colour on a plain tile: what a pip can reach never gets a colour of its own.
+private func tile(_ symbol: String) -> some View {
+    Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(.primary)
         .frame(width: 30, height: 30)
-        .background(colour, in: .rect(cornerRadius: 8, style: .continuous))
+        .background(Color(.tertiarySystemFill), in: .rect(cornerRadius: 8, style: .continuous))
 }
 
 
@@ -1432,7 +1433,7 @@ private struct PillButton: View {
             .font(size: 17, weight: .semibold, relativeTo: .headline)
             .frame(maxWidth: .infinity).frame(minHeight: 50)
             // Primary is the app's one accent, as Pay, Copy code and Done are.
-            .foregroundStyle(primary ? .white : destructive ? Color(.systemRed) : .primary)
+            .foregroundStyle(primary ? .white : destructive ? Color.redInk : .primary)
             .background(primary ? Color.accentColor : Color(.secondarySystemFill), in: .capsule)
             .contentShape(.capsule)
         }

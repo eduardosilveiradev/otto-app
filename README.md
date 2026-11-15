@@ -19,6 +19,9 @@ what Otto knows about your day.
 - A live status line in the typing bubble while Otto works, and
   Delivered / Read receipts
 - Otto's one-tap buttons
+- Coding jobs Otto hands to an agent on the Mac: a card under the message that
+  started each one, and a sheet to answer its question, steer or stop it, and
+  merge its pull request
 - The day at a glance: calendar, inbox, open loops, armed triggers
 - The web dashboard's pages, in the contact card: loops and tonight's hygiene
   pass, memory (search, topics, the summary), people, money, trips, activity,
@@ -70,7 +73,8 @@ It is not stable yet.
 
 Debug builds accept a few arguments for checking layout without a server:
 `-seedThread`, `-thinking`, `-keyboardDemo`, `-growDraft`, `-seedDraft`,
-`-seedAttachments`, and `-details -screen <Loops|Memory|People|Money|Trips|Activity|Status|Devices>`
+`-seedAttachments`, `-jobsThread` (coding jobs; `-jobsThread worst` for the
+awkward ones, `-jobOpen <id>` to open one), and `-details -screen <Loops|Memory|People|Money|Trips|Activity|Status|Devices>`
 to open the contact card on one of its pages, or `-details -checkServer` to open it on the
 server fields and check them.
 

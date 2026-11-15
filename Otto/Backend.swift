@@ -96,6 +96,8 @@ struct Message: Identifiable, Codable {
     var recorded: [RecordedCard]? = nil
     /// Data Otto drew for this message (generative UI), shown under the bubble (Cards.swift).
     var card: Card? = nil
+    /// Coding jobs this message started, by id: each draws as a card under the bubble (Jobs.swift).
+    var jobs: [String]? = nil
     /// A verification code to show in the drawer (OTP.swift). Cleared when the server edits the message after it expires.
     var otp: OTPCode? = nil
     /// A desktop was focused when it went out (server's desktop-focus quiet): in the thread, but no banner.
@@ -258,6 +260,12 @@ protocol OttoBackend: AnyObject {
     var conversationEvents: AsyncStream<ConversationEvent> { get }
     /// One call to the pips API (docs/pips-api.md in otto-core): its status and body, or nil with no answer.
     func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse?
+    /// Coding jobs, whole each time (the socket's "jobs" frame).
+    var jobLists: AsyncStream<[CodeJob]> { get }
+    /// GET /app/jobs; nil when the Mac didn't answer or has no such route.
+    func jobs() async -> [CodeJob]?
+    /// POST /app/jobs/<verb> {id, text}: the job as it now is, or the server's words for why not.
+    func jobAction(_ verb: JobVerb, id: String, text: String?) async -> JobOutcome
 }
 
 struct PipResponse { let status: Int; let data: Data }
@@ -282,6 +290,9 @@ extension OttoBackend {
     func decide(approval id: String, approve: Bool) async -> ApprovalOutcome { .done }
     func wallet(_ fields: [String: String], id: String) async -> Bool { true }
     var conversationEvents: AsyncStream<ConversationEvent> { AsyncStream { _ in } }
+    var jobLists: AsyncStream<[CodeJob]> { AsyncStream { _ in } }
+    func jobs() async -> [CodeJob]? { nil }
+    func jobAction(_ verb: JobVerb, id: String, text: String?) async -> JobOutcome { .failed(String(localized: "This is sample data: there’s no Mac to tell.")) }
     func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse? { nil }
 }
 

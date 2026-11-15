@@ -1,0 +1,1229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Otto iOS redesign mockup</title>
+<style>
+/* ==========================================================================
+   Design tokens. Dark first. Every phone carries its own data-theme, so the
+   theme a viewer sets on <html> never repaints a phone.
+   ========================================================================== */
+:root, [data-theme='dark'] {
+  color-scheme: dark;
+  /* ground and surfaces */
+  --bg: #000000;                 /* thread ground */
+  --bg-grouped: #000000;         /* list pages */
+  --card: #1c1c1e;               /* raised on the ground: Otto's cards, a command block */
+  --cell: #1c1c1e;               /* list rows on a page */
+  --sheet: #1c1c1e;              /* sheets */
+  --cell-on-sheet: #2c2c2e;      /* list rows and tiles on a sheet */
+  --well: #111113;               /* quoted text inside a card */
+  --chip: rgb(0 0 0 / .34);      /* a line Otto wrote down, inside its bubble */
+  --bubble-in: #262628;          /* Otto's side */
+  --bubble-out: #60656b;         /* your side: slate, never blue */
+  --on-bubble-out: #ffffff;
+  --send: #868d97;
+  /* text */
+  --label: #ffffff;
+  --label-2: rgb(235 235 245 / .62);
+  --label-3: rgb(235 235 245 / .32);   /* glyphs and placeholders only */
+  /* lines and fills */
+  --hairline: rgb(255 255 255 / .1);
+  --fill: rgb(120 120 128 / .36);
+  --fill-2: rgb(120 120 128 / .24);
+  /* blue: actions, and nothing else */
+  --blue: #0a84ff;               /* the one button that commits */
+  --on-blue: #ffffff;
+  --blue-ink: #409cff;           /* text actions, readable on every dark surface */
+  --blue-tint: rgb(10 132 255 / .18);
+  /* tangerine: Otto, and what is waiting on you. Never a button fill. */
+  --otto: #ff9230;
+  --otto-ink: #ff9230;
+  /* status */
+  --red-ink: #ff6961;
+  --green: #30d158;
+  /* system chrome (iOS 26 glass, only where iOS itself uses it) */
+  --glass: rgb(44 44 47 / .72);
+  --glass-edge: rgb(255 255 255 / .14);
+  --glass-shadow: 0 6px 20px rgb(0 0 0 / .4);
+  --scrim: rgb(0 0 0 / .5);
+  --kbd: #2b2b2d; --key: #6c6c6e; --key-2: #4a4a4c;
+  --seg-on: #636366;
+  /* status fills: a wrong and a right answer, ending a call, a match in search */
+  --red: #ff453a; --red-tint: rgb(255 69 58 / .22); --green-tint: rgb(48 209 88 / .2); --green-ink: #30d158;
+  --find: #ffd60a; --on-find: #000000;
+  /* type */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* shape */
+  --r-bubble: 18px; --r-card: 20px; --r-inner: 8px; --r-cell: 26px; --r-sheet: 38px;
+}
+[data-theme='light'] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-grouped: #f2f2f7;
+  --card: #f2f2f5;
+  --cell: #ffffff;
+  --sheet: #f2f2f7;
+  --cell-on-sheet: #ffffff;
+  --well: #ffffff;
+  --chip: rgb(255 255 255 / .72);
+  --bubble-in: #e9e9eb;
+  --bubble-out: #6b7178;
+  --on-bubble-out: #ffffff;
+  --send: #868d97;
+  --label: #000000;
+  --label-2: rgb(60 60 67 / .78);
+  --label-3: rgb(60 60 67 / .34);
+  --hairline: rgb(0 0 0 / .1);
+  --fill: rgb(120 120 128 / .16);
+  --fill-2: rgb(120 120 128 / .1);
+  --blue: #007aff;
+  --on-blue: #ffffff;
+  --blue-ink: #0063d1;
+  --blue-tint: rgb(0 122 255 / .12);
+  --otto: #f08a1c;
+  --otto-ink: #ad5200;
+  --red-ink: #b81f14;
+  --green: #34c759;
+  --glass: rgb(250 250 252 / .78);
+  --glass-edge: rgb(255 255 255 / .9);
+  --glass-shadow: 0 6px 20px rgb(0 0 0 / .1), 0 1px 2px rgb(0 0 0 / .06);
+  --scrim: rgb(0 0 0 / .2);
+  --kbd: #d1d3d9; --key: #ffffff; --key-2: #abb0bc;
+  --seg-on: #ffffff;
+  --red: #ff3b30; --red-tint: rgb(255 59 48 / .14); --green-tint: rgb(52 199 89 / .16); --green-ink: #1a7f37;
+  --find: #ffcc00; --on-find: #000000;
+}
+
+/* The page itself is fixed and dark, whatever data-theme a viewer puts on <html>. */
+html, html[data-theme], body { background: #0c0c0e; }
+html, html[data-theme] { color-scheme: dark; --page-ink: #ededf0; --page-muted: #a1a1aa; }
+
+*, *::before, *::after { box-sizing: border-box }
+body { margin: 0; color: var(--page-ink); font: 16px/1.5 var(--font); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; -webkit-text-size-adjust: 100% }
+p, h1, ul, figure, pre { margin: 0 }
+ul { padding: 0; list-style: none }
+svg { display: block; flex: none }
+.i { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.f { fill: currentColor }
+
+/* ---------- the wall ---------- */
+.wall { --s: 1; display: grid; grid-template-columns: repeat(auto-fit, calc(421px * var(--s))); justify-content: center; gap: 56px 36px;
+  padding: 56px max(16px, env(safe-area-inset-right, 0px)) 96px max(16px, env(safe-area-inset-left, 0px)) }
+@media (max-width: 460px) { .wall { --s: .84 } }
+@media (max-width: 385px) { .wall { --s: .78 } }
+@media (max-width: 359px) { .wall { --s: .68 } }
+.intro { grid-column: 1 / -1 }
+.intro h1 { font: 600 clamp(1.75rem, 1.3rem + 1.6vw, 2.5rem)/1.1 var(--font); letter-spacing: -0.02em; text-wrap: balance }
+.intro p { margin-top: 12px; max-width: 62ch; color: var(--page-muted); text-wrap: pretty }
+.roles { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-top: 20px; font-size: .875rem; color: var(--page-muted) }
+.roles li { display: flex; align-items: center; gap: 8px }
+.roles i { width: 12px; height: 12px; border-radius: 50%; flex: none }
+.shot { display: grid; gap: 14px; justify-items: center; align-content: start }
+.shot figcaption { max-width: 34ch; font-size: .875rem; line-height: 1.4; color: var(--page-muted); text-align: center; text-wrap: balance }
+.shot figcaption b { display: block; font-size: .9375rem; font-weight: 600; color: var(--page-ink) }
+
+/* ---------- device: iPhone, 393 x 852 pt, 1 px = 1 pt ---------- */
+.fit { width: calc(421px * var(--s)); height: calc(880px * var(--s)) }
+.device { position: relative; width: 421px; height: 880px; padding: 14px; border-radius: 69px; background: #0b0b0c;
+  box-shadow: 0 0 0 1.5px #4a4a4f, 0 0 0 4px #1d1d20, inset 0 0 0 1px #2b2b2e; transform: scale(var(--s)); transform-origin: 0 0 }
+.device::before, .device::after { content: ""; position: absolute; left: -5px; width: 4px; border-radius: 2px; background: #2a2a2d }
+.device::before { top: 190px; height: 34px; box-shadow: 0 60px 0 #2a2a2d, 0 128px 0 #2a2a2d }
+.device::after { left: auto; right: -5px; top: 250px; height: 100px }
+.screen { position: relative; width: 393px; height: 852px; overflow: hidden; border-radius: 55px; clip-path: inset(0 round 55px); isolation: isolate;
+  background: var(--bg); color: var(--label); font: 400 17px/22px var(--font); letter-spacing: -0.43px }
+.screen.grouped { background: var(--bg-grouped) }
+.island { position: absolute; z-index: 90; top: 11px; left: 50%; width: 126px; height: 37px; margin-left: -63px; border-radius: 19px; background: #000 }
+.status { position: absolute; z-index: 89; inset: 0 0 auto; height: 54px }
+.status .time { position: absolute; left: 30px; top: 21px; width: 80px; text-align: center; font: 600 17px/22px var(--font); letter-spacing: -0.4px; font-variant-numeric: tabular-nums }
+.status .icons { position: absolute; right: 33px; top: 24px; height: 13px; display: flex; align-items: center; gap: 7px }
+.home { position: absolute; z-index: 90; bottom: 8px; left: 50%; width: 139px; height: 5px; margin-left: -69.5px; border-radius: 3px; background: var(--label) }
+
+/* ---------- system chrome ---------- */
+.glass { background: var(--glass); -webkit-backdrop-filter: blur(16px) saturate(1.8); backdrop-filter: blur(16px) saturate(1.8);
+  box-shadow: var(--glass-shadow), inset 0 0 0 .5px var(--glass-edge), inset 0 1px 0 var(--glass-edge) }
+.gbtn { width: 44px; height: 44px; border-radius: 22px; display: grid; place-items: center }
+.gbtn.sm { width: 40px; height: 40px; border-radius: 20px }
+.gcap { height: 44px; padding: 0 16px; border-radius: 22px; display: inline-flex; align-items: center; font: 500 17px/22px var(--font) }
+.face { display: block; width: 68px; height: 68px; background: url("data:image/webp;base64,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") center / contain no-repeat }
+.face.working { background-image: url("data:image/webp;base64,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") }
+
+/* ---------- thread ---------- */
+.thead { position: absolute; z-index: 30; inset: 0 0 auto; height: 176px; padding: 76px 16px 0; display: flex; justify-content: space-between; align-items: flex-start;
+  background: linear-gradient(to bottom, var(--bg) 146px, transparent) }
+.who { position: absolute; left: 50%; top: 54px; transform: translateX(-50%); display: grid; justify-items: center }
+.name { margin-top: -10px; height: 28px; padding: 0 10px 0 12px; border-radius: 14px; display: inline-flex; align-items: center; gap: 5px; font: 600 15px/20px var(--font); letter-spacing: -0.23px }
+.name svg { width: 7px; height: 11px; stroke-width: 2.2; color: var(--label-2) }
+.thread { position: absolute; z-index: 1; inset: 0; padding: 150px 16px 92px; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; overflow: hidden }
+.thread.top { justify-content: flex-start; padding-top: 172px }
+.thread.kb { padding-bottom: 416px }
+.thread.todo { padding-bottom: 134px }
+.thread > * { flex: none }
+.stamp { align-self: center; padding-top: 4px; font: 400 11px/13px var(--font); letter-spacing: .06px; color: var(--label-2) }
+.stamp b { font-weight: 600 }
+.mline { align-self: center; max-width: 100%; display: flex; align-items: center; gap: 5px; font: 400 11px/13px var(--font-mono); letter-spacing: 0; color: var(--label-2); white-space: nowrap }
+.mline svg { width: 12px; height: 12px }
+.b { position: relative; max-width: 272px; padding: 9.5px 14px; border-radius: var(--r-bubble); font: 400 17px/21px var(--font); letter-spacing: -0.43px; overflow-wrap: anywhere }
+.b.in { align-self: flex-start; background: var(--bubble-in) }
+.b.out { align-self: flex-end; background: var(--bubble-out); color: var(--on-bubble-out) }
+.b.tail::before, .b.tail::after { content: ""; position: absolute; z-index: -1; bottom: 0; height: 20px }
+.b.in.tail::before { left: -7px; width: 20px; background: var(--bubble-in); border-bottom-right-radius: 16px 14px }
+.b.in.tail::after { left: -26px; width: 26px; background: var(--bg); border-bottom-right-radius: 10px }
+.b.out.tail::before { right: -7px; width: 20px; background: var(--bubble-out); border-bottom-left-radius: 16px 14px }
+.b.out.tail::after { right: -26px; width: 26px; background: var(--bg); border-bottom-left-radius: 10px }
+.t4 { margin-top: -6px }
+.t6 { margin-top: -4px }
+.receipt { align-self: flex-end; margin: -4px 4px 0; font: 400 12px/16px var(--font); letter-spacing: 0; color: var(--label-2) }
+.receipt b { font-weight: 600 }
+/* a line Otto wrote down, inside its bubble: a code, a calendar event */
+.b.haschip { padding-bottom: 10px }
+.chip { display: flex; align-items: center; gap: 10px; margin: 8px -4px 0; padding: 10px; border-radius: var(--r-inner); background: var(--chip) }
+.chip .disc { width: 30px; height: 30px; border-radius: 50%; background: var(--fill-2); display: grid; place-items: center }
+.chip .disc svg { width: 16px; height: 16px }
+.chip .tx { flex: 1; min-width: 0 }
+.chip .tx b { display: block; font: 600 15px/20px var(--font); letter-spacing: -0.23px }
+.chip .tx span { display: block; font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.chip .code { flex: 1; font: 600 17px/22px var(--font); letter-spacing: 3px }
+.chip > svg { width: 7px; height: 12px; stroke-width: 2.2; color: var(--label-3) }
+.link { font: 400 15px/20px var(--font); letter-spacing: -0.23px; color: var(--blue-ink) }
+/* Otto working */
+.b.typing { display: flex; align-items: flex-start; gap: 8px; padding: 12px 14px; font: 400 14px/20px var(--font); letter-spacing: -0.15px; color: var(--label-2) }
+/* Otto working: the app's own thinking orb (MorphingOrb -> ThinkingOrbsKit), as "Checking..." shows it:
+   state .searching, size .px20. 54 dots on a globe 8.2pt in radius (rings of 1, 7, 12, 14, 12, 7, 1), tilted 0.4rad.
+   One turn takes 4.715s, the scan meridian passes a dot every 0.453s, the globe nods 3.44deg each way over 6.736s.
+   A dot is 0.3 to 0.79pt in radius and #616161 to #ebebeb by depth (mirrored in light), at 45% until the scan
+   lights it. The keyframes are sampled from the package's frame function; Reduce Motion holds its 0.6s frame, as the app does. */
+.orb { display: block; position: relative; flex: none; width: 20px; height: 20px }
+.orb-g { position: absolute; inset: 0; transform-style: preserve-3d; animation: orb-nod 6.73619s linear infinite }
+.orb i { position: absolute; left: 50%; top: 50%; width: 0; height: 0; animation: 4.71534s linear infinite; animation-delay: calc((var(--f, 0) - 1) * 4.71534s) }
+.orb i::before, .orb i::after { content: ""; position: absolute; left: -10px; top: -10px; width: 20px; height: 20px; border-radius: 50% }
+.orb i::before { background: currentColor; opacity: .45 }
+.orb i::after { background-color: inherit; animation: orb-scan .45322s linear infinite; animation-delay: calc((var(--f, 0) - 1) * .45322s) }
+[data-theme='light'] .orb { filter: invert(1) }
+@media (prefers-reduced-motion: reduce) {
+  .orb-g, .orb i, .orb i::after { animation-play-state: paused }
+  .orb-g { animation-delay: -.6s }
+  .orb i { animation-delay: calc((var(--f, 0) - 1) * 4.71534s - .6s) }
+  .orb i::after { animation-delay: calc((var(--f, 0) - 1) * .45322s - .6s) }
+}
+@keyframes orb-r1{0%{transform:translate3d(4.1px,6.54px,-2.77px) scale(.0401);color:#8f8f8f;background-color:#8f8f8f00}4.17%{transform:translate3d(3.96px,6.13px,-3.74px) scale(.0366);color:#868686;background-color:#86868600}8.33%{transform:translate3d(3.55px,5.74px,-4.65px) scale(.0333);color:#7f7f7f;background-color:#7f7f7f00}12.5%{transform:translate3d(2.9px,5.41px,-5.44px) scale(.0306);color:#787878;background-color:#78787800}16.67%{transform:translate3d(2.05px,5.16px,-6.04px) scale(.03);color:#737373;background-color:#73737300}20.83%{transform:translate3d(1.06px,5px,-6.41px) scale(.03);color:#707070;background-color:#70707000}25%{transform:translate3d(0px,4.94px,-6.54px) scale(.03);color:#6f6f6f;background-color:#6f6f6f00}29.17%{transform:translate3d(-1.06px,5px,-6.41px) scale(.03);color:#707070;background-color:#70707000}33.33%{transform:translate3d(-2.05px,5.16px,-6.04px) scale(.03);color:#737373;background-color:#73737300}37.5%{transform:translate3d(-2.9px,5.41px,-5.44px) scale(.0306);color:#787878;background-color:#78787800}41.67%{transform:translate3d(-3.55px,5.74px,-4.65px) scale(.0333);color:#7f7f7f;background-color:#7f7f7f00}45.83%{transform:translate3d(-3.96px,6.13px,-3.74px) scale(.0366);color:#868686;background-color:#86868600}50%{transform:translate3d(-4.1px,6.54px,-2.77px) scale(.0401);color:#8f8f8f;background-color:#8f8f8f00}54.17%{transform:translate3d(-3.96px,6.95px,-1.79px) scale(.0436);color:#979797;background-color:#97979700}58.33%{transform:translate3d(-3.55px,7.34px,-.88px) scale(.0468);color:#9e9e9e;background-color:#9e9e9e00}62.5%{transform:translate3d(-2.9px,7.67px,-.1px) scale(.0496);color:#a5a5a5;background-color:#a5a5a500}66.67%{transform:translate3d(-2.05px,7.92px,.5px) scale(.0518);color:#aaaaaa;background-color:#aaaaaa10}70.83%{transform:translate3d(-1.06px,8.08px,.88px) scale(.0531);color:#adadad;background-color:#adadad1b}75%{transform:translate3d(0px,8.14px,1.01px) scale(.0536);color:#aeaeae;background-color:#aeaeae1f}79.17%{transform:translate3d(1.06px,8.08px,.88px) scale(.0531);color:#adadad;background-color:#adadad1b}83.33%{transform:translate3d(2.05px,7.92px,.5px) scale(.0518);color:#aaaaaa;background-color:#aaaaaa10}87.5%{transform:translate3d(2.9px,7.67px,-.1px) scale(.0496);color:#a5a5a5;background-color:#a5a5a500}91.67%{transform:translate3d(3.55px,7.34px,-.88px) scale(.0468);color:#9e9e9e;background-color:#9e9e9e00}95.83%{transform:translate3d(3.96px,6.95px,-1.79px) scale(.0436);color:#979797;background-color:#97979700}100%{transform:translate3d(4.1px,6.54px,-2.77px) scale(.0401);color:#8f8f8f;background-color:#8f8f8f00}}
+.orb .r1{animation-name:orb-r1}
+@keyframes orb-r2{0%{transform:translate3d(7.1px,3.78px,-1.6px) scale(.0443);color:#989898;background-color:#98989800}4.17%{transform:translate3d(6.86px,3.06px,-3.29px) scale(.0382);color:#8a8a8a;background-color:#8a8a8a00}8.33%{transform:translate3d(6.15px,2.39px,-4.87px) scale(.0326);color:#7d7d7d;background-color:#7d7d7d00}12.5%{transform:translate3d(5.02px,1.82px,-6.22px) scale(.03);color:#727272;background-color:#72727200}16.67%{transform:translate3d(3.55px,1.38px,-7.26px) scale(.03);color:#696969;background-color:#69696900}20.83%{transform:translate3d(1.84px,1.11px,-7.91px) scale(.03);color:#636363;background-color:#63636300}25%{transform:translate3d(0px,1.01px,-8.14px) scale(.03);color:#616161;background-color:#61616100}29.17%{transform:translate3d(-1.84px,1.11px,-7.91px) scale(.03);color:#636363;background-color:#63636300}33.33%{transform:translate3d(-3.55px,1.38px,-7.26px) scale(.03);color:#696969;background-color:#69696900}37.5%{transform:translate3d(-5.02px,1.82px,-6.22px) scale(.03);color:#727272;background-color:#72727200}41.67%{transform:translate3d(-6.15px,2.39px,-4.87px) scale(.0326);color:#7d7d7d;background-color:#7d7d7d00}45.83%{transform:translate3d(-6.86px,3.06px,-3.29px) scale(.0382);color:#8a8a8a;background-color:#8a8a8a00}50%{transform:translate3d(-7.1px,3.78px,-1.6px) scale(.0443);color:#989898;background-color:#98989800}54.17%{transform:translate3d(-6.86px,4.49px,.1px) scale(.0503);color:#a7a7a7;background-color:#a7a7a703}58.33%{transform:translate3d(-6.15px,5.16px,1.67px) scale(.056);color:#b4b4b4;background-color:#b4b4b434}62.5%{transform:translate3d(-5.02px,5.73px,3.03px) scale(.0608);color:#bfbfbf;background-color:#bfbfbf5e}66.67%{transform:translate3d(-3.55px,6.17px,4.07px) scale(.0645);color:#c8c8c8;background-color:#c8c8c87f}70.83%{transform:translate3d(-1.84px,6.45px,4.72px) scale(.0668);color:#cdcdcd;background-color:#cdcdcd93}75%{transform:translate3d(0px,6.54px,4.94px) scale(.0676);color:#cfcfcf;background-color:#cfcfcf9a}79.17%{transform:translate3d(1.84px,6.45px,4.72px) scale(.0668);color:#cdcdcd;background-color:#cdcdcd93}83.33%{transform:translate3d(3.55px,6.17px,4.07px) scale(.0645);color:#c8c8c8;background-color:#c8c8c87f}87.5%{transform:translate3d(5.02px,5.73px,3.03px) scale(.0608);color:#bfbfbf;background-color:#bfbfbf5e}91.67%{transform:translate3d(6.15px,5.16px,1.67px) scale(.056);color:#b4b4b4;background-color:#b4b4b434}95.83%{transform:translate3d(6.86px,4.49px,.1px) scale(.0503);color:#a7a7a7;background-color:#a7a7a703}100%{transform:translate3d(7.1px,3.78px,-1.6px) scale(.0443);color:#989898;background-color:#98989800}}
+.orb .r2{animation-name:orb-r2}
+@keyframes orb-r3{0%{transform:translate3d(8.2px,0px,0px) scale(.05);color:#a6a6a6;background-color:#a6a6a600}4.17%{transform:translate3d(7.92px,-.83px,-1.95px) scale(.043);color:#959595;background-color:#95959500}8.33%{transform:translate3d(7.1px,-1.6px,-3.78px) scale(.0365);color:#868686;background-color:#86868600}12.5%{transform:translate3d(5.8px,-2.26px,-5.34px) scale(.0309);color:#797979;background-color:#79797900}16.67%{transform:translate3d(4.1px,-2.77px,-6.54px) scale(.03);color:#6f6f6f;background-color:#6f6f6f00}20.83%{transform:translate3d(2.12px,-3.08px,-7.3px) scale(.03);color:#686868;background-color:#68686800}25%{transform:translate3d(0px,-3.19px,-7.55px) scale(.03);color:#666666;background-color:#66666600}29.17%{transform:translate3d(-2.12px,-3.08px,-7.3px) scale(.03);color:#686868;background-color:#68686800}33.33%{transform:translate3d(-4.1px,-2.77px,-6.54px) scale(.03);color:#6f6f6f;background-color:#6f6f6f00}37.5%{transform:translate3d(-5.8px,-2.26px,-5.34px) scale(.0309);color:#797979;background-color:#79797900}41.67%{transform:translate3d(-7.1px,-1.6px,-3.78px) scale(.0365);color:#868686;background-color:#86868600}45.83%{transform:translate3d(-7.92px,-.83px,-1.95px) scale(.043);color:#959595;background-color:#95959500}50%{transform:translate3d(-8.2px,0px,0px) scale(.05);color:#a6a6a6;background-color:#a6a6a600}54.17%{transform:translate3d(-7.92px,.83px,1.95px) scale(.057);color:#b6b6b6;background-color:#b6b6b63d}58.33%{transform:translate3d(-7.1px,1.6px,3.78px) scale(.0635);color:#c5c5c5;background-color:#c5c5c575}62.5%{transform:translate3d(-5.8px,2.26px,5.34px) scale(.0691);color:#d3d3d3;background-color:#d3d3d3a6}66.67%{transform:translate3d(-4.1px,2.77px,6.54px) scale(.0733);color:#dddddd;background-color:#ddddddcb}70.83%{transform:translate3d(-2.12px,3.08px,7.3px) scale(.076);color:#e3e3e3;background-color:#e3e3e3e3}75%{transform:translate3d(0px,3.19px,7.55px) scale(.077);color:#e5e5e5;background-color:#e5e5e5eb}79.17%{transform:translate3d(2.12px,3.08px,7.3px) scale(.076);color:#e3e3e3;background-color:#e3e3e3e3}83.33%{transform:translate3d(4.1px,2.77px,6.54px) scale(.0733);color:#dddddd;background-color:#ddddddcb}87.5%{transform:translate3d(5.8px,2.26px,5.34px) scale(.0691);color:#d3d3d3;background-color:#d3d3d3a6}91.67%{transform:translate3d(7.1px,1.6px,3.78px) scale(.0635);color:#c5c5c5;background-color:#c5c5c575}95.83%{transform:translate3d(7.92px,.83px,1.95px) scale(.057);color:#b6b6b6;background-color:#b6b6b63d}100%{transform:translate3d(8.2px,0px,0px) scale(.05);color:#a6a6a6;background-color:#a6a6a600}}
+.orb .r3{animation-name:orb-r3}
+@keyframes orb-r4{0%{transform:translate3d(7.1px,-3.78px,1.6px) scale(.0557);color:#b3b3b3;background-color:#b3b3b332}4.17%{transform:translate3d(6.86px,-4.49px,-.1px) scale(.0496);color:#a5a5a5;background-color:#a5a5a500}8.33%{transform:translate3d(6.15px,-5.16px,-1.67px) scale(.044);color:#989898;background-color:#98989800}12.5%{transform:translate3d(5.02px,-5.73px,-3.03px) scale(.0392);color:#8c8c8c;background-color:#8c8c8c00}16.67%{transform:translate3d(3.55px,-6.17px,-4.07px) scale(.0354);color:#848484;background-color:#84848400}20.83%{transform:translate3d(1.84px,-6.45px,-4.72px) scale(.0331);color:#7e7e7e;background-color:#7e7e7e00}25%{transform:translate3d(0px,-6.54px,-4.94px) scale(.0323);color:#7c7c7c;background-color:#7c7c7c00}29.17%{transform:translate3d(-1.84px,-6.45px,-4.72px) scale(.0331);color:#7e7e7e;background-color:#7e7e7e00}33.33%{transform:translate3d(-3.55px,-6.17px,-4.07px) scale(.0354);color:#848484;background-color:#84848400}37.5%{transform:translate3d(-5.02px,-5.73px,-3.03px) scale(.0392);color:#8c8c8c;background-color:#8c8c8c00}41.67%{transform:translate3d(-6.15px,-5.16px,-1.67px) scale(.044);color:#989898;background-color:#98989800}45.83%{transform:translate3d(-6.86px,-4.49px,-.1px) scale(.0496);color:#a5a5a5;background-color:#a5a5a500}50%{transform:translate3d(-7.1px,-3.78px,1.6px) scale(.0557);color:#b3b3b3;background-color:#b3b3b332}54.17%{transform:translate3d(-6.86px,-3.06px,3.29px) scale(.0617);color:#c1c1c1;background-color:#c1c1c166}58.33%{transform:translate3d(-6.15px,-2.39px,4.87px) scale(.0674);color:#cfcfcf;background-color:#cfcfcf97}62.5%{transform:translate3d(-5.02px,-1.82px,6.22px) scale(.0722);color:#dadada;background-color:#dadadac1}66.67%{transform:translate3d(-3.55px,-1.38px,7.26px) scale(.0759);color:#e3e3e3;background-color:#e3e3e3e2}70.83%{transform:translate3d(-1.84px,-1.11px,7.91px) scale(.0783);color:#e8e8e8;background-color:#e8e8e8f6}75%{transform:translate3d(0px,-1.01px,8.14px) scale(.079);color:#eaeaea;background-color:#eaeaeafd}79.17%{transform:translate3d(1.84px,-1.11px,7.91px) scale(.0783);color:#e8e8e8;background-color:#e8e8e8f6}83.33%{transform:translate3d(3.55px,-1.38px,7.26px) scale(.0759);color:#e3e3e3;background-color:#e3e3e3e2}87.5%{transform:translate3d(5.02px,-1.82px,6.22px) scale(.0722);color:#dadada;background-color:#dadadac1}91.67%{transform:translate3d(6.15px,-2.39px,4.87px) scale(.0674);color:#cfcfcf;background-color:#cfcfcf97}95.83%{transform:translate3d(6.86px,-3.06px,3.29px) scale(.0617);color:#c1c1c1;background-color:#c1c1c166}100%{transform:translate3d(7.1px,-3.78px,1.6px) scale(.0557);color:#b3b3b3;background-color:#b3b3b332}}
+.orb .r4{animation-name:orb-r4}
+@keyframes orb-r5{0%{transform:translate3d(4.1px,-6.54px,2.77px) scale(.0599);color:#bdbdbd;background-color:#bdbdbd56}4.17%{transform:translate3d(3.96px,-6.95px,1.79px) scale(.0564);color:#b5b5b5;background-color:#b5b5b538}8.33%{transform:translate3d(3.55px,-7.34px,.88px) scale(.0531);color:#adadad;background-color:#adadad1b}12.5%{transform:translate3d(2.9px,-7.67px,.1px) scale(.0503);color:#a7a7a7;background-color:#a7a7a703}16.67%{transform:translate3d(2.05px,-7.92px,-.5px) scale(.0482);color:#a2a2a2;background-color:#a2a2a200}20.83%{transform:translate3d(1.06px,-8.08px,-.88px) scale(.0468);color:#9e9e9e;background-color:#9e9e9e00}25%{transform:translate3d(0px,-8.14px,-1.01px) scale(.0464);color:#9d9d9d;background-color:#9d9d9d00}29.17%{transform:translate3d(-1.06px,-8.08px,-.88px) scale(.0468);color:#9e9e9e;background-color:#9e9e9e00}33.33%{transform:translate3d(-2.05px,-7.92px,-.5px) scale(.0482);color:#a2a2a2;background-color:#a2a2a200}37.5%{transform:translate3d(-2.9px,-7.67px,.1px) scale(.0503);color:#a7a7a7;background-color:#a7a7a703}41.67%{transform:translate3d(-3.55px,-7.34px,.88px) scale(.0531);color:#adadad;background-color:#adadad1b}45.83%{transform:translate3d(-3.96px,-6.95px,1.79px) scale(.0564);color:#b5b5b5;background-color:#b5b5b538}50%{transform:translate3d(-4.1px,-6.54px,2.77px) scale(.0599);color:#bdbdbd;background-color:#bdbdbd56}54.17%{transform:translate3d(-3.96px,-6.13px,3.74px) scale(.0633);color:#c5c5c5;background-color:#c5c5c574}58.33%{transform:translate3d(-3.55px,-5.74px,4.65px) scale(.0666);color:#cdcdcd;background-color:#cdcdcd91}62.5%{transform:translate3d(-2.9px,-5.41px,5.44px) scale(.0694);color:#d3d3d3;background-color:#d3d3d3a9}66.67%{transform:translate3d(-2.05px,-5.16px,6.04px) scale(.0715);color:#d8d8d8;background-color:#d8d8d8bc}70.83%{transform:translate3d(-1.06px,-5px,6.41px) scale(.0729);color:#dcdcdc;background-color:#dcdcdcc7}75%{transform:translate3d(0px,-4.94px,6.54px) scale(.0733);color:#dddddd;background-color:#ddddddcb}79.17%{transform:translate3d(1.06px,-5px,6.41px) scale(.0729);color:#dcdcdc;background-color:#dcdcdcc7}83.33%{transform:translate3d(2.05px,-5.16px,6.04px) scale(.0715);color:#d8d8d8;background-color:#d8d8d8bc}87.5%{transform:translate3d(2.9px,-5.41px,5.44px) scale(.0694);color:#d3d3d3;background-color:#d3d3d3a9}91.67%{transform:translate3d(3.55px,-5.74px,4.65px) scale(.0666);color:#cdcdcd;background-color:#cdcdcd91}95.83%{transform:translate3d(3.96px,-6.13px,3.74px) scale(.0633);color:#c5c5c5;background-color:#c5c5c574}100%{transform:translate3d(4.1px,-6.54px,2.77px) scale(.0599);color:#bdbdbd;background-color:#bdbdbd56}}
+.orb .r5{animation-name:orb-r5}
+@keyframes orb-scan{0%{opacity:1;transform:scale(1.281)}2%{opacity:.916;transform:scale(1.258)}4%{opacity:.704;transform:scale(1.198)}6%{opacity:.454;transform:scale(1.128)}8%{opacity:.246;transform:scale(1.069)}10%{opacity:.112;transform:scale(1.031)}12%{opacity:.042;transform:scale(1.012)}15%{opacity:.007;transform:scale(1.002)}18%{opacity:0;transform:scale(1)}82%{opacity:0;transform:scale(1)}85%{opacity:.007;transform:scale(1.002)}88%{opacity:.042;transform:scale(1.012)}90%{opacity:.112;transform:scale(1.031)}92%{opacity:.246;transform:scale(1.069)}94%{opacity:.454;transform:scale(1.128)}96%{opacity:.704;transform:scale(1.198)}98%{opacity:.916;transform:scale(1.258)}100%{opacity:1;transform:scale(1.281)}}
+@keyframes orb-nod{0%{transform:rotateX(0deg)}6.25%{transform:rotateX(-1.316deg)}12.5%{transform:rotateX(-2.431deg)}18.75%{transform:rotateX(-3.176deg)}25%{transform:rotateX(-3.438deg)}31.25%{transform:rotateX(-3.176deg)}37.5%{transform:rotateX(-2.431deg)}43.75%{transform:rotateX(-1.316deg)}50%{transform:rotateX(0deg)}56.25%{transform:rotateX(1.316deg)}62.5%{transform:rotateX(2.431deg)}68.75%{transform:rotateX(3.176deg)}75%{transform:rotateX(3.438deg)}81.25%{transform:rotateX(3.176deg)}87.5%{transform:rotateX(2.431deg)}93.75%{transform:rotateX(1.316deg)}100%{transform:rotateX(0deg)}}
+
+/* ---------- Otto's cards: one frame for a draft, a job, data, a study set ---------- */
+.card { align-self: flex-start; width: 288px; padding: 14px 14px 0; border-radius: var(--r-card); background: var(--card); box-shadow: inset 0 0 0 .5px var(--hairline) }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 600 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.card-head > span { display: inline-flex; align-items: center; gap: 6px }
+.card-head svg { width: 15px; height: 15px }
+.card-head .state { font-weight: 400 }
+.needs { display: inline-flex; align-items: center; gap: 6px; font: 600 13px/18px var(--font); letter-spacing: 0; color: var(--otto-ink); white-space: nowrap }
+.needs i { width: 7px; height: 7px; border-radius: 50%; background: var(--otto) }
+.card-title { margin-top: 6px; font: 600 16px/21px var(--font); letter-spacing: -0.31px }
+.card-sub { margin-top: 2px; font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2); font-variant-numeric: tabular-nums }
+.well { margin-top: 10px; padding: 10px 12px; border-radius: var(--r-inner); background: var(--well); font: 400 15px/20px var(--font); letter-spacing: -0.23px }
+.card-btns { display: flex; gap: 8px; padding: 12px 0 14px }
+.card-links { display: flex; align-items: center; gap: 20px; min-height: 44px; margin: 12px -14px 0; padding: 0 14px; border-top: 1px solid var(--hairline) }
+.fig { margin-top: 6px; font: 600 34px/40px var(--font); letter-spacing: .2px; font-variant-numeric: tabular-nums }
+.bars { display: grid; gap: 10px; margin-top: 14px }
+.bar { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; font: 400 13px/18px var(--font); letter-spacing: 0 }
+.bar span + span { color: var(--label-2); font-variant-numeric: tabular-nums }
+.bar i { grid-column: 1 / -1; width: var(--v); height: 4px; border-radius: 0 2px 2px 0; background: var(--label) }
+.budget { margin-top: 16px }
+.meter { margin: 6px 0; height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden }
+.meter i { display: block; width: var(--v); height: 100%; background: var(--label) }
+
+/* ---------- buttons ---------- */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 50px; padding: 0 22px; border-radius: 25px;
+  background: var(--blue); color: var(--on-blue); font: 600 17px/22px var(--font); letter-spacing: -0.43px; white-space: nowrap }
+.btn svg { width: 20px; height: 20px }
+.btn.wide { width: 100% }
+.btn.tall { height: 52px; border-radius: 26px }
+.btn.quiet { background: var(--fill); color: var(--label) }
+.btn.tint { background: var(--blue-tint); color: var(--blue-ink) }
+.btn.sm { height: 34px; padding: 0 16px; border-radius: 17px; font-size: 15px; line-height: 20px; letter-spacing: -0.23px }
+.btn.sm svg { width: 16px; height: 16px }
+
+/* ---------- composer and keyboard ---------- */
+.fade { position: absolute; z-index: 35; inset: auto 0 0; height: 90px; background: linear-gradient(to bottom, transparent, var(--bg) 16px) }
+.fade.todo { height: 132px }
+.fade.kb { bottom: 336px; height: 74px }
+.composer { position: absolute; z-index: 45; left: 27px; right: 27px; bottom: 28px; display: flex; align-items: flex-end; gap: 8px }
+.composer.kb { left: 15px; right: 15px; bottom: 348px }
+.field { flex: 1; min-height: 40px; padding: 0 12px 0 14px; border-radius: 20px; display: flex; align-items: center; justify-content: space-between; gap: 8px }
+.field .ph { color: var(--label-3) }
+.field > svg { width: 20px; height: 20px; color: var(--label-2) }
+.field.typed { padding-right: 6.5px }
+.caret { display: inline-block; width: 2px; height: 22px; margin-left: 1px; vertical-align: -5px; border-radius: 1px; background: var(--blue) }
+.send { width: 37px; height: 27px; border-radius: 14px; background: var(--send); color: #fff; display: grid; place-items: center }
+.send svg { width: 17px; height: 17px; stroke-width: 2.6 }
+.todo-pill { position: absolute; z-index: 45; left: 27px; bottom: 76px; height: 34px; padding: 0 12px; border-radius: 17px; display: inline-flex; align-items: center; gap: 6px;
+  font: 500 13px/18px var(--font); letter-spacing: 0; color: var(--label-2); font-variant-numeric: tabular-nums }
+.todo-pill svg { width: 15px; height: 15px }
+.todo-pill svg + span + svg { width: 11px; height: 11px; stroke-width: 2.4 }
+.kbd { position: absolute; z-index: 50; inset: auto 0 0; height: 336px; padding: 0 3px; background: var(--kbd) }
+.sugg { height: 44px; display: grid; grid-template-columns: repeat(3, 1fr); align-items: center; text-align: center; font: 400 16px/21px var(--font); letter-spacing: -0.31px }
+.sugg span + span { box-shadow: -1px 0 0 var(--hairline) }
+.kr { display: flex; justify-content: center; gap: 6px; margin-bottom: 11px }
+.k { flex: 0 0 32.7px; height: 43px; border-radius: 8.5px; background: var(--key); display: grid; place-items: center; font: 400 24px/1 var(--font); letter-spacing: 0; box-shadow: 0 1px 0 rgb(0 0 0 / .35) }
+.k.w { flex-basis: 44px; background: var(--key-2); font-size: 16px }
+.k.w:first-child { margin-right: 7px } .k.w:last-child { margin-left: 7px }
+.k.sp { flex: 1 1 auto; font-size: 16px }
+.k.ret { flex-basis: 92px; background: var(--key-2); font-size: 16px; margin-left: 0 }
+.kr.last .k.w { margin: 0; flex-basis: 92px }
+.kbd .tool { position: absolute; bottom: 26px; width: 26px; height: 26px; stroke-width: 1.7 }
+.kbd .tool.l { left: 32px } .kbd .tool.r { right: 32px }
+
+/* ---------- sheets ---------- */
+.scrim { position: absolute; z-index: 70; inset: 0; background: var(--scrim) }
+.sheet { position: absolute; z-index: 71; left: 8px; right: 8px; bottom: 8px; border-radius: var(--r-sheet) var(--r-sheet) 47px 47px; background: var(--sheet); box-shadow: inset 0 0 0 .5px var(--hairline) }
+.sheet.large { left: 0; right: 0; bottom: 0; top: 62px; border-radius: var(--r-sheet) var(--r-sheet) 55px 55px; overflow: hidden }
+.grabber { position: absolute; top: 6px; left: 50%; width: 36px; height: 5px; margin-left: -18px; border-radius: 3px; background: var(--label-3) }
+.sheet-bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; padding: 14px 16px 10px }
+.sheet-bar > :first-child { justify-self: start } .sheet-bar > :last-child { justify-self: end }
+.sheet-title { font: 600 17px/22px var(--font); letter-spacing: -0.43px; text-align: center }
+.sheet-foot { position: absolute; inset: auto 0 0; padding: 28px 20px 34px; display: flex; gap: 12px; background: linear-gradient(to bottom, transparent, var(--sheet) 16px) }
+.sheet-foot .btn { flex: 1 }
+.otp { padding: 26px 20px 24px; display: grid; gap: 20px }
+.tiles { display: flex; gap: 8px }
+.tile { flex: 1; height: 64px; border-radius: 14px; background: var(--cell-on-sheet); box-shadow: inset 0 0 0 .5px var(--hairline); display: grid; place-items: center;
+  font: 600 34px/1 var(--font); letter-spacing: 0; font-variant-numeric: tabular-nums }
+.job-body { padding: 4px 24px 30px }
+.job-title { font: 600 20px/25px var(--font); letter-spacing: -0.45px; text-wrap: balance }
+.job-meta { margin-top: 8px; display: flex; align-items: center; gap: 8px; font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2); font-variant-numeric: tabular-nums }
+.pill { padding: 3px 8px; border-radius: 11px; background: var(--fill-2); font: 500 12px/16px var(--font); letter-spacing: 0; color: var(--label-2) }
+.md { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--hairline) }
+.md b { font-weight: 600 }
+.md ul { margin-top: 10px; display: grid; gap: 6px; color: var(--label-2) }
+.md li { position: relative; padding-left: 18px }
+.md li::before { content: ""; position: absolute; left: 4px; top: 9px; width: 4px; height: 4px; border-radius: 50%; background: currentColor }
+
+/* ---------- pages and lists (iOS 26 inset grouped) ---------- */
+.nav { position: absolute; z-index: 40; top: 58px; left: 16px; right: 16px; height: 44px; display: flex; align-items: center; justify-content: space-between }
+.nav .title { position: absolute; left: 60px; right: 60px; text-align: center; font: 600 17px/22px var(--font); letter-spacing: -0.43px }
+.page { position: absolute; inset: 0; overflow: hidden }
+.hero { display: grid; justify-items: center; gap: 6px; padding: 66px 0 24px }
+.hero .face { width: 78px; height: 78px }
+.hero p { font: 600 22px/28px var(--font); letter-spacing: -0.26px }
+.sect { margin: 0 16px 28px }
+.sect-h { padding: 0 20px 7px; font: 600 15px/20px var(--font); letter-spacing: -0.23px }
+.sect-f { padding: 7px 20px 0; font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.list { border-radius: var(--r-cell); background: var(--cell); overflow: hidden }
+.sheet .list { background: var(--cell-on-sheet) }
+.row { position: relative; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 16px 0 20px }
+.row + .row::before { content: ""; position: absolute; top: 0; left: 20px; right: 16px; height: 1px; background: var(--hairline) }
+.row.ico { padding-left: 16px } .row.ico + .row.ico::before { left: 52px }
+.row.top { align-items: flex-start } .row.top > :not(.tx) { margin-top: 15px }
+.row > .i { width: 24px; height: 24px; stroke-width: 1.7 }
+.row .tx { flex: 1; min-width: 0; padding: 15px 0 }
+.row .tx small { display: block; margin-top: 1px; font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.row .tx small.late { color: var(--red-ink) }
+.row .val { color: var(--label-2); white-space: nowrap; font-variant-numeric: tabular-nums }
+.row .chev { width: 8px; height: 14px; stroke-width: 2.2; color: var(--label-3) }
+.row.total { font-weight: 600 }
+.row > span:not([class]) { white-space: nowrap; font-variant-numeric: tabular-nums }
+.mono { font: 400 14px/22px var(--font-mono); letter-spacing: 0 }
+.cellpad { padding: 16px 20px }
+.amount { font: 600 34px/41px var(--font); letter-spacing: .3px; font-variant-numeric: tabular-nums }
+.hl { margin-top: 4px; font-weight: 600 }
+.sub15 { font: 400 15px/20px var(--font); letter-spacing: -0.23px; color: var(--label-2) }
+/* a change to Otto, file by file: what it does in a sentence, then a few changed lines (removed on red, added on green) */
+.chg { position: relative; padding: 12px 16px 14px 20px }
+.chg + .chg::before { content: ""; position: absolute; top: 0; left: 20px; right: 16px; height: 1px; background: var(--hairline) }
+.chg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px }
+.tier { font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.chg-why { font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.diff { margin-top: 8px; border-radius: var(--r-inner); overflow: hidden; font: 400 12px/18px var(--font-mono); letter-spacing: 0 }
+.diff span { display: block; padding: 1px 10px; white-space: pre; overflow: hidden; text-overflow: ellipsis }
+.diff .del { background: var(--red-tint) }
+.diff .add { background: var(--green-tint) }
+.sw { flex: none; position: relative; width: 63px; height: 28px; border-radius: 14px; background: var(--fill) }
+.sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 37px; height: 24px; border-radius: 12px; background: #fff; box-shadow: 0 2px 6px rgb(0 0 0 / .14) }
+.sw.on { background: var(--green) } .sw.on::after { transform: translateX(22px) }
+
+/* ---------- first launch ---------- */
+.ob { position: absolute; inset: 0; padding: 176px 24px 42px; display: flex; flex-direction: column; align-items: center; text-align: center }
+.ob.step { padding-top: 190px }
+.ob .face { width: 148px; height: 148px }
+.ob-title { margin-top: 32px; font: 700 28px/34px var(--font); letter-spacing: .38px; text-wrap: balance }
+.ob-line { margin-top: 10px; font: 400 16px/21px var(--font); letter-spacing: -0.31px; color: var(--label-2); text-wrap: balance }
+.ob-foot { margin-top: auto; width: 100%; display: grid; gap: 6px; justify-items: center }
+.ob-link { min-height: 44px; display: grid; place-items: center; font: 500 15px/20px var(--font); letter-spacing: -0.23px; color: var(--label-2) }
+.dots { position: absolute; top: 71px; left: 0; right: 0; display: flex; justify-content: center; gap: 6px }
+.dots i { width: 6px; height: 6px; border-radius: 3px; background: var(--fill) }
+.dots i.on { width: 18px; background: var(--label) }
+.glyph { width: 128px; height: 128px; border-radius: 50%; background: var(--fill-2); display: grid; place-items: center }
+.glyph svg { width: 56px; height: 56px; stroke-width: 1.5 }
+.cmd { width: 100%; margin-top: 24px; padding: 10px 14px; border-radius: 12px; background: var(--card); text-align: left; font: 400 13px/18px var(--font-mono); letter-spacing: 0; white-space: pre }
+.empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; padding-bottom: 40px; text-align: center }
+.empty b { font: 600 22px/28px var(--font); letter-spacing: -0.26px }
+.empty p { max-width: 260px; font: 400 15px/20px var(--font); letter-spacing: -0.23px; color: var(--label-2); text-wrap: balance }
+
+/* ==========================================================================
+   Round two: Otto's helpers, study, search, calls, the boarding pass,
+   the photo viewer and the pages behind Otto's card. Same tokens, same parts.
+   ========================================================================== */
+.group-h { grid-column: 1 / -1; margin: 32px 0 -16px; font: 600 1.25rem/1.2 var(--font); letter-spacing: -0.01em; color: var(--page-ink) }
+
+/* ---------- faces: every pip keeps its own colour and shape ---------- */
+.face.code { background-image: url("data:image/webp;base64,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") }
+.face.code-needs { background-image: url("data:image/webp;base64,UklGRgwKAABXRUJQVlA4WAoAAAAQAAAAnwAAnwAAQUxQSBcEAAARoMX+n+I2mpW1XoMccNy7cwquy8x2lDIzY7DM3GNmZr7kOCCVmcnOYZmZQjIosv2wluNVZGvn8WZn5z+P14iYAPTY//+HULA+0bZj5x5dOrqdWSJXCGZ7bu9Jy98s3/vPjdr6WKD2/rmjFR8sG5xrAU+UsjoPm7/xo2r//SZZwf9Vid3eunlwBlCC1TVgYukrZYev1UaSWNMm//MDjKCYnd3zZ278dOdfNwIJTGtg63Q7AFKOq9fYpW/+cvhcbVxVMe3NJwrtzBJtDvfggqc/r/bdjiZTKtZt8vBkiTWixTlg8tJXyvZfDsSa05iBse+7MUTsOHHzT/57ATmFmXqjVGKDzbNp950EZrL8dRv9GbqsP9yEGe7z6kwa/OX9NGb77amCjsTBP4Ux+xuLRd10+zyEQYwsN+gja80tDGV0qS48u1swnKHZ9EkL72NQ7w+mLeddGQP7V0e62lelMLi/2WjqdhwDrKynqJsPg1znpaabDwO93UaJ6yiGOllCh6Maw/1vLg3SxynA0htpWBjHkF9sq53nIQY9tUazjF0Y+BqHVusU6OLTNOp1D4NfLmpi/BbDf8etyYgmDlDma2GpxjxYJmgwNMIFZ54gZyjHXBj1kutdzwfqQnJPq3yAPyWW4cOceMBAanCEF87bSb2IefFeZ0Lmw9wQ9BDqXMsN8ihCsxPckJhI6BXMjenZZKQKfsAFZHLO8EN6NhlXPT8kJpLxRPhBHkVmoswPQQ+Z4iQ/3OtMZqnCD+ftZJ5O88N+A5kXVX74CJF9jh/UhYSWt3BD1EuoVOGGM08QmhrnhjKBUF6UF5T5iHD7AC/ccZNynOeFMpGUZSsnyFMR8Tc5wZ9DrkDhgtQaRL53IxdcbKuB9RQPpDciLV/jgX9zNRkVgy9RjDS1/wPfdps26DXw6vKQxgODwDWvQVpL1cD9ZNUMTZJBq3Ej7TP2Q3YnH9E4XYYrMBNRaakEK1qKKM1rBKppuYEW4TUVpPoCA6LW6YPoxiQBUTw2BM+pgYhq4WkFGPnLNohyW7kKyuUCI6LedRSQyNedkR57n4EisX+8EenTcw2ExJGCDKTbEdfYV18xOQPp2XOGaWr46NN9RaTz3kdVRimRa5XrPFbEQFe5whpViZzf/v5i7xMSYqTt6RA71GStv+LF6b2cZsRUYaxPZYAauXH869WjutkRk52vNeoqEbiy843CwS4jYriQVynrIiU31vz03Ox+dklAzLdM3y/T1SLfOfzNxrFuuxGBmTGpOkhJOnx+9wcL81wZCFxp4Gv/xDSKP/yn4sXpA5wiAts+6k1/QCGSitw78fnKsd0zBAS9YOtd/M7Wi8FYXEmpqppS4tHg+a1vLxzWxmxA/GhxdBw8feG6559/ft3C6fkdHRb0+OsAVlA4IM4FAADwJACdASqgAKAAPnk2lkYkoyIhL1ZaUJAPCUEOALBATC0zdRh+tHrVaPJAr6dp3m4P52z0nb1f6DXTFXQAzkzshyuCRI3aUzRtsGl+uFl3ZVHkE/goH2BX73b9SH1/C+CZtwJWLoDW23OQfElhwsjR8Y3MBM1LLzW3n4rI5IFUrfBuYVxel9FSOuKOrKQq3aImG453mIf5xFbSFgtYcjCvKfqHvzmEJTvXHL3maHLhBhHwCsKV3Am0CVqmyDbVK2j5FFtMVJXP42mbu9brADZi/hY+swoVjpcxj+dUKUDJLcdtfioVE1rQcT6urnGwqkAu0vneh0t+Bv0WWszdk1Bz042q+A40ctz/G9hF/8Uz7O55fxvgsLpuzwaIbxp+/vzVkym3pdjjAbK0aX64WbsAAP7RxgAAADN/+SkZOcmNuJBcSm6nio2C2MgV+2qvbBg7HyrByAlLhg9eJuypUqnT//wAJbzOEU5PHeB52v1v76D9v9H466D64trEz8sCGhe3xPg8QNMWO0Mxxt6fF2/5qOH4QX7uije/mwtms/7OHY73223/4aVcuqzmPP5yhF73ndhhuhSIJgUwzTRbNPnT0Ow+VJmrJpAHldSEhiEm0V2b2G6yeiQuk5mZJb6HWc9HhAlRQ4TZVWWYjf/LfnvYwtOUkx9j/AQcVi3nYc0Yj1zB60McDFtcAAoMHoOJ7EVHd/+j/s+QoBv1EsoUE6mQCQfVUj9f0j6iAF8ZsLSvF/xbaNlTmJXuQZ/jfyJMaVTmYVWmkVMWDEaHp4RuOEz4VMdM6C2AKWdeh9+g81jr+9u/SVAk5H0wFeukSl+ftn//xAAf4Xq+WU+K+B/HM1B+xWa/9OKkiu+PdXFZhWlQ6f+rozkv4hnPTppxEW6qNu9mFZBkF28w520SDzu5UBEHlyuHW1fGJ4wGTiC/3A/iDTe6JWSyvzjFlw8tuqE5UE/f3eb0OhXIzwwZ2TEGnoT4qi+nYVVk45922Kn9A9but2TNsDuy/L4DWwqTJYVsHJuB+gH1SdIJr9Tu+YNiBp3l2N0iAwTO7EeK0RxP6i2gSLl/dt+qtK5E7+fEADxJlBYB6gqVn3ksj3wxWlmAYauCvK+fE3ZbIl8vkMu2+xEw3zlWoX5bhXQdFF9fSTLUg8dW9TtIrZQaN28CBZfAGTvEsakeAbFF1SVC12TEn8jwwlXsnmOZepmOIDLtk3ZUE1hSjNaQvpDXdhXnakpslsSMUcPuNrafnspKlwPJFRKNg1VOJcocpJ/Tdy6CrLNlgm6kFQ0NBN8fom3CMbBCLws4EF7scTQ78oH4gJltu7qgjoOetlsFi1xzQcl4CXmvaKT/87LV+VSKJg/+bdGairqQGh+Vw8qxF4ysIqDgAAxkR56GTDepi7ScwrCNKT4hYuFuCG73KxzF9NX29XvLXZc+Xh8olECpGXcBKLhPhk+F8fuIrLfeBBtfTioRsL09HPdK71pLA9JMeuBlpHusNl/iQmnQEkXEdDZSoXPC4t/xE6WUW2wFkUj551dBmWYL8sHwXeULHRGL04envcS3ZVIJ4h3FPNSGsorK73L3Tj9wb1W+Er3TtBzPOpHqQjtQiSjqdBNXmHj8SjW8zRqgFpj6oXCbY2RC4ssIAM63Hl7EWVKTk9iYLZxsa3gm3kKeC5hxz5fSeBZ5QNTo3U5T7sRwaoUdgiLqzVGFKbP1S099w0MXMOtJjg6cUZyTklREOnFx+ekxtHNz2uiDzL9gLJ51PbouzbuA6TUSq7EbBRznGJI/MRUWEr+v48TXkz5spifL0BqxYIMDY7aSY2nBjCE4pLvQ0vfiqs7Uq+wqlDyP+3T7IAEKvpgS0047H/oYP/+EYTsEddbbHE8KQQj/VjeTlfRi62hrOsKjuz1TQI4CG3pJGlhNZxQhA5tdatGjqp62bO58ty9h5AiesdpvT8YTakSK3oe0Mf833/0betihRXaudmEAuTHHqIAAAAAA") }
+.face.inbox { background-image: url("data:image/webp;base64,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") }
+.face.planner { background-image: url("data:image/webp;base64,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") }
+.face.planner-gpt { background-image: url("data:image/webp;base64,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") }
+.face.school { background-image: url("data:image/webp;base64,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") }
+.face.fares { background-image: url("data:image/webp;base64,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") }
+.face.s28 { width: 28px; height: 28px } .face.s34 { width: 34px; height: 34px } .face.s52 { width: 52px; height: 52px }
+.face.s56 { width: 56px; height: 56px }
+.face { flex: none }
+.fwrap { position: relative; display: block; flex: none }
+.badge { position: absolute; right: -1px; top: -1px; width: 18px; height: 18px; border-radius: 50%; background: var(--otto); color: #1c1c1e; display: grid; place-items: center;
+  font: 700 12px/1 var(--font); font-style: normal; letter-spacing: 0; box-shadow: 0 0 0 2px var(--bg) }
+.swap { position: absolute; right: 0; bottom: 0; width: 24px; height: 24px; border-radius: 50%; background: var(--cell-on-sheet); display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg-grouped) }
+.swap svg { width: 14px; height: 14px }
+.gface { position: relative; display: block; flex: none; width: 56px; height: 56px }
+.gface .face { position: absolute; top: 28px; width: 26px; height: 26px }
+.gface .face:nth-child(1) { left: 11px; top: 0; width: 34px; height: 34px }
+.gface .face:nth-child(2) { left: 1px } .gface .face:nth-child(3) { right: 1px }
+.gface.lg { width: 68px; height: 68px }
+.gface.lg .face { top: 34px; width: 32px; height: 32px }
+.gface.lg .face:nth-child(1) { left: 13px; top: 0; width: 42px; height: 42px }
+
+/* ---------- conversations ---------- */
+.large-title { font: 700 34px/41px var(--font); letter-spacing: .4px }
+.chats { position: absolute; inset: 0; padding-top: 88px }
+.chats-head { display: flex; align-items: center; justify-content: space-between; padding: 0 16px 12px 20px }
+.crow { position: relative; display: flex; align-items: center; gap: 14px; height: 76px; padding: 0 16px 0 20px }
+.crow + .crow::before { content: ""; position: absolute; top: 0; left: 90px; right: 16px; height: 1px; background: var(--hairline) }
+.crow .tx { flex: 1; min-width: 0 }
+.crow .tx b { display: flex; align-items: center; gap: 6px; font: 600 17px/22px var(--font); letter-spacing: -0.43px }
+.crow .tx b svg { width: 12px; height: 12px; color: var(--label-3) }
+.crow .tx span { display: block; margin-top: 1px; font: 400 15px/20px var(--font); letter-spacing: -0.23px; color: var(--label-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.crow time { align-self: flex-start; margin-top: 16px; font: 400 15px/20px var(--font); letter-spacing: -0.23px; color: var(--label-2); white-space: nowrap; font-variant-numeric: tabular-nums }
+.crow.waiting .tx span { color: var(--label) }
+.crow.waiting::after { content: ""; position: absolute; left: 6px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: var(--otto) }
+.fsearch { position: absolute; z-index: 45; left: 28px; right: 28px; bottom: 28px; height: 48px; padding: 0 16px; border-radius: 24px; display: flex; align-items: center; gap: 8px; color: var(--label-2) }
+.fsearch svg { width: 20px; height: 20px; color: var(--label) }
+
+/* ---------- a group's thread ---------- */
+.gmsg { align-self: flex-start; display: flex; align-items: flex-end; gap: 8px }
+.gmsg .col { display: grid; justify-items: start; gap: 3px }
+.gmsg .by, .script .by { font: 400 11px/13px var(--font); letter-spacing: .06px; color: var(--label-2) }
+.gmsg .by { margin-left: 14px }
+.gmsg .b { max-width: 236px }
+.tdots { display: inline-flex; align-items: center; gap: 4px; height: 20px }
+.tdots i { width: 7px; height: 7px; border-radius: 50%; background: var(--label-3) }
+.field b { font-weight: 600 }
+
+/* ---------- handoff sheet ---------- */
+.hand { display: grid; gap: 10px; padding: 0 16px 28px }
+.hpath { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 0 8px; color: var(--label-3) }
+.hpath svg { width: 112px; height: 40px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.hpath svg circle { fill: var(--cell-on-sheet); stroke: none } .hpath svg .ok { stroke: var(--label) }
+.said { display: flex; align-items: flex-end; gap: 8px; padding-right: 36px }
+.said p { padding: 8px 12px; border-radius: 17px; background: var(--cell-on-sheet); font: 400 15px/20px var(--font); letter-spacing: -0.23px }
+.hand .stamp { justify-self: center }
+.result { margin: 4px 0 8px; text-align: center; font: 400 15px/20px var(--font); letter-spacing: -0.23px; color: var(--label-2) }
+
+/* ---------- search ---------- */
+.thead.tall { height: 232px; background: linear-gradient(to bottom, var(--bg) 202px, transparent) }
+.sbar { position: absolute; z-index: 31; top: 152px; left: 16px; right: 16px; display: flex; align-items: center; gap: 8px }
+.sbar .field { min-height: 44px; border-radius: 22px; padding: 0 12px }
+.sbar .field span { flex: 1 }
+.sbar .field svg { width: 18px; height: 18px }
+.thread.results { padding: 232px 16px 40px; gap: 14px }
+.hit { align-self: flex-start; display: grid; justify-items: start; gap: 4px }
+.hit.me { align-self: flex-end; justify-items: end }
+.hit time { margin: 0 6px; font: 400 11px/13px var(--font); letter-spacing: .06px; color: var(--label-2) }
+.hit time b { font-weight: 600 }
+mark { padding: 0 1px; border-radius: 3px; background: var(--find); color: var(--on-find) }
+
+/* ---------- study ---------- */
+.gcap.strong { font-weight: 600 }
+.seg { display: flex; height: 36px; padding: 2px; border-radius: 18px; background: var(--fill-2) }
+.seg span { flex: 1; display: grid; place-items: center; border-radius: 16px; font: 500 15px/20px var(--font); letter-spacing: -0.23px }
+.seg .on { background: var(--seg-on); font-weight: 600; box-shadow: 0 2px 6px rgb(0 0 0 / .1) }
+.study { position: absolute; inset: 0; padding: 112px 16px 42px; display: flex; flex-direction: column; gap: 14px }
+.study .count { text-align: center; font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2); font-variant-numeric: tabular-nums }
+.flash { flex: 1; display: grid; place-items: center; padding: 28px; border-radius: 26px; background: var(--card); box-shadow: inset 0 0 0 .5px var(--hairline); text-align: center; font: 400 20px/26px var(--font); letter-spacing: -0.45px; text-wrap: balance }
+.pair { display: flex; gap: 12px } .pair .btn { flex: 1 }
+.study.quiz { gap: 12px } .study.quiz .count { margin-top: 6px; text-align: left; padding: 0 4px }
+.quiz-q { padding: 0 4px 4px; font: 600 22px/28px var(--font); letter-spacing: -0.26px; text-wrap: balance }
+.opt { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; padding: 0 14px 0 20px; border-radius: 26px; background: var(--card) }
+.opt.wrong { background: var(--red-tint) } .opt.wrong svg { color: var(--red-ink) }
+.opt.right { background: var(--green-tint) } .opt.right svg { color: var(--green-ink) }
+.why { padding: 2px 4px 6px; font: 400 16px/21px var(--font); letter-spacing: -0.31px; color: var(--label-2) }
+
+/* ---------- calls and the walkie-talkie ---------- */
+.callv { position: absolute; inset: 0; padding: 196px 24px 70px; display: flex; flex-direction: column; align-items: center; text-align: center }
+.callv .face { width: 148px; height: 148px }
+.callv .cname { margin-top: 36px; font: 600 34px/41px var(--font); letter-spacing: .4px }
+.callv .timer { margin-top: 4px; font: 600 17px/22px var(--font); color: var(--label-2); font-variant-numeric: tabular-nums }
+.rbtns { margin-top: auto; display: flex; gap: 36px }
+.rbtn { display: grid; justify-items: center; gap: 8px; font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.rbtn span { width: 72px; height: 72px; border-radius: 50%; background: var(--fill); color: var(--label); display: grid; place-items: center }
+.rbtn svg { width: 30px; height: 30px }
+.rbtn.end span { background: var(--red); color: #fff }
+.rbtn.end svg, .btn.stop svg { transform: rotate(135deg) }
+.btn.stop { background: var(--fill); color: var(--red-ink) }
+.sheet-title small { display: flex; align-items: center; justify-content: center; gap: 5px; font: 400 12px/16px var(--font); letter-spacing: 0; color: var(--label-2); font-variant-numeric: tabular-nums }
+.live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green) }
+.script { position: absolute; inset: 78px 0 152px; padding: 0 16px; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; overflow: hidden }
+.script > * { flex: none }
+.script .task { align-self: center; margin-bottom: 10px; text-align: center; font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.script .by { margin: 0 6px -6px } .script .by.r { align-self: flex-end }
+.sheet .b.in, .sheet .b.in.tail::before { background: var(--cell-on-sheet) }
+.sheet .b.tail::after { background: var(--sheet) }
+.callfoot { position: absolute; inset: auto 0 0; padding: 0 16px 34px; display: grid; gap: 10px }
+.say { min-height: 44px; padding: 0 16px; border-radius: 22px; background: var(--cell-on-sheet); display: flex; align-items: center; color: var(--label-3) }
+.walkie { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 28px; padding-bottom: 110px }
+.walkie .ring { width: 236px; height: 236px; border-radius: 50%; background: var(--fill-2); display: grid; place-items: center }
+.walkie .face { width: 156px; height: 156px }
+.walkie p { font: 600 17px/22px var(--font); letter-spacing: -0.43px }
+.corner { position: absolute; z-index: 40; top: 58px; right: 16px }
+
+/* ---------- a line under the header: the flight, a call in progress ---------- */
+.banner { position: absolute; z-index: 31; top: 152px; left: 16px; right: 16px; height: 50px; padding: 0 16px 0 9px; border-radius: 25px; display: flex; align-items: center; gap: 10px }
+.banner .disc { width: 32px; height: 32px; border-radius: 50%; background: var(--fill); display: grid; place-items: center }
+.banner .disc svg { width: 17px; height: 17px }
+.banner .tx { flex: 1; min-width: 0 }
+.banner .tx b { display: block; font: 600 15px/19px var(--font); letter-spacing: -0.23px }
+.banner .tx span { display: block; font: 400 12px/15px var(--font); letter-spacing: 0; color: var(--label-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.banner > span:last-child { font: 400 15px/20px var(--font); letter-spacing: -0.23px; color: var(--label-2); white-space: nowrap; font-variant-numeric: tabular-nums }
+.thread.top.under { padding-top: 226px }
+
+/* ---------- boarding pass ---------- */
+.pass { margin: 30px 16px 0; padding: 18px 20px; border-radius: 24px; background: var(--cell-on-sheet) }
+.pass-head { display: flex; align-items: center; justify-content: space-between; font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.route { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; margin-top: 14px }
+.route .code { display: block; font: 600 34px/40px var(--font); letter-spacing: .3px }
+.route small { display: block; font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.route .at { display: block; margin-top: 6px; font: 400 15px/20px var(--font); letter-spacing: -0.23px; font-variant-numeric: tabular-nums }
+.route .end { text-align: right }
+.leg { margin-top: 19px; text-align: center; font: 400 12px/16px var(--font); letter-spacing: 0; color: var(--label-2) }
+.leg i { display: block; margin-bottom: 9px; border-top: 1.5px dotted var(--label-3) }
+.tear { position: relative; margin: 16px -20px; border-top: 1.5px dashed var(--hairline) }
+.tear::before, .tear::after { content: ""; position: absolute; top: -9px; width: 16px; height: 16px; border-radius: 50%; background: var(--sheet) }
+.tear::before { left: -8px } .tear::after { right: -8px }
+.facts { display: grid; grid-template-columns: repeat(4, auto); justify-content: space-between; gap: 8px }
+.facts span { font: 400 15px/20px var(--font); letter-spacing: -0.23px }
+.facts small { display: block; font: 400 12px/16px var(--font); letter-spacing: 0; color: var(--label-2) }
+.booking { display: flex; align-items: center; gap: 12px; margin-top: 18px }
+.booking .mono-disc { width: 36px; height: 36px; border-radius: 50%; background: var(--fill); display: grid; place-items: center; font: 600 13px/1 var(--font); letter-spacing: 0 }
+.booking .tx { flex: 1 }
+.booking .tx b { display: block; font: 600 15px/20px var(--font); letter-spacing: -0.23px }
+.booking .tx span { display: block; font: 400 12px/16px var(--font); letter-spacing: 0; color: var(--label-2) }
+.checked { margin: 14px 0 26px; text-align: center; font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+
+/* ---------- photo viewer: always black, whatever the theme ---------- */
+.viewer { position: absolute; inset: 0; background: #000 }
+.vtop { position: absolute; z-index: 40; top: 58px; left: 16px; right: 16px; display: flex; align-items: center; justify-content: space-between }
+.vcap { height: 44px; padding: 0 18px; border-radius: 22px; display: grid; align-content: center; justify-items: center; font: 600 15px/18px var(--font); letter-spacing: -0.23px }
+.vcap small { font: 400 12px/15px var(--font); letter-spacing: 0; color: var(--label-2) }
+.photo { position: absolute; left: 0; top: 50%; width: 393px; height: 295px; margin-top: -148px }
+
+/* ---------- pages behind Otto's card ---------- */
+.row .tx small b { font-weight: 400; color: var(--red-ink) }
+.row .meta { display: grid; justify-items: end; gap: 5px; font: 400 12px/16px var(--font); letter-spacing: 0; color: var(--label-2); white-space: nowrap }
+.pill.on { display: inline-flex; align-items: center; gap: 5px; color: var(--label) }
+.grand { font: 600 40px/48px var(--font); letter-spacing: .3px; font-variant-numeric: tabular-nums }
+.picks { display: flex; align-items: center; justify-content: space-between; min-height: 44px; margin: 14px -20px -16px; padding: 0 20px; border-top: 1px solid var(--hairline) }
+.chart { position: relative; height: 176px }
+.chart .grid { position: absolute; inset: 0 44px 22px 0; display: flex; flex-direction: column; justify-content: space-between }
+.chart .grid span { position: relative; display: block; height: 0; border-top: 1px solid var(--hairline) }
+.chart .grid span::after { content: attr(data-v); position: absolute; left: 100%; top: -7px; width: 44px; text-align: right; font: 400 11px/13px var(--font); letter-spacing: .06px; color: var(--label-2); font-variant-numeric: tabular-nums }
+.chart .cols { position: absolute; inset: 0 44px 22px 0; display: flex; align-items: flex-end; justify-content: space-around }
+.chart .cols div { position: relative; width: 15%; height: 100%; display: flex; align-items: flex-end }
+.chart .cols i { display: block; width: 100%; height: var(--v); border-radius: 4px 4px 0 0; background: var(--label) }
+.chart .cols b { position: absolute; top: 100%; left: 0; right: 0; margin-top: 7px; text-align: center; font: 400 11px/13px var(--font); letter-spacing: .06px; color: var(--label-2) }
+.cat { flex: 1; display: grid; grid-template-columns: 1fr auto; gap: 7px 8px; padding: 14px 0 }
+.cat span + span { color: var(--label-2); font-variant-numeric: tabular-nums }
+.cat i { grid-column: 1 / -1; width: var(--v); height: 4px; border-radius: 0 2px 2px 0; background: var(--label) }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <symbol id="s-signal" viewBox="0 0 19 12"><rect x="0" y="7.5" width="3.2" height="4.5" rx="1"/><rect x="5.2" y="5" width="3.2" height="7" rx="1"/><rect x="10.4" y="2.5" width="3.2" height="9.5" rx="1"/><rect x="15.6" y="0" width="3.2" height="12" rx="1"/></symbol>
+  <symbol id="s-wifi" viewBox="0 0 17 12"><path d="M8.5 2.3c2.4 0 4.6.9 6.3 2.5l1.3-1.3A10.6 10.6 0 0 0 8.5.4 10.6 10.6 0 0 0 .9 3.5l1.3 1.3A8.8 8.8 0 0 1 8.5 2.3Zm0 3.6c1.4 0 2.7.5 3.7 1.4l1.3-1.3a7.2 7.2 0 0 0-10 0l1.3 1.3c1-.9 2.3-1.4 3.7-1.4Zm0 3.5c.5 0 1 .2 1.3.5L8.5 11.2 7.2 9.9c.3-.3.8-.5 1.3-.5Z"/></symbol>
+  <symbol id="s-battery" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.8" fill="none" stroke="currentColor" stroke-opacity=".4"/><rect x="2" y="2" width="20" height="9" rx="2.4"/><path d="M25 4.5v4c.8-.3 1.4-1.1 1.4-2s-.6-1.7-1.4-2Z" fill-opacity=".45"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5 8 12l7 7"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 8 14"><path d="M1.2 1.2 6.8 7l-5.6 5.8"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24"><path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></symbol>
+  <symbol id="i-todo" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></symbol>
+  <symbol id="i-faceid" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M9 9v1.5M15 9v1.5M12 9v3.5h-1M9 15.5a4.2 4.2 0 0 0 6 0"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16.5" rx="3"/><path d="M8 2.5v4M16 2.5v4M3 10h18"/></symbol>
+  <symbol id="i-job" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3.5"/><path d="m7.5 10 3 2.5-3 2.5M13 15h3.5"/></symbol>
+  <symbol id="i-prompt" viewBox="0 0 24 24"><path d="m5 7 5 5-5 5M12 17h7"/></symbol>
+  <symbol id="i-draft" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v14M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15V5.5A2.5 2.5 0 0 1 7.5 3H15"/></symbol>
+  <symbol id="i-paste" viewBox="0 0 24 24"><rect x="5" y="4.5" width="14" height="16.5" rx="3"/><path d="M9 4.5a3 3 0 0 1 6 0M9 12h6M9 16h4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V13M12 16.4v.1"/></symbol>
+  <symbol id="i-qr" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M12.5 8.5h3v3M8.5 12.5v3h3"/><rect x="8.5" y="8.5" width="2.6" height="2.6" rx=".5"/><rect x="12.9" y="12.9" width="2.6" height="2.6" rx=".5"/></symbol>
+  <symbol id="i-ring" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></symbol>
+  <symbol id="i-arc" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-done" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></symbol>
+  <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5a3 3 0 0 0-5.6-1.5A3.5 3.5 0 0 0 4 9.5 3.5 3.5 0 0 0 5 16a3.5 3.5 0 0 0 7 1.5V5a3 3 0 0 1 5.6-1.5A3.5 3.5 0 0 1 20 9.5a3.5 3.5 0 0 1-1 6.5 3.5 3.5 0 0 1-7 1.5"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+  <symbol id="i-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.6v.1M15 9.6v.1"/></symbol>
+  <symbol id="i-shift" viewBox="0 0 24 24"><path d="M12 4 4 13h4.5v6h7v-6H20z"/></symbol>
+  <symbol id="i-delete" viewBox="0 0 24 24"><path d="M9 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6-7zM13 10l4 4M17 10l-4 4"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="7"/><path d="m20 20-4.5-4.5"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></symbol>
+  <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
+  <symbol id="i-plane" viewBox="0 0 24 24"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+  <symbol id="i-alarm" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M5 3 2 6M22 6l-3-3"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 8 8 5.5L20 8"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 7h16M7 12h10M10 17h4"/></symbol>
+  <symbol id="i-lines" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9"/></symbol>
+  <symbol id="i-headphones" viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3M4 14h2.5a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2zM20 14h-2.5a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h.5a2 2 0 0 0 2-2z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 9h14l-3-3M20 15H6l3 3"/></symbol>
+  <symbol id="i-xcircle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></symbol>
+  <symbol id="i-okcircle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16 9.5"/></symbol>
+  <symbol id="i-ask" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.6-2.4 2.1-2.4 3.6M12 17v.1"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+</defs></svg>
+
+<main class="wall">
+
+<header class="intro">
+  <h1>Otto for iPhone, redesign round 1</h1>
+  <p>One thread stays the home. Nothing here is built yet: these are drawings at iPhone size to comment on, dark first, with the thread once in light.</p>
+  <ul class="roles">
+    <li><i style="background:#0a84ff"></i>Blue: buttons and links, nothing else</li>
+    <li><i style="background:#ff9230"></i>Tangerine: Otto, and what is waiting on you</li>
+    <li><i style="background:#60656b"></i>Slate: your side of the thread</li>
+    <li><i style="background:#262628;box-shadow:inset 0 0 0 1px #3a3a3e"></i>Greys: everything else</li>
+  </ul>
+</header>
+
+<!-- 1. Thread -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-thread" data-theme="dark" role="group" aria-label="Thread, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="face"></span><span class="name glass">Otto<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="thread">
+    <div class="stamp"><b>Today</b> 9:12</div>
+    <p class="b in tail">Morning. The boiler engineer can do Tuesday or Thursday.</p>
+    <p class="b out tail">Tuesday, before 10</p>
+    <div class="receipt"><b>Read</b> 9:14</div>
+    <div class="card">
+      <div class="card-head"><span><svg class="i" aria-hidden="true"><use href="#i-draft"/></svg>Draft</span><span class="needs"><i></i>Needs you</span></div>
+      <p class="card-title">To Luca at Alder Heating</p>
+      <p class="well">Hi Luca, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks.</p>
+      <div class="card-btns"><span class="btn sm">Send</span><span class="btn sm quiet">Discard</span></div>
+    </div>
+    <p class="b in tail t4">I’ve started on the quotes too.</p>
+    <div class="card t6">
+      <div class="card-head"><span><svg class="i" aria-hidden="true"><use href="#i-job"/></svg>Job</span><span class="state"><svg class="i" aria-hidden="true"><use href="#i-arc"/></svg>Running</span></div>
+      <p class="card-title">Compare three flat insurance quotes</p>
+      <p class="card-sub">Started 14 min ago · $0.42 so far</p>
+      <div class="card-links"><span class="link">Open job</span></div>
+    </div>
+  </div>
+  <div class="fade"></div>
+  <div class="composer"><span class="gbtn sm glass"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></span><div class="field glass"><span class="ph">Message</span><svg class="i" aria-hidden="true"><use href="#i-wave"/></svg></div></div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Thread</b>A draft waiting on you, a running job, a read receipt</figcaption></figure>
+
+<!-- 2. Thread, cards -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-thread-cards" data-theme="dark" role="group" aria-label="Thread with a data card and a study set, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="face"></span><span class="name glass">Otto<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="thread">
+    <p class="b in tail">A bit more than last week.</p>
+    <div class="card t6">
+      <div class="card-head"><span>Spending this week</span></div>
+      <p class="fig">€184.60</p>
+      <p class="card-sub">12% more than last week</p>
+      <div class="bars">
+        <div class="bar" style="--v:100%"><span>Groceries</span><span>€72.40</span><i></i></div>
+        <div class="bar" style="--v:66.6%"><span>Eating out</span><span>€48.20</span><i></i></div>
+        <div class="bar" style="--v:42.8%"><span>Transport</span><span>€31.00</span><i></i></div>
+      </div>
+      <div class="budget">
+        <div class="bar"><span>Weekly budget</span><span>74%</span></div>
+        <div class="meter" style="--v:74%"><i></i></div>
+        <p class="card-sub">€65.40 left of €250.00</p>
+      </div>
+      <div class="card-links"><span class="link">Show all</span><span class="link">Set a budget</span></div>
+    </div>
+    <p class="b out tail">Quiz me on chapter 6 tonight?</p>
+    <div class="card">
+      <div class="card-head"><span><svg class="i" aria-hidden="true"><use href="#i-book"/></svg>Study set</span><span class="state">12 cards · 5 questions</span></div>
+      <p class="card-title">Photosynthesis</p>
+      <p class="card-sub">From Biology, page 112</p>
+      <div class="card-links"><span class="link">Study</span></div>
+    </div>
+  </div>
+  <div class="fade"></div>
+  <div class="composer"><span class="gbtn sm glass"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></span><div class="field glass"><span class="ph">Message</span><svg class="i" aria-hidden="true"><use href="#i-wave"/></svg></div></div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Thread, cards</b>A data card and a study set in the same frame as the draft and the job</figcaption></figure>
+
+<!-- 3. Composer, keyboard up -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-composer" data-theme="dark" role="group" aria-label="Composer with the keyboard up, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="face working"></span><span class="name glass">Otto<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="thread kb">
+    <div class="stamp"><b>Today</b> 9:38</div>
+    <div class="b in tail haschip">Your sign-in code from Kestrel Bank.
+      <div class="chip"><span class="disc"><svg class="i" aria-hidden="true"><use href="#i-key"/></svg></span><span class="code" aria-label="Hidden code">••••••</span><span class="link">Show</span></div>
+    </div>
+    <p class="b out tail">Book the Tuesday slot too</p>
+    <div class="b in tail typing"><span class="orb" role="img" aria-label="Searching…"><span class="orb-g"><i style="transform:translate3d(0px,7.55px,-3.19px) scale(.0386);color:#8b8b8b;background-color:#8b8b8b00"></i><i class="r1" style="--f:0"></i><i class="r1" style="--f:.1429"></i><i class="r1" style="--f:.2857"></i><i class="r1" style="--f:.4286"></i><i class="r1" style="--f:.5714"></i><i class="r1" style="--f:.7143"></i><i class="r1" style="--f:.8571"></i><i class="r2" style="--f:0"></i><i class="r2" style="--f:.0833"></i><i class="r2" style="--f:.1667"></i><i class="r2" style="--f:.25"></i><i class="r2" style="--f:.3333"></i><i class="r2" style="--f:.4167"></i><i class="r2" style="--f:.5"></i><i class="r2" style="--f:.5833"></i><i class="r2" style="--f:.6667"></i><i class="r2" style="--f:.75"></i><i class="r2" style="--f:.8333"></i><i class="r2" style="--f:.9167"></i><i class="r3" style="--f:0"></i><i class="r3" style="--f:.0714"></i><i class="r3" style="--f:.1429"></i><i class="r3" style="--f:.2143"></i><i class="r3" style="--f:.2857"></i><i class="r3" style="--f:.3571"></i><i class="r3" style="--f:.4286"></i><i class="r3" style="--f:.5"></i><i class="r3" style="--f:.5714"></i><i class="r3" style="--f:.6429"></i><i class="r3" style="--f:.7143"></i><i class="r3" style="--f:.7857"></i><i class="r3" style="--f:.8571"></i><i class="r3" style="--f:.9286"></i><i class="r4" style="--f:0"></i><i class="r4" style="--f:.0833"></i><i class="r4" style="--f:.1667"></i><i class="r4" style="--f:.25"></i><i class="r4" style="--f:.3333"></i><i class="r4" style="--f:.4167"></i><i class="r4" style="--f:.5"></i><i class="r4" style="--f:.5833"></i><i class="r4" style="--f:.6667"></i><i class="r4" style="--f:.75"></i><i class="r4" style="--f:.8333"></i><i class="r4" style="--f:.9167"></i><i class="r5" style="--f:0"></i><i class="r5" style="--f:.1429"></i><i class="r5" style="--f:.2857"></i><i class="r5" style="--f:.4286"></i><i class="r5" style="--f:.5714"></i><i class="r5" style="--f:.7143"></i><i class="r5" style="--f:.8571"></i><i style="transform:translate3d(0px,-7.55px,3.19px) scale(.0614);color:#c1c1c1;background-color:#c1c1c163"></i></span></span><span>Checking your calendar…</span></div>
+  </div>
+  <div class="fade kb"></div>
+  <div class="composer kb"><span class="gbtn sm glass"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></span><div class="field glass typed"><span>Before 10 if they can<i class="caret"></i></span><span class="send"><svg class="i" aria-hidden="true"><use href="#i-up"/></svg></span></div></div>
+  <div class="kbd" aria-hidden="true">
+    <div class="sugg"><span>can</span><span>can’t</span><span>cancel</span></div>
+    <div class="kr"><span class="k">q</span><span class="k">w</span><span class="k">e</span><span class="k">r</span><span class="k">t</span><span class="k">y</span><span class="k">u</span><span class="k">i</span><span class="k">o</span><span class="k">p</span></div>
+    <div class="kr"><span class="k">a</span><span class="k">s</span><span class="k">d</span><span class="k">f</span><span class="k">g</span><span class="k">h</span><span class="k">j</span><span class="k">k</span><span class="k">l</span></div>
+    <div class="kr"><span class="k w"><svg class="i"><use href="#i-shift"/></svg></span><span class="k">z</span><span class="k">x</span><span class="k">c</span><span class="k">v</span><span class="k">b</span><span class="k">n</span><span class="k">m</span><span class="k w"><svg class="i"><use href="#i-delete"/></svg></span></div>
+    <div class="kr last"><span class="k w">123</span><span class="k sp">space</span><span class="k ret">return</span></div>
+    <svg class="i tool l"><use href="#i-smile"/></svg><svg class="i tool r"><use href="#i-mic"/></svg>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Composer</b>Keyboard up, a code line in Otto’s bubble, Otto working</figcaption></figure>
+
+<!-- 4. One-time code drawer -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-otp" data-theme="dark" role="group" aria-label="One-time code drawer, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="face"></span><span class="name glass">Otto<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="thread top">
+    <div class="stamp"><b>Today</b> 9:38</div>
+    <p class="b in">The bank wants a code to sign you in.</p>
+    <div class="b in tail haschip t4">Your sign-in code from Kestrel Bank.
+      <div class="chip"><span class="disc"><svg class="i" aria-hidden="true"><use href="#i-key"/></svg></span><span class="code" aria-label="Hidden code">••••••</span><span class="link">Show</span></div>
+    </div>
+  </div>
+  <div class="scrim"></div>
+  <div class="sheet"><div class="grabber"></div>
+    <div class="otp">
+      <p class="sheet-title">Code from Kestrel Bank</p>
+      <div class="tiles" role="img" aria-label="4 8 2 9 1 6"><span class="tile">4</span><span class="tile">8</span><span class="tile">2</span><span class="tile">9</span><span class="tile">1</span><span class="tile">6</span></div>
+      <span class="btn wide"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>Copy code</span>
+    </div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Code drawer</b>Opens when a code arrives; one blue button</figcaption></figure>
+
+<!-- 5. Approval: a payment -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-approval" data-theme="dark" role="group" aria-label="Payment approval sheet, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="scrim"></div>
+  <div class="sheet large">
+    <div class="sheet-bar"><span class="gcap glass">Later</span><span class="sheet-title">Pay €17.00</span><span></span></div>
+    <div class="sect"><div class="list"><div class="cellpad">
+      <p class="amount">€17.00</p>
+      <p class="hl">Fennel &amp; Rye Bakery</p>
+      <p class="sub15">fennelandrye.example</p>
+    </div></div></div>
+    <div class="sect"><div class="sect-h">Items</div><div class="list">
+      <div class="row top"><div class="tx">2 × Sourdough loaf<small>Sliced</small></div><span>€11.00</span></div>
+      <div class="row top"><div class="tx">Cinnamon buns<small>Box of 4</small></div><span>€6.00</span></div>
+      <div class="row total"><div class="tx">Total</div><span>€17.00</span></div>
+    </div></div>
+    <div class="sect"><div class="sect-h">Paying with</div><div class="list">
+      <div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-card"/></svg><div class="tx">Debit card ending 0042</div></div>
+    </div></div>
+    <div class="sect"><div class="sect-h">Before you pay</div><div class="list">
+      <div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><div class="tx">Collection only, Saturday from 8:00</div></div>
+    </div></div>
+    <div class="sheet-foot"><span class="btn quiet">Decline</span><span class="btn"><svg class="i" aria-hidden="true"><use href="#i-faceid"/></svg>Pay €17.00</span></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Approval, a payment</b>Face ID sits on the blue button; Decline stays quiet</figcaption></figure>
+
+<!-- 6. Approval: a change to Otto -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-approval-change" data-theme="dark" role="group" aria-label="Approval sheet for a change to Otto, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="scrim"></div>
+  <div class="sheet large">
+    <div class="sheet-bar"><span class="gcap glass">Later</span><span class="sheet-title">Quiet hours</span><span></span></div>
+    <div class="sect"><div class="sect-h">What it does</div><div class="list"><div class="cellpad">Holds anything that isn’t urgent between 22:00 and 7:00, then hands it over with the morning brief. Reminders you set yourself still come through.</div></div></div>
+    <div class="sect"><div class="sect-h">Changes · 3 files</div><div class="list">
+      <div class="chg"><div class="chg-head"><span class="mono">otto/notify.ts</span><span class="needs"><i></i>Guarded</span></div><p class="chg-why">Checks for quiet hours before it sends</p><pre class="diff"><span class="del">− await send(msg)</span><span class="add">+ if (quiet() &amp;&amp; !msg.urgent) hold(msg)</span><span class="add">+ else await send(msg)</span></pre></div>
+      <div class="chg"><div class="chg-head"><span class="mono">otto/settings.ts</span><span class="needs"><i></i>Guarded</span></div><p class="chg-why">Adds the switch, set to 22:00 until 7:00</p><pre class="diff"><span class="add">+ quiet: { on: true, from: 22, to: 7 },</span></pre></div>
+      <div class="chg"><div class="chg-head"><span class="mono">otto/quiet-hours.ts</span><span class="tier">Open</span></div><p class="chg-why">New file: decides what counts as urgent</p><pre class="diff"><span class="add">+ export function quiet() {</span><span class="add">+   const h = new Date().getHours()</span><span class="add">+   return h &gt;= 22 || h &lt; 7</span></pre></div>
+    </div><div class="sect-f">A few lines from each file. In all, 81 added and 4 removed against main.</div></div>
+    <div class="sheet-foot"><span class="btn quiet">Decline</span><span class="btn"><svg class="i" aria-hidden="true"><use href="#i-faceid"/></svg>Approve</span></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Approval, a change to Otto</b>Each file in a sentence with a few changed lines; tangerine marks the guarded ones</figcaption></figure>
+
+<!-- 7. Job detail sheet -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-job" data-theme="dark" role="group" aria-label="Job detail sheet, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="face"></span><span class="name glass">Otto<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="thread top">
+    <div class="stamp"><b>Yesterday</b> 18:05</div>
+    <p class="b out tail">Is there a quieter way to walk to the office?</p>
+    <p class="b in tail">I’ll look. Give me a few minutes.</p>
+    <div class="card t6">
+      <div class="card-head"><span><svg class="i" aria-hidden="true"><use href="#i-job"/></svg>Job</span><span class="state"><svg class="i" aria-hidden="true"><use href="#i-done"/></svg>Done</span></div>
+      <p class="card-title">Find a quieter walk to the office</p>
+      <p class="card-sub">Yesterday 18:11 · $0.18</p>
+      <div class="card-links"><span class="link">Open job</span></div>
+    </div>
+  </div>
+  <div class="scrim"></div>
+  <div class="sheet"><div class="grabber"></div>
+    <div class="sheet-bar"><span></span><span class="sheet-title">Job</span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></span></div>
+    <div class="job-body">
+      <p class="job-title">Find a quieter walk to the office</p>
+      <p class="job-meta"><span class="pill">Done</span>Yesterday 18:11 · $0.18</p>
+      <div class="md">
+        <p><b>Take Elm Street.</b> Two minutes longer, and it skips the main road.</p>
+        <ul><li>14 minute walk</li><li>One crossing, with lights</li><li>Quiet until about 8:30</li></ul>
+      </div>
+    </div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Job</b>The sheet a job card opens: what was asked, how it went, the result</figcaption></figure>
+
+<!-- 8. Otto's contact card -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-contact" data-theme="dark" role="group" aria-label="Otto’s contact card, dark"><div class="screen grouped">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="nav"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span></div>
+  <div class="page">
+    <div class="hero"><span class="face"></span><p>Otto</p></div>
+    <div class="sect"><div class="sect-h">Today</div><div class="list">
+      <div class="row"><div class="tx">Dentist</div><span class="val">11:30</span></div>
+      <div class="row"><div class="tx">Lunch with Noor</div><span class="val">13:00</span></div>
+      <div class="row"><div class="tx">Parents’ evening</div><span class="val">18:30</span></div>
+    </div><div class="sect-f">As of 9:38</div></div>
+    <div class="sect"><div class="sect-h">Open loops</div><div class="list">
+      <div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-ring"/></svg><div class="tx">Send the signed lease back<small>Due Tue, Nov 17</small></div></div>
+      <div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-ring"/></svg><div class="tx">Renew the bike insurance<small class="late">Was due Fri, Nov 13</small></div></div>
+    </div></div>
+    <div class="sect"><div class="list">
+      <div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-todo"/></svg><div class="tx">Loops</div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div>
+      <div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-cal"/></svg><div class="tx">Schedules</div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div>
+      <div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg><div class="tx">Calls</div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div>
+      <div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-brain"/></svg><div class="tx">Memory</div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div>
+      <div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-card"/></svg><div class="tx">Money</div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div>
+    </div></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Otto’s card</b>Today, open loops, then the pages; one glyph colour</figcaption></figure>
+
+<!-- 9. Settings -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-settings" data-theme="dark" role="group" aria-label="Settings, dark"><div class="screen grouped">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="nav"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="title">Settings</span></div>
+  <div class="page" style="padding-top:118px">
+    <div class="sect"><div class="sect-h">Otto</div><div class="list">
+      <div class="row"><div class="tx">Morning brief</div><span class="sw on"></span></div>
+      <div class="row"><div class="tx">Evening wrap-up</div><span class="sw"></span></div>
+      <div class="row"><div class="tx">Speak replies</div><span class="sw on"></span></div>
+      <div class="row"><div class="tx">Nudges about open loops</div><span class="sw on"></span></div>
+    </div></div>
+    <div class="sect"><div class="sect-h">Recurring</div><div class="list">
+      <div class="row"><div class="tx">Inbox scan</div><span class="sw on"></span></div>
+      <div class="row"><div class="tx">Weekly review</div><span class="sw on"></span></div>
+      <div class="row"><div class="tx">Price watch</div><span class="sw"></span></div>
+    </div></div>
+    <div class="sect"><div class="sect-h">Connectors</div><div class="list">
+      <div class="row"><div class="tx">Mail</div><span class="sw on"></span></div>
+      <div class="row"><div class="tx">Calendar</div><span class="sw on"></span></div>
+      <div class="row"><div class="tx">Browser</div><span class="sw"></span></div>
+    </div><div class="sect-f">A change applies from the next session.</div></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Settings</b>The Mac’s switches, one tap each</figcaption></figure>
+
+<!-- 10. First launch -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-onboarding" data-theme="dark" role="group" aria-label="Welcome, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="ob">
+    <span class="face"></span>
+    <p class="ob-title">Hi, I’m Otto.</p>
+    <p class="ob-line">One chat that keeps track of the rest: your mail, your calendar, what you said you’d do, and what you asked me to remember.</p>
+    <div class="ob-foot"><span class="btn wide tall">Get started</span><span class="ob-link"></span></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Welcome</b>Otto is the only colour on the page; the button is blue</figcaption></figure>
+
+<!-- 11. Pairing -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-pairing" data-theme="dark" role="group" aria-label="Pairing with the Mac, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="dots" aria-hidden="true"><i class="on"></i><i></i><i></i><i></i><i></i></div>
+  <div class="ob step">
+    <span class="glyph"><svg class="i" aria-hidden="true"><use href="#i-qr"/></svg></span>
+    <p class="ob-title">Connect to your Mac</p>
+    <p class="ob-line">Run this on your Mac, then scan the code it opens.</p>
+    <pre class="cmd">bun otto/apptokens.ts new iPhone \
+  --server \
+  https://your-mac.your-tailnet.ts.net</pre>
+    <span class="btn sm tint" style="margin-top:12px"><svg class="i" aria-hidden="true"><use href="#i-paste"/></svg>Paste link</span>
+    <span class="ob-link" style="margin-top:8px">Type it in</span>
+    <div class="ob-foot"><span class="btn wide tall">Scan code</span><span class="ob-link">Look around with sample data</span></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Pairing</b>Scan is the one blue button; paste and typing stay quieter</figcaption></figure>
+
+<!-- 12. Empty thread -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-empty" data-theme="dark" role="group" aria-label="Empty thread, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="face"></span><span class="name glass">Otto<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="empty"><b>Say hi</b><p>Reminders, mail, plans: I’ll keep track of the rest.</p></div>
+  <div class="composer"><span class="gbtn sm glass"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></span><div class="field glass"><span class="ph">Message</span><svg class="i" aria-hidden="true"><use href="#i-wave"/></svg></div></div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Empty thread</b>Nothing yet: what to do, and what Otto does with it</figcaption></figure>
+
+<!-- 13. Thread, light -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-thread-light" data-theme="light" role="group" aria-label="Thread, light"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="face"></span><span class="name glass">Otto<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="thread todo">
+    <div class="stamp"><b>Yesterday</b> 17:52</div>
+    <p class="b in tail">Your parcel moved to Friday.</p>
+    <div class="mline"><svg class="i" aria-hidden="true"><use href="#i-prompt"/></svg>18:05 “find a quieter walk to the office”</div>
+    <div class="card">
+      <div class="card-head"><span><svg class="i" aria-hidden="true"><use href="#i-job"/></svg>Job</span><span class="state"><svg class="i" aria-hidden="true"><use href="#i-done"/></svg>Done</span></div>
+      <p class="card-title">Find a quieter walk to the office</p>
+      <p class="card-sub">Yesterday 18:11 · $0.18</p>
+      <div class="card-links"><span class="link">Open job</span></div>
+    </div>
+    <p class="b in tail t4">Elm Street is quieter, two minutes longer.</p>
+    <div class="stamp"><b>Today</b> 8:04</div>
+    <div class="b in tail haschip">Morning. Dentist at 11:30, and I’ve put lunch with Noor in.
+      <div class="chip"><span class="disc"><svg class="i" aria-hidden="true"><use href="#i-cal"/></svg></span><span class="tx"><b>Lunch with Noor</b><span>Today 13:00 · Calendar</span></span><svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></div>
+    </div>
+    <p class="b out tail">Thanks</p>
+    <div class="receipt"><b>Read</b> 8:06</div>
+  </div>
+  <div class="fade todo"></div>
+  <span class="todo-pill glass"><svg class="i" aria-hidden="true"><use href="#i-todo"/></svg><span>2 to-dos</span><svg class="i" aria-hidden="true"><use href="#i-down"/></svg></span>
+  <div class="composer"><span class="gbtn sm glass"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></span><div class="field glass"><span class="ph">Message</span><svg class="i" aria-hidden="true"><use href="#i-wave"/></svg></div></div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Thread, light</b>A finished job, a calendar line, a terminal line, the to-do pill</figcaption></figure>
+
+<h2 class="group-h">Otto’s helpers</h2>
+
+<!-- Conversations -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-conversations" data-theme="dark" role="group" aria-label="Conversations, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="chats">
+    <div class="chats-head"><p class="large-title">Chats</p><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></span></div>
+    <div class="crow"><span class="face s56"></span><div class="tx"><b>Otto<svg class="i" aria-hidden="true"><use href="#i-pin"/></svg></b><span>I’ve started on the quotes too.</span></div><time>9:21</time></div>
+    <div class="crow waiting"><span class="fwrap"><span class="face code-needs s56"></span><i class="badge">!</i></span><div class="tx"><b>Code</b><span>Merge or hold PR #214?</span></div><time>9:12</time></div>
+    <div class="crow"><span class="gface"><span class="face"></span><span class="face planner"></span><span class="face inbox"></span></span><div class="tx"><b>Saturday plan</b><span>Inbox: Table for 4 at 7 is booked</span></div><time>8:05</time></div>
+    <div class="crow"><span class="face inbox s56"></span><div class="tx"><b>Inbox</b><span>Reading 12 new emails</span></div><time>8:04</time></div>
+    <div class="crow"><span class="face planner s56"></span><div class="tx"><b>Planner</b><span>School didn’t answer</span></div><time>7:40</time></div>
+    <div class="crow"><span class="face school s56"></span><div class="tx"><b>School</b><span>Back at 7:00 tomorrow</span></div><time>Yesterday</time></div>
+    <div class="crow"><span class="gface"><span class="face"></span><span class="face fares"></span><span class="face planner"></span></span><div class="tx"><b>Lisbon in March</b><span>Fares: Morning flights are cheapest so far</span></div><time>Monday</time></div>
+  </div>
+  <div class="fsearch glass"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg>Search</div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Conversations</b>Otto stays pinned on top; the tangerine dot and badge mark the pip waiting on you</figcaption></figure>
+
+<!-- A pip’s thread -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-pip" data-theme="dark" role="group" aria-label="A pip’s thread, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="fwrap"><span class="face code-needs"></span><i class="badge">!</i></span><span class="name glass">Code<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="thread">
+    <div class="stamp"><b>Today</b> 9:10</div>
+    <p class="b in tail">PR #214 is ready. It renames the settings keys in 3 files, and the tests pass.</p>
+    <div class="card t6">
+      <div class="card-head"><span><svg class="i" aria-hidden="true"><use href="#i-ask"/></svg>Question</span><span class="needs"><i></i>Needs you</span></div>
+      <p class="card-title">Merge or hold PR #214?</p>
+      <div class="card-btns"><span class="btn sm">Merge</span><span class="btn sm quiet">Hold</span></div>
+    </div>
+  </div>
+  <div class="fade"></div><div class="composer"><div class="field glass"><span class="ph">Message</span></div></div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>A pip’s thread</b>A pip’s question uses the same card as a draft: the mark, then the two answers</figcaption></figure>
+
+<!-- A group -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-group" data-theme="dark" role="group" aria-label="A group thread, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="gface lg"><span class="face"></span><span class="face planner"></span><span class="face inbox"></span></span><span class="name glass">Saturday plan<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="thread">
+    <div class="stamp"><b>Today</b> 8:02</div>
+    <p class="b out tail">Plan Saturday: bike repair, groceries, dinner at 7</p>
+    <div class="gmsg"><span class="face  s28"></span><div class="col"><span class="by">Otto</span><p class="b in tail">Splitting it up. Planner first.</p></div></div>
+    <div class="gmsg"><span class="face planner s28"></span><div class="col"><span class="by">Planner</span><p class="b in tail">Bike shop is open 9 to 1. Groceries fit after.</p></div></div>
+    <div class="mline"><svg class="i" aria-hidden="true"><use href="#i-done"/></svg>8:07 Planner asked Inbox about the booking</div>
+    <div class="gmsg"><span class="face inbox s28"></span><div class="col"><span class="by">Inbox</span><p class="b in tail">The confirmation is in your mail. Table for 4 at 7.</p></div></div>
+    <div class="gmsg"><span class="face inbox s28"></span><div class="col"><span class="by">Inbox</span><div class="b in tail typing"><span class="tdots"><i></i><i></i><i></i></span><span>Checking the reservation</span></div></div></div>
+  </div>
+  <div class="fade"></div><div class="composer"><div class="field glass typed"><span><b>@Inbox</b> forward the booking<i class="caret"></i></span><span class="send"><svg class="i" aria-hidden="true"><use href="#i-up"/></svg></span></div></div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>A group</b>Each pip keeps its face and name; pips think in dots, Otto keeps the orb</figcaption></figure>
+
+<!-- Pip details -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-pip-details" data-theme="dark" role="group" aria-label="Pip details, dark"><div class="screen grouped">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="nav"><span class="gcap glass">Edit</span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></span></div>
+  <div class="page">
+    <div class="hero"><span class="fwrap"><span class="face planner-gpt"></span><i class="swap"><svg class="i" aria-hidden="true"><use href="#i-swap"/></svg></i></span><p>Planner</p><span class="sub15">Keeps your days, routes and errands in order</span></div>
+    <div class="sect"><div class="list"><div class="cellpad">Watches your calendar, plans routes, and tells the other pips when you’re out.</div></div></div>
+    <div class="sect"><div class="sect-h">Schedules</div><div class="list"><div class="row"><div class="tx">Morning route check<small>Weekdays at 7:30</small></div></div><div class="row"><div class="tx">Weekend plan<small>Friday at 18:00</small></div></div></div></div>
+    <div class="sect"><div class="sect-h">Can reach</div><div class="list"><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-cal"/></svg><div class="tx">Calendar</div><span class="val">Shared with Otto</span></div></div></div>
+    <div class="sect"><div class="sect-h">Runs on</div><div class="list"><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-swap"/></svg><div class="tx">GPT<small>Claude’s weekly limit is low. Back on Monday.</small></div></div></div></div>
+    <div class="sect"><span class="btn wide quiet"><svg class="i" aria-hidden="true"><use href="#i-pause"/></svg>Pause pip</span></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Pip details</b>What it does, when it runs, what it can reach; glyphs in one colour</figcaption></figure>
+
+<!-- Handoff -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-handoff" data-theme="dark" role="group" aria-label="Handoff sheet, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="face"></span><span class="name glass">Otto<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="thread top">
+    <div class="stamp"><b>Today</b> 8:04</div>
+    <p class="b in tail">Thursday is the busy one. Dentist at 9:30, then the review at 2.</p>
+    <p class="b out tail">Can Code look at the PR before lunch?</p>
+    <div class="mline"><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg>8:12 Otto asked Code about PR #214</div>
+    <p class="b in tail">Code read the diff. Two comments, neither blocks the merge.</p>
+  </div>
+  <div class="scrim"></div>
+  <div class="sheet"><div class="grabber"></div>
+    <div class="sheet-bar"><span></span><span class="sheet-title">Otto to Code</span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></span></div>
+    <div class="hand">
+      <div class="hpath"><span class="face s52"></span><svg viewBox="0 0 112 40" aria-hidden="true"><path d="M4 30Q56 2 108 30"/><circle cx="56" cy="16" r="10"/><path class="ok" d="m51.5 16.2 3.2 3.2 5.8-6.4"/></svg><span class="face code s52"></span></div>
+      <div class="said"><span class="face s34"></span><p>Can you review PR #214 before lunch? It renames the settings keys, 3 files.</p></div>
+      <div class="said"><span class="face code s34"></span><p>Read the diff. Two comments, neither blocks the merge. Tests pass.</p></div>
+      <div class="stamp"><b>Today</b> 8:12</div>
+      <p class="result">Code told Otto at 8:13, and Otto told you.</p>
+      <span class="btn wide quiet">Open Code</span>
+    </div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Handoff</b>What Otto asked a pip and what came back, from the line in the thread</figcaption></figure>
+
+<h2 class="group-h">From the thread</h2>
+
+<!-- Study set, cards -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-study-cards" data-theme="dark" role="group" aria-label="Study set, a card turned over, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="nav"><span class="gcap glass">Close</span><span class="title">Photosynthesis</span><span class="gcap glass strong">Done</span></div>
+  <div class="study">
+    <div class="seg"><span class="on">Cards</span><span>Quiz</span></div>
+    <p class="count">3 of 12 known</p>
+    <div class="flash">In the chloroplasts, mostly in the leaf’s mesophyll cells.</div>
+    <div class="pair"><span class="btn quiet">Again</span><span class="btn">Knew it</span></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Study set, cards</b>A card turned over: Again stays quiet, Knew it moves on</figcaption></figure>
+
+<!-- Study set, quiz -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-study-quiz" data-theme="dark" role="group" aria-label="Study set, quiz, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="nav"><span class="gcap glass">Close</span><span class="title">Photosynthesis</span><span class="gcap glass strong">Done</span></div>
+  <div class="study quiz">
+    <div class="seg"><span>Cards</span><span class="on">Quiz</span></div>
+    <p class="count">2 of 5</p>
+    <p class="quiz-q">Which gas do plants release during photosynthesis?</p>
+    <div class="opt wrong">Carbon dioxide<svg class="i" aria-hidden="true"><use href="#i-xcircle"/></svg></div>
+    <div class="opt right">Oxygen<svg class="i" aria-hidden="true"><use href="#i-okcircle"/></svg></div>
+    <div class="opt">Nitrogen</div>
+    <p class="why">Splitting water in the light reaction frees oxygen.</p>
+    <span class="btn wide">Next</span>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Study set, quiz</b>A wrong answer picked: red and green carry an icon each, Next is the blue button</figcaption></figure>
+
+<!-- Search -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-search" data-theme="dark" role="group" aria-label="Search in the thread, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead tall"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="face"></span><span class="name glass">Otto<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="sbar"><div class="field glass"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><span>tuesday</span><svg class="i" aria-hidden="true"><use href="#i-xcircle"/></svg></div><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></span></div>
+  <div class="thread results">
+    <div class="hit"><time><b>Yesterday</b> 17:40</time><p class="b in tail">The plumber can come <mark>Tuesday</mark> after 16:00.</p></div>
+    <div class="hit"><time><b>Today</b> 9:12</time><p class="b in tail">Morning. The boiler engineer can do <mark>Tuesday</mark> or Thursday.</p></div>
+    <div class="hit me"><time><b>Today</b> 9:13</time><p class="b out tail"><mark>Tuesday</mark>, before 10</p></div>
+    <div class="hit"><time><b>Today</b> 9:14</time><p class="b in tail">Hi Luca, <mark>Tuesday</mark> morning works for the boiler service. I’ll be home from 9. Thanks.</p></div>
+    <div class="hit me"><time><b>Today</b> 9:38</time><p class="b out tail">Book the <mark>Tuesday</mark> slot too</p></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Search</b>Pulled down from the header: each match with its time, the word marked</figcaption></figure>
+
+<!-- Photo viewer -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-photo" data-theme="dark" role="group" aria-label="Photo viewer"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="viewer" data-theme="dark">
+    <div class="vtop"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></span><span class="vcap glass">2 of 3<small>You · Today 9:05</small></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-share"/></svg></span></div>
+    <svg class="photo" viewBox="0 0 393 295" role="img" aria-label="A photo of hills under a pale sun"><rect width="393" height="295" fill="#a9c9d6"/><circle cx="288" cy="86" r="30" fill="#f4ecd2"/><path d="M0 190 90 132l70 44 62-52 76 60 95-58v169H0z" fill="#6f9a8c"/><path d="M0 232c60-26 120-30 190-8s140 14 203-10v81H0z" fill="#3f6b5a"/><path d="M0 268c80-18 150-14 230 0s110 6 163-6v33H0z" fill="#2c4d41"/></svg>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Photo viewer</b>Black in both modes; who sent it and when sit in one glass line</figcaption></figure>
+
+<!-- Boarding pass -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-boarding-pass" data-theme="dark" role="group" aria-label="Boarding pass sheet, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="thead"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="who"><span class="face"></span><span class="name glass">Otto<svg class="i" aria-hidden="true"><use href="#i-chev"/></svg></span></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span></div>
+  <div class="banner glass"><span class="disc"><svg class="i" aria-hidden="true"><use href="#i-plane"/></svg></span><span class="tx"><b>TA 482 · Gate B12</b><span>SFO to JFK · 12:40, was 12:00</span></span><span>in 2h 59m</span></div>
+  <div class="thread top under">
+    <p class="b in tail">Your flight moved to 12:40. Leave by 10:00 and you’re still fine.</p>
+    <p class="b out tail">Which gate?</p>
+  </div>
+  <div class="scrim"></div>
+  <div class="sheet"><div class="grabber"></div>
+    <div class="pass">
+      <div class="pass-head"><span>TA 482 · Sun, Nov 15</span><span class="needs"><i></i>Delayed</span></div>
+      <div class="route">
+        <div><span class="code">SFO</span><small>San Francisco</small><span class="at">12:40</span><small>was 12:00</small></div>
+        <div class="leg"><i></i>5h 20m</div>
+        <div class="end"><span class="code">JFK</span><small>New York</small><span class="at">21:00</span></div>
+      </div>
+      <div class="tear"></div>
+      <div class="facts"><span><small>Gate</small>B12</span><span><small>Terminal</small>2</span><span><small>Seat</small>14A</span><span><small>Class</small>Economy</span></div>
+      <div class="booking"><span class="mono-disc">TA</span><span class="tx"><b>Booking ABC123</b><span>No pass saved</span></span><span class="btn sm">Add pass</span></div>
+    </div>
+    <p class="checked">Checked just now</p>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Boarding pass</b>The flight line under the header opens it; the delay wears the tangerine mark</figcaption></figure>
+
+<!-- A call with Otto -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-call" data-theme="dark" role="group" aria-label="A call with Otto, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="callv">
+    <span class="face"></span>
+    <p class="cname">Otto</p>
+    <p class="timer">1:25</p>
+    <div class="rbtns">
+      <div class="rbtn"><span><svg class="i" aria-hidden="true"><use href="#i-speaker"/></svg></span>Speaker</div>
+      <div class="rbtn"><span><svg class="i" aria-hidden="true"><use href="#i-mic"/></svg></span>Mute</div>
+      <div class="rbtn end"><span><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg></span>End</div>
+    </div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>A call with Otto</b>Plain black, no glow behind the face; only End is red</figcaption></figure>
+
+<!-- A call Otto is placing -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-live-call" data-theme="dark" role="group" aria-label="A call Otto is placing, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="scrim"></div>
+  <div class="sheet large">
+    <div class="sheet-bar"><span class="gcap glass">Done</span><span class="sheet-title">+1 555 0142<small><i class="live"></i>Live · 1:25</small></span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-headphones"/></svg></span></div>
+    <div class="script">
+      <p class="task">Book a table for two at 19:30 on Friday</p>
+      <span class="by r">Otto</span><p class="b out tail">Hi, I’m calling to book a table for two this Friday.</p>
+      <span class="by">Them</span><p class="b in tail">Sure, what time were you thinking?</p>
+      <span class="by r">Otto</span><p class="b out tail">Half past seven, if you have it.</p>
+      <span class="by">Them</span><p class="b in tail">We have a table at</p>
+    </div>
+    <div class="callfoot"><div class="say">Something to say on the call</div><span class="btn wide stop"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg>End call</span></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>A call Otto is placing</b>The live words as they are said; you can add a line or end it</figcaption></figure>
+
+<!-- Walkie-talkie -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-walkie" data-theme="dark" role="group" aria-label="Walkie-talkie, dark"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <span class="corner gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></span>
+  <div class="walkie"><span class="ring"><span class="face"></span></span><p>Hold to talk</p></div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Walkie-talkie</b>Otto on a plain ring: hold anywhere, let go to send</figcaption></figure>
+
+<h2 class="group-h">Behind Otto’s card</h2>
+
+<!-- Loops -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-loops" data-theme="dark" role="group" aria-label="Loops, dark"><div class="screen grouped">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="nav"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="title">Loops</span></div>
+  <div class="page" style="padding-top:118px">
+    <div class="sect"><div class="sect-h">Open · 4</div><div class="list"><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-ring"/></svg><div class="tx">Pay the electricity bill, €112<small><b>Was due Sat, Nov 7</b> · opened last week</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-ring"/></svg><div class="tx">Send the signed lease back<small>Due Tue, Nov 17 · opened 3 days ago</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-ring"/></svg><div class="tx">Renew the bike insurance<small><b>Was due Fri, Nov 13</b> · pushed back twice</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-ring"/></svg><div class="tx">Waiting on the passport renewal<small>Opened 3 weeks ago</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div></div></div><div class="sect"><div class="sect-h">Overnight tidy-up</div><div class="list"><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-okcircle"/></svg><div class="tx">Waiting on the passport renewal<small>Will close it · The passport office wrote: ready for pickup.</small></div></div><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-ask"/></svg><div class="tx">Renew the bike insurance<small>Will ask you · You pushed it back twice.</small></div></div></div><div class="sect-f">Runs at 5:00. Closes what’s clearly done, asks you about the rest.</div></div><div class="sect"><div class="sect-h">Closed lately</div><div class="list"><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-done"/></svg><div class="tx">Book the boiler service<small>Closed yesterday</small></div></div><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-done"/></svg><div class="tx">Return the library books<small>Closed Monday</small></div></div></div></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Loops</b>Open, what tonight’s tidy-up will do, then what closed</figcaption></figure>
+
+<!-- Schedules -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-schedules" data-theme="dark" role="group" aria-label="Schedules, dark"><div class="screen grouped">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="nav"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="title">Schedules</span></div>
+  <div class="page" style="padding-top:118px">
+    <div class="sect"><div class="sect-h">Coming up</div><div class="list"><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-alarm"/></svg><div class="tx">Call the bike shop<small>Tomorrow at 9:00 · in 23 hours</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div></div></div><div class="sect"><div class="sect-h">Repeating</div><div class="list"><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-repeat"/></svg><div class="tx">Morning brief<small>Every day at 7:57 · next in 22 hours</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-repeat"/></svg><div class="tx">Homework check<small>Weekdays at 18:00 · next in 8 hours</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div></div></div><div class="sect"><div class="sect-h">Watching mail</div><div class="list"><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-mail"/></svg><div class="tx">Tell me when the landlord replies<small>When matching mail arrives</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div></div></div><div class="sect"><div class="list"><div class="row"><div class="tx">Done or paused · 1</div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div></div></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Schedules</b>What Otto will do and when, by kind</figcaption></figure>
+
+<!-- Calls -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-calls" data-theme="dark" role="group" aria-label="Calls, dark"><div class="screen grouped">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="nav"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="title">Calls</span></div>
+  <div class="page" style="padding-top:118px">
+    <div class="sect"><div class="list"><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg><div class="tx">+1 555 0142<small>Book a table for two at 19:30 on Friday</small></div><span class="meta"><span class="pill on"><i class="live"></i>Live</span>2 minutes ago</span></div><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg><div class="tx">+1 555 0199<small>Ask the bike shop if the repair is ready</small></div><span class="meta"><span class="pill">Ended</span>50 minutes ago</span></div></div></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Calls</b>Calls Otto placed for you; a live one opens its words</figcaption></figure>
+
+<!-- Memory -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-memory" data-theme="dark" role="group" aria-label="Memory, dark"><div class="screen grouped">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="nav"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="title">Memory</span><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-filter"/></svg></span></div>
+  <div class="page" style="padding-top:118px">
+    <div class="sect"><div class="list"><div class="row ico"><svg class="i" aria-hidden="true"><use href="#i-lines"/></svg><div class="tx">What Otto knows about you</div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div></div><div class="sect-f">Rewritten nightly from what Otto keeps.</div></div><div class="sect"><div class="sect-h">Everything · 5</div><div class="list"><div class="row"><div class="tx">Flat white, oat milk. No sugar.<small>Preference · you · last week</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div><div class="row"><div class="tx">Noor leads design. Prefers a call to email, mornings.<small>Person · you · 2 weeks ago</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div><div class="row"><div class="tx">Alder Heating services the boiler every November.<small>Routine · you · last month</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div><div class="row"><div class="tx">The bike shop on Elm Street closes at 13:00 on Saturdays.<small>Place · you · 3 weeks ago</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div><div class="row"><div class="tx">Network at the cabin: Pinewood-5G.<small>Fact · you · 2 months ago</small></div><svg class="i chev" aria-hidden="true"><use href="#i-chev"/></svg></div></div><div class="sect-f">Indexed last week</div></div>
+  </div>
+  <div class="fsearch glass"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg>Search memory</div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Memory</b>The summary first, then every item with its kind and age</figcaption></figure>
+
+<!-- Money -->
+<figure class="shot"><div class="fit"><div class="device" id="screen-money" data-theme="dark" role="group" aria-label="Money, dark"><div class="screen grouped">
+  <div class="island"></div>
+  <div class="status"><span class="time">9:41</span><span class="icons"><svg class="f" width="19" height="12" aria-hidden="true"><use href="#s-signal"/></svg><svg class="f" width="17" height="12" aria-hidden="true"><use href="#s-wifi"/></svg><svg class="f" width="27" height="13" aria-hidden="true"><use href="#s-battery"/></svg></span></div>
+  <div class="nav"><span class="gbtn glass"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></span><span class="title">Money</span></div>
+  <div class="page" style="padding-top:118px">
+    <div class="sect"><div class="list"><div class="cellpad"><p class="grand">€1,477.30</p><p class="sub15">All time</p><p class="card-sub">plus $412.00 · about €1,856.10 in all at ECB rates of 13 Nov</p><div class="picks"><span class="link">All months</span><span class="link">EUR</span></div></div></div></div><div class="sect"><div class="sect-h">By month · EUR</div><div class="list"><div class="cellpad"><div class="chart" role="img" aria-label="Spent by month: October €1,290.50, November €186.80"><div class="grid"><span data-v="1,500"></span><span data-v="1,000"></span><span data-v="500"></span><span data-v="0"></span></div><div class="cols"><div><i style="--v:86%"></i><b>Oct</b></div><div><i style="--v:12.5%"></i><b>Nov</b></div></div></div></div></div></div><div class="sect"><div class="sect-h">By category · EUR</div><div class="list"><div class="row"><div class="cat" style="--v:100%"><span>Bills</span><span>€612.00</span><i></i></div></div><div class="row"><div class="cat" style="--v:56.7%"><span>Groceries</span><span>€346.80</span><i></i></div></div><div class="row"><div class="cat" style="--v:37.6%"><span>Travel</span><span>€229.90</span><i></i></div></div><div class="row"><div class="cat" style="--v:24.3%"><span>Eating out</span><span>€148.60</span><i></i></div></div></div></div>
+  </div>
+  <div class="home"></div>
+</div></div></div><figcaption><b>Money</b>Bars in plain ink where the app has orange today</figcaption></figure>
+
+</main>
+</body>
+</html>

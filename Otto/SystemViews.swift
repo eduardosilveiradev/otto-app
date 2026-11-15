@@ -87,7 +87,7 @@ struct ActivityScreen: View {
     private func jobs(_ j: Jobs) -> some View {
         List {
             ForEach(j.jobs.sorted { $0.createdAt > $1.createdAt }) { job in
-                let pill = Pill(text: job.state, tint: job.state == "running" ? .orange : job.state == "failed" ? .red : .secondary)
+                let pill = Pill(text: job.state, tint: job.state == "failed" ? .red : .secondary)
                 let meta = Text([ago(job.createdAt), job.costUsd.map { $0.formatted(.currency(code: "USD")) }].compactMap { $0 }.joined(separator: " · "))
                     .font(.footnote).foregroundStyle(.secondary)
                 NavigationLink {
@@ -205,7 +205,7 @@ struct StatusScreen: View {
     }
 
     private func color(_ v: String) -> Color {
-        switch v { case "up": .green; case "degraded": .orange; case "down": .red; default: .gray }
+        switch v { case "up": .green; case "degraded": .otto; case "down": .red; default: .gray }
     }
 }
 
@@ -228,7 +228,7 @@ struct DevicesScreen: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
                                     Text(dev.name)
-                                    if dev.id == me { Pill(text: "this phone", tint: .orange) }
+                                    if dev.id == me { Pill(text: "this phone") }
                                 }
                                 Text(detail(dev)).font(.footnote).foregroundStyle(.secondary)
                             }

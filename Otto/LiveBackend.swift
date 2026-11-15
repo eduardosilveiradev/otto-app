@@ -30,6 +30,10 @@ import Foundation
 ///                  {"type":"reminders","items":[{"id","at":"<ISO>","text"}]}   every upcoming reminder, on connect and on change:
 ///                   each becomes a local notification (Reminders.swift), so it fires with the Mac off; we answer
 ///                   {"type":"reminders_ack","items":[{"id","at"}]} for those really pending, and the server stops alerting for them
+///                  {"type":"jobs","jobs":[WireJob],"usage","github"}   the coding jobs, whole: on connect when the Mac has them
+///                   and whenever one changes (Jobs.swift). A "message" (and its history row) may carry "jobs":["<job id>"]
+///                   (or "job", the first of them): each draws as a card under that message. GET /app/jobs is the same list;
+///                   POST /app/jobs/<answer|steer|stop|merge|resolve> {"id","text"?} acts on one and answers with it.
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
 ///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
 ///   GET  <server>/app/brief    brief JSON
@@ -55,6 +59,7 @@ final class LiveBackend: OttoBackend {
     let todoLists: AsyncStream<[TodoItem]>
     let openTodoLists: AsyncStream<[TodoItem]>
     let browserTiles: AsyncStream<BrowserTile?>
+    let jobLists: AsyncStream<[CodeJob]>
     let desktopSync: DesktopSync?
     let reads: AsyncStream<[String]>
     let typing: AsyncStream<Bool>
@@ -72,6 +77,7 @@ final class LiveBackend: OttoBackend {
     private let todosOut: AsyncStream<[TodoItem]>.Continuation
     private let openTodosOut: AsyncStream<[TodoItem]>.Continuation
     private let browserOut: AsyncStream<BrowserTile?>.Continuation
+    private let jobsOut: AsyncStream<[CodeJob]>.Continuation
     private let readIDs: AsyncStream<[String]>.Continuation
     private let typingOn: AsyncStream<Bool>.Continuation
     private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
@@ -114,6 +120,7 @@ final class LiveBackend: OttoBackend {
         (todoLists, todosOut) = AsyncStream.makeStream()
         (openTodoLists, openTodosOut) = AsyncStream.makeStream()
         (browserTiles, browserOut) = AsyncStream.makeStream()
+        (jobLists, jobsOut) = AsyncStream.makeStream()
         (reads, readIDs) = AsyncStream.makeStream()
         (typing, typingOn) = AsyncStream.makeStream()
         (approvalUpdates, approvalOut) = AsyncStream.makeStream()
@@ -155,7 +162,8 @@ final class LiveBackend: OttoBackend {
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
                           buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: r.voice != nil || r.voicePending == true, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
-                          thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled, recorded: r.recorded, card: r.card, quiet: r.quiet)
+                          thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled, recorded: r.recorded, card: r.card,
+                          jobs: r.jobs ?? r.job.map { [$0] }, quiet: r.quiet)
             m.reaction = r.reaction
             if r.kind == "edit" || r.kind == "reaction" { m.patch = r.kind }
             return m
@@ -385,6 +393,8 @@ final class LiveBackend: OttoBackend {
             if k.type == "approval_done", let id = k.id { approvalOut.yield(.done(id)); return }
             // Here, not below: its `ts` is a number, which WireMessage would refuse.
             if k.type == "browser" { if let f = BrowserFrame(json: data) { browserOut.yield(f.tile) }; return }
+            // The coding jobs, whole: on connect when the Mac has them, and whenever one changes.
+            if k.type == "jobs" { if let w = try? JSONDecoder().decode(CodeJobs.self, from: data) { jobsOut.yield(w.jobs) }; return }
             if k.type == "hello" { lock.withLock { acksOn = true }; return }
             if k.type == "reminders" {
                 struct Frame: Decodable { let items: [ReminderItem] }
@@ -417,7 +427,8 @@ final class LiveBackend: OttoBackend {
         out.yield(Message(from: .otto, text: text, date: Self.date(f.ts) ?? Date(),
                           buttons: (f.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: f.voice != nil || f.voicePending == true, serverID: f.id, replyTo: f.reply_to,
-                          files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why, scheduled: f.scheduled, recorded: f.recorded, card: f.card, otp: f.otp, quiet: f.quiet))
+                          files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why, scheduled: f.scheduled, recorded: f.recorded, card: f.card,
+                          jobs: f.jobs ?? f.job.map { [$0] }, otp: f.otp, quiet: f.quiet))
     }
 
     private func write(_ frame: [String: String]) async {
@@ -536,6 +547,28 @@ final class LiveBackend: OttoBackend {
         return PipResponse(status: code, data: data)
     }
 
+    func jobs() async -> [CodeJob]? {
+        guard let w: CodeJobs = await get("app/jobs") else { return nil }
+        return w.jobs
+    }
+
+    func jobAction(_ verb: JobVerb, id: String, text: String?) async -> JobOutcome {
+        var req = URLRequest(url: base.appending(path: "app/jobs/\(verb.rawValue)"))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 120   // a merge or a steer answers once the agent has it
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var body = ["id": id]
+        if let text { body["text"] = text }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, resp) = try? await session.data(for: req), let code = (resp as? HTTPURLResponse)?.statusCode else {
+            return .failed(String(localized: "Can’t reach your Mac."))
+        }
+        if (200..<300).contains(code) { return .done(try? JSONDecoder().decode(CodeJob.self, from: data)) }
+        struct Failure: Decodable { let error: String }
+        return .failed((try? JSONDecoder().decode(Failure.self, from: data))?.error ?? String(localized: "Your Mac couldn’t do that."))
+    }
+
     // MARK: HTTP
 
     private func get<T: Decodable>(_ path: String, background: Bool = false, query: [URLQueryItem] = []) async -> T? {
@@ -578,6 +611,8 @@ final class LiveBackend: OttoBackend {
         let thread: String?; let level: String?; let src: String?; let why: String?
         let voicePending: Bool?; let scheduled: [DashTrigger]?; let recorded: [RecordedCard]?; let shared: Bool?
         let card: Card?
+        /// Coding jobs the reply started; `job` is the first of them, from a server that sends only one.
+        let jobs: [String]?; let job: String?
         let items: [TodoItem]?
         let otp: OTPCode?
         let quiet: Bool?; let count: Int?
@@ -589,6 +624,7 @@ final class LiveBackend: OttoBackend {
         let files: [RemoteFile]?; let voice: RemoteFile?; let voicePending: Bool?; let reply_to: String?; let buttons: [WireButton]?
         let thread: String?; let level: String?; let src: String?; let why: String?; let scheduled: [DashTrigger]?; let recorded: [RecordedCard]?; let card: Card?
         let shared: Bool?; let reaction: String?; let read: Bool?; let quiet: Bool?
+        let jobs: [String]?; let job: String?
     }
     private struct WireBrief: Decodable {
         struct Event: Decodable { let title: String; let start: String; let minutes: Int }

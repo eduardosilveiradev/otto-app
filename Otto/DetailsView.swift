@@ -64,12 +64,14 @@ struct DetailsView: View {
                     NavigationLink { PackagesScreen() } label: { Label("Packages", systemImage: "shippingbox") }
                     NavigationLink { ActivityScreen() } label: { Label("Activity", systemImage: "waveform.path.ecg") }
                 }
+                .tint(.primary)   // glyphs in the text colour: nothing here is an action's blue
 
                 Section {
                     NavigationLink { StatusScreen() } label: { Label("Status", systemImage: "gauge.with.dots.needle.33percent") }
                     NavigationLink { DevicesScreen() } label: { Label("Devices", systemImage: "iphone") }
                     NavigationLink { GlassesScreen() } label: { Label { Text("Glasses") } icon: { Image(systemName: "eyeglasses").imageScale(.small) } }
                 }
+                .tint(.primary)
 
                 Section {
                     if store.snooze?.until.map({ $0 > .now }) != true {
@@ -195,7 +197,7 @@ struct DetailsView: View {
                 .font(.footnote).foregroundStyle(.secondary)
                 .accessibilityElement(children: .combine)
         case .connected: status("checkmark.circle.fill", "Connected", icon: .green, text: .secondary)
-        case .failed(let why): status("exclamationmark.triangle.fill", why, icon: .red, text: .red)
+        case .failed(let why): status("exclamationmark.triangle.fill", why, icon: .redInk, text: .redInk)
         }
     }
 
@@ -244,7 +246,7 @@ struct DetailsView: View {
                     Text("Snoozed until \(until.formatted(date: .omitted, time: .shortened))")
                         .font(.title3.weight(.semibold))
                     ProgressView(value: span > 0 ? min(1, max(0, tl.date.timeIntervalSince(start) / span)) : 1)
-                        .tint(.orange)
+                        .tint(.primary)
                     HStack(spacing: 10) {
                         Button { Task { await store.setSnooze(.clear) } } label: {
                             Text("Hand them over now").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
@@ -314,7 +316,7 @@ struct DetailsView: View {
                                 if let due = l.due, !closed {
                                     let late = due < Calendar.current.startOfDay(for: .now)
                                     Text("\(late ? "was due" : "due") \(due.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
-                                        .font(.footnote).foregroundStyle(late ? .red : .secondary)
+                                        .font(.footnote).foregroundStyle(late ? Color.redInk : .secondary)
                                 }
                             }
                             Spacer()
