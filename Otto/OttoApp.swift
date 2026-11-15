@@ -578,6 +578,10 @@ final class OttoStore {
         if ProcessInfo.processInfo.arguments.contains("-scriptDemo") { Task { await scriptDemo() } }
         // `-emptyThread`: Otto's thread with nothing in it, over whatever a fixture seeded.
         if ProcessInfo.processInfo.arguments.contains("-emptyThread") { messages = [] }
+        #if DEBUG
+        // `-spinnerCheck`: the thinking mark's step table and pose maths.
+        if ProcessInfo.processInfo.arguments.contains("-spinnerCheck") { OttoThinkingSpinnerCheck.run() }
+        #endif
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
         if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift"
             if ProcessInfo.processInfo.arguments.contains("-todos") {

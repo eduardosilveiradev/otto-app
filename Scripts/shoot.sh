@@ -125,6 +125,12 @@ shot chat schedule-recorded 6 "Schedule chip, recorded chips (money, loop, memor
 shot chat long-bubbles 6 "Long wrapping bubbles, links, terminal line" $O -seedThread
 shot chat thinking 6 "Otto typing with its live status line" $O -demoThread -thinking
 shot chat thinking-todos 6 "Typing bubble with a to-do list" $O -demoThread -thinking -todos
+shot chat spinner-think 6 "Thinking mark, think (Wobble): a plain Thinking step" $O -demoThread -thinking -thinkingStatus Thinking
+shot chat spinner-look 6 "Thinking mark, look (Mull): reading a file" $O -demoThread -thinking -thinkingStatus "Reading ChatView.swift"
+shot chat spinner-away 6 "Thinking mark, away (Pip): waiting on the web" $O -demoThread -thinking -thinkingStatus "Searching the web for tangerine"
+shot chat spinner-do 6 "Thinking mark, do (Hop): running a command" $O -demoThread -thinking -thinkingStatus "Running tests"
+shot chat spinner-idle 6 "Thinking mark held on idle: the still face" $O -demoThread -thinking -spinnerKind idle
+shot chat spinner-done 6 "Thinking mark held on done: settled, after its squash and blink" $O -demoThread -thinking -spinnerKind done
 shot chat todos-none 6 "No open to-dos: nothing over the composer" $O -demoThread
 shot chat todos-two 6 "Two open to-dos while Otto is idle: the pill over the composer" $O -demoThread -openTodos
 shot chat todos-one 6 "A single open to-do" $O -demoThread -openTodos one

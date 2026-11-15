@@ -330,7 +330,7 @@ struct ChatView: View {
         .overlay(alignment: .bottomLeading) {
             if scrolledUp && !showingResults && thread.typing && thread.connected, let step = thread.typingStatus, !step.isEmpty {
                 HStack(spacing: 6) {
-                    OttoAvatar(size: 13, thinking: true)
+                    OttoThinkingSpinner(kind: OttoThinkingSpinner.Kind(step: step) ?? .think, size: 13)
                     Text(step).lineLimit(1).truncationMode(.tail)
                         .contentTransition(.interpolate)
                         .animation(.snappy, value: step)
@@ -2293,24 +2293,21 @@ struct Typing: View {
     /// Off while the server is unreachable: the orb shows it's reconnecting instead of thinking.
     let connected: Bool
 
-    /// The orb that fits the step, read off the label's first word (the server's
-    /// toolstatus.ts): looking things up, writing, running something, remembering.
-    static func orb(for status: String?) -> OrbState {
-        guard let status else { return .breathing }
-        switch status.split(separator: " ").first.map(String.init) ?? "" {
-        case "Searching", "Looking", "Checking", "Reading": return .searching
-        case "Editing", "Writing": return .composing
-        case "Running": return .solving
-        case "Remembering": return .weaving
-        default: return .working
-        }
-    }
+    /// The mark's kind, held through to-do bookkeeping steps so ticking one off doesn't flicker it.
+    @State private var kind = OttoThinkingSpinner.Kind(step: nil) ?? .think
+
+    #if DEBUG
+    /// `-spinnerKind <kind>`: hold one kind, for screenshots of idle and done.
+    private static let forced = UserDefaults.standard.string(forKey: "spinnerKind").flatMap(OttoThinkingSpinner.Kind.init(rawValue:))
+    #else
+    private static let forced: OttoThinkingSpinner.Kind? = nil
+    #endif
 
     var body: some View {
-        // Top-aligned so the orb stays on the first line when a long status wraps. Otto thinks with the
-        // orb; the three dots stay for pips (the owner wants the orb back, 12 Nov 2026).
+        // Top-aligned so the mark stays on the first line when a long status wraps. A dropped connection is
+        // Otto waiting, the same as on the Mac.
         HStack(alignment: .top, spacing: 8) {
-            MorphingOrb(state: !connected ? .connecting : Self.orb(for: status))
+            OttoThinkingSpinner(kind: Self.forced ?? (connected ? kind : .away), ring: .incomingBubble)
             // A status from before the drop would be stale; say what's actually happening.
             VStack(alignment: .leading, spacing: 8) {
                 if let status = connected ? status : "Reconnecting…" {
@@ -2335,6 +2332,7 @@ struct Typing: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: status)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: todos)
         .animation(.snappy(duration: 0.25), value: connected)
+        .onChange(of: status, initial: true) { _, s in if let k = OttoThinkingSpinner.Kind(step: s) { kind = k } }
     }
 }
 
@@ -2440,16 +2438,28 @@ struct TodoList: View {
     let items: [TodoItem]
     /// Off for the idle list over the composer: nothing pulses, and nothing is done.
     var working = true
+    @Environment(\.accessibilityReduceMotion) private var still
 
     var body: some View {
         let done = items.filter { $0.status == .completed }.count
         VStack(alignment: .leading, spacing: 5) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    let ticked = item.status == .completed
                     Image(systemName: icon(item.status))
                         .font(size: 12, weight: .semibold, relativeTo: .caption)
                         .foregroundStyle(item.status == .in_progress ? Color.accentColor : .secondary)
                         .symbolEffect(.pulse, isActive: working && item.status == .in_progress)
+                        // The check is cut out of the disc and drawn in when the row is ticked off: the row persists,
+                        // so this runs on the change and never for a list that arrives already done.
+                        .overlay {
+                            Tick(drawn: ticked || still ? 1 : 0)
+                                .stroke(.black, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))   // opaque: it only cuts
+                                .opacity(ticked ? 1 : 0)
+                                .blendMode(.destinationOut)
+                                .animation(.easeOut(duration: 0.25), value: ticked)
+                        }
+                        .compositingGroup()
                         .frame(minWidth: 14)
                     Text(item.text)
                         .font(size: 13, weight: item.status == .in_progress ? .medium : .regular, relativeTo: .footnote)
@@ -2466,10 +2476,23 @@ struct TodoList: View {
 
     private func icon(_ s: TodoItem.Status) -> String {
         switch s {
-        case .completed: "checkmark.circle.fill"
+        case .completed: "circle.fill"
         case .in_progress: "circle.dotted.circle"
         case .pending: "circle"
         }
+    }
+}
+
+/// A done to-do's check, trimmed to `drawn` (0 to 1), in the disc's own units: the prototype's
+/// `M5.4 10.2l1.8 1.8 3.5-3.8` on a circle of radius 5.5.
+private struct Tick: Shape {
+    var drawn: Double
+    var animatableData: Double { get { drawn } set { drawn = newValue } }
+
+    func path(in rect: CGRect) -> Path {
+        let r = min(rect.width, rect.height) / 2, c = CGPoint(x: rect.midX, y: rect.midY)
+        func p(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: c.x + (x - 8) / 5.5 * r, y: c.y + (y - 10) / 5.5 * r) }
+        return Path { $0.addLines([p(5.4, 10.2), p(7.2, 12), p(10.7, 8.2)]) }.trimmedPath(from: 0, to: drawn)
     }
 }
 
