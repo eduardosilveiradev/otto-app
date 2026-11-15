@@ -227,7 +227,7 @@ struct ApprovalSheet: View {
 /// line, so the tint is never the only cue.
 private struct DiffPreview: View {
     let lines: [String]
-    /// Every line, wrapped, instead of the first six cut to one line each.
+    /// Every line in full, instead of the first six cut to one line each: this is what gets approved.
     var whole = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -239,7 +239,7 @@ private struct DiffPreview: View {
                 let lead = removed ? "− " : added ? "+ " : "  "
                 Text(verbatim: names ? String(code) : lead + code)
                     .font(.system(.caption, design: .monospaced).weight(names ? .semibold : .regular))
-                    .lineLimit(whole ? 4 : 1).truncationMode(.tail)
+                    .lineLimit(whole ? nil : 1).truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10).padding(.vertical, 2)
                     .background(removed ? Color.redTint : added ? Color.greenTint : Color.clear)

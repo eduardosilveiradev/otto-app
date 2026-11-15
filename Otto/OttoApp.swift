@@ -396,7 +396,7 @@ final class OttoStore {
                     summary: "About 9k tokens load before you type. This drops 2 index lines for memories nothing has recalled (the memories stay searchable) and deletes 1 memory a newer one replaces.",
                     files: [.init(path: "~/.otto/memory/home/MEMORY.md", tier: "free", why: "2 index lines dropped"),
                             .init(path: "~/.otto/memory/home/boiler-2025.md", tier: "free", why: "deleted, boiler-2026 replaces it")],
-                    branch: nil, stat: "--- home/MEMORY.md\n- [Boiler service 2025](boiler-2025.md): the yearly check, the landlord books it\n- [Gym hours](gym-hours.md): closed since March\n--- home/boiler-2025.md (deleted; boiler-2026 replaces it)\n- The boiler is serviced every November.\n- The landlord books it and you let the engineer in.", expires: nil)]
+                    branch: nil, stat: "--- home/MEMORY.md\n- [Boiler service 2025](boiler-2025.md): the yearly check, the landlord books it\n- [Gym hours](gym-hours.md): closed since March\n--- home/boiler-2025.md (deleted; boiler-2026 replaces it)\n- The boiler is serviced every November.\n- The landlord books the engineer through the building office, which only takes requests by email and wants the flat number, the serial number from the sticker inside the boiler door, two mornings that work, and a phone number the engineer can ring from the street, because the entry phone on this stair has been broken since the spring before last.", expires: nil)]
             }
         }
         // `-longThread`: one of everything a thread can hold, for the design review.
