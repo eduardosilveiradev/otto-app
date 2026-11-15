@@ -337,7 +337,16 @@ svg { display: block; flex: none }
 .amount { font: 600 34px/41px var(--font); letter-spacing: .3px; font-variant-numeric: tabular-nums }
 .hl { margin-top: 4px; font-weight: 600 }
 .sub15 { font: 400 15px/20px var(--font); letter-spacing: -0.23px; color: var(--label-2) }
-.stat { font: 400 12px/18px var(--font-mono); letter-spacing: 0; color: var(--label-2); white-space: pre; overflow: hidden }
+/* a change to Otto, file by file: what it does in a sentence, then a few changed lines (removed on red, added on green) */
+.chg { position: relative; padding: 12px 16px 14px 20px }
+.chg + .chg::before { content: ""; position: absolute; top: 0; left: 20px; right: 16px; height: 1px; background: var(--hairline) }
+.chg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px }
+.tier { font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.chg-why { font: 400 13px/18px var(--font); letter-spacing: 0; color: var(--label-2) }
+.diff { margin-top: 8px; border-radius: var(--r-inner); overflow: hidden; font: 400 12px/18px var(--font-mono); letter-spacing: 0 }
+.diff span { display: block; padding: 1px 10px; white-space: pre; overflow: hidden; text-overflow: ellipsis }
+.diff .del { background: var(--red-tint) }
+.diff .add { background: var(--green-tint) }
 .sw { flex: none; position: relative; width: 63px; height: 28px; border-radius: 14px; background: var(--fill) }
 .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 37px; height: 24px; border-radius: 12px; background: #fff; box-shadow: 0 2px 6px rgb(0 0 0 / .14) }
 .sw.on { background: var(--green) } .sw.on::after { transform: translateX(22px) }
@@ -759,19 +768,15 @@ mark { padding: 0 1px; border-radius: 3px; background: var(--find); color: var(-
   <div class="sheet large">
     <div class="sheet-bar"><span class="gcap glass">Later</span><span class="sheet-title">Quiet hours</span><span></span></div>
     <div class="sect"><div class="sect-h">What it does</div><div class="list"><div class="cellpad">Holds anything that isn’t urgent between 22:00 and 7:00, then hands it over with the morning brief. Reminders you set yourself still come through.</div></div></div>
-    <div class="sect"><div class="sect-h">Files</div><div class="list">
-      <div class="row top"><div class="tx"><span class="mono">otto/notify.ts</span><small>Checks quiet hours before it sends</small></div><span class="needs"><i></i>Guarded</span></div>
-      <div class="row top"><div class="tx"><span class="mono">otto/settings.ts</span><small>Adds the switch</small></div><span class="needs"><i></i>Guarded</span></div>
-      <div class="row top"><div class="tx"><span class="mono">otto/quiet-hours.ts</span><small>New: decides what counts as urgent</small></div><span class="val">Open</span></div>
-    </div></div>
-    <div class="sect"><div class="sect-h">Diff against main · quiet-hours</div><div class="list"><div class="cellpad"><pre class="stat">otto/notify.ts      | 14 ++++--
-otto/quiet-hours.ts | 62 ++++++++++
-otto/settings.ts    |  9 ++
-3 files, 81 insertions, 4 deletions</pre></div></div></div>
+    <div class="sect"><div class="sect-h">Changes · 3 files</div><div class="list">
+      <div class="chg"><div class="chg-head"><span class="mono">otto/notify.ts</span><span class="needs"><i></i>Guarded</span></div><p class="chg-why">Checks for quiet hours before it sends</p><pre class="diff"><span class="del">− await send(msg)</span><span class="add">+ if (quiet() &amp;&amp; !msg.urgent) hold(msg)</span><span class="add">+ else await send(msg)</span></pre></div>
+      <div class="chg"><div class="chg-head"><span class="mono">otto/settings.ts</span><span class="needs"><i></i>Guarded</span></div><p class="chg-why">Adds the switch, set to 22:00 until 7:00</p><pre class="diff"><span class="add">+ quiet: { on: true, from: 22, to: 7 },</span></pre></div>
+      <div class="chg"><div class="chg-head"><span class="mono">otto/quiet-hours.ts</span><span class="tier">Open</span></div><p class="chg-why">New file: decides what counts as urgent</p><pre class="diff"><span class="add">+ export function quiet() {</span><span class="add">+   const h = new Date().getHours()</span><span class="add">+   return h &gt;= 22 || h &lt; 7</span></pre></div>
+    </div><div class="sect-f">A few lines from each file. In all, 81 added and 4 removed against main.</div></div>
     <div class="sheet-foot"><span class="btn quiet">Decline</span><span class="btn"><svg class="i" aria-hidden="true"><use href="#i-faceid"/></svg>Approve</span></div>
   </div>
   <div class="home"></div>
-</div></div></div><figcaption><b>Approval, a change to Otto</b>Tangerine marks the guarded files, the reason it needs you</figcaption></figure>
+</div></div></div><figcaption><b>Approval, a change to Otto</b>Each file in a sentence with a few changed lines; tangerine marks the guarded ones</figcaption></figure>
 
 <!-- 7. Job detail sheet -->
 <figure class="shot"><div class="fit"><div class="device" id="screen-job" data-theme="dark" role="group" aria-label="Job detail sheet, dark"><div class="screen">
