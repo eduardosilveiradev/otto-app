@@ -63,6 +63,14 @@ struct NeedsMark: View {
     }
 }
 
+/// A list row's glyph in the text colour. A list draws its labels' icons in the accent and a
+/// `tint` on the section doesn't change that; rows that only navigate aren't an action's blue.
+struct PlainIcon: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Label { configuration.title } icon: { configuration.icon.foregroundStyle(Color.primary) }
+    }
+}
+
 /// A glyph on a neutral disc, for the lines Otto writes down in a bubble (a code, a schedule, a memory).
 /// Glyphs take the text colour; they never get one of their own.
 struct GlyphDisc: View {
