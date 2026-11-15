@@ -390,6 +390,14 @@ final class OttoStore {
                         .init(path: "otto/tests/digest.test.ts", tier: "free", why: "an empty week sends nothing",
                               lines: ["+test('an empty week sends nothing', async () => {"])],
                 branch: "otto/sunday-digest", stat: "3 files changed, 142 insertions(+), 6 deletions(-)", expires: nil)]
+            // `-approvalDemo diet`: a change whose detail is its lines, not a git stat (the memory clean-up).
+            if UserDefaults.standard.string(forKey: "approvalDemo") == "diet" {
+                approvals = [ApprovalRequest(id: "demo-diet", title: "Memory diet",
+                    summary: "About 9k tokens load before you type. This drops 2 index lines for memories nothing has recalled (the memories stay searchable) and deletes 1 memory a newer one replaces.",
+                    files: [.init(path: "~/.otto/memory/home/MEMORY.md", tier: "free", why: "2 index lines dropped"),
+                            .init(path: "~/.otto/memory/home/boiler-2025.md", tier: "free", why: "deleted, boiler-2026 replaces it")],
+                    branch: nil, stat: "--- home/MEMORY.md\n- [Boiler service 2025](boiler-2025.md): the yearly check, the landlord books it\n- [Gym hours](gym-hours.md): closed since March\n--- home/boiler-2025.md (deleted; boiler-2026 replaces it)\n- The boiler is serviced every November.\n- The landlord books it and you let the engineer in.", expires: nil)]
+            }
         }
         // `-longThread`: one of everything a thread can hold, for the design review.
         if ProcessInfo.processInfo.arguments.contains("-longThread") {

@@ -1318,12 +1318,15 @@ private struct Row: View {
                     .background(Color.well, in: .rect(cornerRadius: 8, style: .continuous))
                     .padding(.top, 10)
                 if !message.buttons.isEmpty {
-                    HStack(spacing: 8) {
-                        ForEach(Array(message.buttons.enumerated()), id: \.element.id) { i, b in
-                            let button = Button(Self.buttonTitle(b.label)) { press(b) }
-                                .font(size: 15, weight: .semibold, relativeTo: .subheadline).buttonBorderShape(.capsule)
-                            if i == 0 { button.buttonStyle(.borderedProminent).tint(.blue) } else { button.quietButton() }
-                        }
+                    // Side by side while they fit; a third button or a long label stacks them.
+                    let buttons = ForEach(Array(message.buttons.enumerated()), id: \.element.id) { i, b in
+                        let button = Button(Self.buttonTitle(b.label)) { press(b) }
+                            .font(size: 15, weight: .semibold, relativeTo: .subheadline).buttonBorderShape(.capsule)
+                        if i == 0 { button.buttonStyle(.borderedProminent).tint(.blue) } else { button.quietButton() }
+                    }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { buttons }
+                        VStack(alignment: .leading, spacing: 8) { buttons }
                     }
                     .padding(.top, 12)
                 }
