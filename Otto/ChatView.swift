@@ -2454,7 +2454,7 @@ struct TodoList: View {
                         // so this runs on the change and never for a list that arrives already done.
                         .overlay {
                             Tick(drawn: ticked || still ? 1 : 0)
-                                .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                                .stroke(.black, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))   // opaque: it only cuts
                                 .opacity(ticked ? 1 : 0)
                                 .blendMode(.destinationOut)
                                 .animation(.easeOut(duration: 0.25), value: ticked)
