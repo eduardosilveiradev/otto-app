@@ -261,7 +261,7 @@ struct ChatView: View {
                               who: { m in m.from == .me || m.from == .terminal ? "You" : row?.memberStates.first { $0.id == m.author }?.name ?? thread.name },
                               retry: fetchOlder, open: show, close: { closeSearch() })
             } else if thread.isOtto && messages.isEmpty && !store.ottoTyping {
-                EmptyChat(asleep: store.asleep, connected: store.connected)
+                EmptyChat(asleep: store.asleep)
             }
         }
         .onChange(of: searchWords) {
@@ -2571,12 +2571,11 @@ struct TodoPill: View {
 /// First run, or a cleared thread: Otto front and centre with one line of what to do.
 private struct EmptyChat: View {
     let asleep: Bool
-    let connected: Bool
 
-    // Offline, the header already says the Mac is out of reach: this says what to check.
-    private var title: LocalizedStringKey { connected ? "Say hi" : "Waiting for your Mac" }
+    // Out of reach (not merely still connecting at launch), the header already says so: this says what to check.
+    private var title: LocalizedStringKey { asleep ? "Waiting for your Mac" : "Say hi" }
     private var line: String {
-        if !connected { return "Check it’s awake and online. What you send goes out when it’s back." }
+        if asleep { return "Check it’s awake and online. What you send goes out when it’s back." }
         return "Reminders, mail, plans: I’ll keep track of the rest."
     }
     var body: some View {

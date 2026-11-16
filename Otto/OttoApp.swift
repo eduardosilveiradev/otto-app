@@ -80,14 +80,16 @@ private enum PipRootSwitch {
 private struct MainRoot: View {
     @State private var store = OttoStore.shared
     @Environment(\.scenePhase) private var phase
-    /// Offline at launch: stop waiting on the connection and open the chat. 12s, not less: a phone
+    /// Nothing saved and no answer yet: stop waiting and open the empty chat. 12s, not less: a phone
     /// reaching the Mac through the tunnel can take several seconds, and that is still loading.
     @State private var gaveUp = false
-    /// Up until the Mac answers (or `gaveUp`). The saved thread is read from disk at once and laid out
-    /// underneath, so it's all there when the splash fades.
+    /// Up for one fade over a saved thread, which is read from disk at once and laid out underneath.
     @State private var splashing = true
 
-    private var ready: Bool { store.connected || !store.backend.isLive || gaveUp }
+    /// Something to show. A saved thread is on screen at once, whatever the Mac is doing. With none (the
+    /// first launch after pairing) the orb stays until the first history has come back or 12 s have passed,
+    /// so an empty "Say hi" never flashes ahead of a thread that was about to load.
+    private var ready: Bool { !store.messages.isEmpty || store.animated || gaveUp }
 
     var body: some View {
         // A ZStack, not a Group: a Group hands its modifiers to whichever child is showing, so the
@@ -341,11 +343,12 @@ final class OttoStore {
     private func tick() async {
         var seen = backend.connections
         var n = 0
+        var launchGrace = 5   // ticks, so seconds
         while !Task.isCancelled {
             n += 1
             var live = backend is MockBackend || backend.isLive
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-offline") { live = false }   // the disconnected UI, in the simulator
+            if ProcessInfo.processInfo.arguments.contains("-offline") { live = false; launchGrace = 0 }   // the disconnected UI, in the simulator
             #endif
             // A reconnect is when replies sent into a socket iOS had frozen go missing; catch up.
             // Counted, not sampled: the drop usually lasts under a second and a 1s tick misses it.
@@ -376,7 +379,10 @@ final class OttoStore {
             // An ack that never came on a socket that still looks fine: try again every 15s.
             if live && n % 15 == 0 { Task { await resendPending() } }
             if live != connected { connected = live }
-            if !live != asleep { asleep = !live }
+            // Asleep means out of reach. At launch the socket is still on its way, so Otto gets a few seconds
+            // to answer before the face sleeps and the header says so; once it has been up, a drop shows at once.
+            let out = !live && (seen > 0 || n > launchGrace)
+            if out != asleep { asleep = out }
             try? await Task.sleep(for: .seconds(1))
         }
     }

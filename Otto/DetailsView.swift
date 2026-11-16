@@ -39,7 +39,7 @@ struct DetailsView: View {
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
                             if let line = store.backend is MockBackend ? "Sample data"
-                                : !store.connected ? "Asleep. Can’t reach your Mac." : nil {
+                                : store.asleep ? "Asleep. Can’t reach your Mac." : nil {
                                 Text(line).font(.subheadline).foregroundStyle(.secondary)
                             }
                         }
