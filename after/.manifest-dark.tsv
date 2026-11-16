@@ -1,18 +1,4 @@
 chat-normal-dark.png	chat	normal	dark	Everyday thread: brief, draft with buttons, voice notes
-chat-long-a-dark.png	chat	long-a	dark	Long thread, part 1: quote reply, draft buttons, voice both ways, photo with tapback, link, terminal line
-chat-actions-dark.png	chat	actions	dark	Reply quote, long text, photo, voice note, link preview, tapbacks
-chat-voice-speed-dark.png	chat	voice-speed	dark	A voice reply paused part-way: the speed button (1x, 1.5x, 2x) beside its length
-chat-thinking-dark.png	chat	thinking	dark	Otto typing with its live status line
-media-browser-full-dark.png	media	browser-full	dark	Browser tile tapped: the page full screen
-media-browser-take-over-dark.png	media	browser-take-over	dark	A page the Mac will hand over: Take over, behind Face ID
-media-browser-holding-dark.png	media	browser-holding	dark	The page in your hands: taps go to it, with typing, keys and Hand back
-chat-flight-banner-dark.png	chat	flight-banner	dark	Flight-day card under the header
-chat-call-banner-dark.png	chat	call-banner	dark	Live call banner under the header
-sheet-payment-dark.png	sheet	payment	dark	Payment approval
-sheet-change-approval-dark.png	sheet	change-approval	dark	Approve a change to Otto's core
-sheet-approval-scopes-dark.png	sheet	approval-scopes	dark	An ask the Mac will take a wider yes for: just this once is picked
-sheet-approval-over-card-dark.png	sheet	approval-over-card	dark	An approval raised while the contact card is up: its sheet shows over the card, not behind it
-memory-list-dark.png	memory	list	dark	Memory screen
 onboarding-hello-dark.png	onboarding	hello	dark	Welcome page
 onboarding-connect-dark.png	onboarding	connect	dark	Pair with the Mac (no camera in the simulator, so typing is the main button)
 onboarding-connect-manual-dark.png	onboarding	connect-manual	dark	Typed server address and token
@@ -24,8 +10,10 @@ onboarding-awake-dark.png	onboarding	awake	dark	Stay-connected step
 onboarding-done-dark.png	onboarding	done	dark	All set
 launch-connecting-dark.png	launch	connecting	dark	Splash while the Mac is being reached
 chat-empty-dark.png	chat	empty	dark	Fresh thread, nothing yet
+chat-long-a-dark.png	chat	long-a	dark	Long thread, part 1: quote reply, draft buttons, voice both ways, photo with tapback, link, terminal line
 chat-long-b-dark.png	chat	long-b	dark	Long thread, part 2: card, schedule chip, recorded chips, file, code chip, failed and pending sends
 chat-deleted-quote-dark.png	chat	deleted-quote	dark	Otto deleted the message a reply quotes: its bubble is gone and the quote reads Message deleted
+chat-actions-dark.png	chat	actions	dark	Reply quote, long text, photo, voice note, link preview, tapbacks
 chat-cards-all-dark.png	chat	cards-all	dark	Every card type (bottom of the thread)
 chat-cards-mixed-dark.png	chat	cards-mixed	dark	Mixed card: stat, bars, list, progress, actions
 chat-cards-table-timeline-dark.png	chat	cards-table-timeline	dark	Table and timeline cards
@@ -33,6 +21,7 @@ chat-cards-checklist-keyvalue-dark.png	chat	cards-checklist-keyvalue	dark	Checkl
 chat-cards-image-text-dark.png	chat	cards-image-text	dark	Image and text cards
 chat-schedule-recorded-dark.png	chat	schedule-recorded	dark	Schedule chip, recorded chips (money, loop, memory, place, calendar write), wallet passes
 chat-long-bubbles-dark.png	chat	long-bubbles	dark	Long wrapping bubbles, links, terminal line
+chat-thinking-dark.png	chat	thinking	dark	Otto typing with its live status line
 chat-thinking-todos-dark.png	chat	thinking-todos	dark	Typing bubble with a to-do list
 chat-spinner-think-dark.png	chat	spinner-think	dark	Thinking mark, think (Wobble): a plain Thinking step
 chat-spinner-look-dark.png	chat	spinner-look	dark	Thinking mark, look (Mull): reading a file
@@ -50,6 +39,10 @@ chat-browser-tile-dark.png	chat	browser-tile	dark	Otto in Chrome: the live page 
 chat-browser-tile-private-dark.png	chat	browser-tile-private	dark	Sign-in page: caption only, no picture
 chat-browser-tile-long-dark.png	chat	browser-tile-long	dark	Worst case: the server's 100-character caption, two lines kept
 chat-browser-tile-idle-dark.png	chat	browser-tile-idle	dark	Tile still up after the reply ended (done comes 20 s later)
+media-browser-full-dark.png	media	browser-full	dark	Browser tile tapped: the page full screen
+media-browser-take-over-dark.png	media	browser-take-over	dark	A page the Mac will hand over: Take over, behind Face ID
+media-browser-holding-dark.png	media	browser-holding	dark	The page in your hands: taps go to it, with typing, keys and Hand back
+chat-voice-speed-dark.png	chat	voice-speed	dark	A voice reply paused part-way: the speed button (1x, 1.5x, 2x) beside its length
 chat-draft-unnamed-dark.png	chat	draft-unnamed	dark	A draft the Mac sent without saying who it goes to: the card says so above Send
 chat-offline-dark.png	chat	offline	dark	Server unreachable: Otto asleep, reconnecting
 chat-no-network-dark.png	chat	no-network	dark	This phone has no network at all: the header says so, not that the Mac is out of reach
@@ -59,15 +52,21 @@ chat-update-available-dark.png	chat	update-available	dark	Update button in the h
 chat-walkie-hint-dark.png	chat	walkie-hint	dark	Hold-for-walkie-talkie hint
 chat-call-row-dark.png	chat	call-row	dark	A call with Otto that just ended: its line in the thread, with how long it ran
 sheet-call-transcript-dark.png	sheet	call-transcript	dark	The call's line tapped: what was said
+chat-flight-banner-dark.png	chat	flight-banner	dark	Flight-day card under the header
+chat-call-banner-dark.png	chat	call-banner	dark	Live call banner under the header
 composer-focused-dark.png	composer	focused	dark	Composer focused with text
 composer-long-draft-dark.png	composer	long-draft	dark	Composer grown by a long draft
 composer-attachments-dark.png	composer	attachments	dark	Two photos waiting in the composer
 composer-recording-dark.png	composer	recording	dark	Recording a voice note
 sheet-otp-drawer-dark.png	sheet	otp-drawer	dark	One-time code drawer
+sheet-payment-dark.png	sheet	payment	dark	Payment approval
 sheet-payment-receipt-dark.png	sheet	payment-receipt	dark	Payment approved: printed receipt
+sheet-change-approval-dark.png	sheet	change-approval	dark	Approve a change to Otto's core
 sheet-change-approval-detail-dark.png	sheet	change-approval-detail	dark	A change whose detail is its lines, not a git stat (the memory clean-up)
+sheet-approval-scopes-dark.png	sheet	approval-scopes	dark	An ask the Mac will take a wider yes for: just this once is picked
 sheet-approval-out-of-reach-dark.png	sheet	approval-out-of-reach	dark	An ask while the Mac is out of reach: the buttons are off and a line says nothing can be sent yet
 sheet-schedule-dark.png	sheet	schedule	dark	A schedule's page from its chip: when it runs, what Otto will do, and Change or Stop (asked for in the chat)
+sheet-approval-over-card-dark.png	sheet	approval-over-card	dark	An approval raised while the contact card is up: its sheet shows over the card, not behind it
 sheet-approval-scopes-always-dark.png	sheet	approval-scopes-always	dark	Always picked: what it means in words, before Face ID
 sheet-approval-scopes-worst-dark.png	sheet	approval-scopes-worst	dark	Worst case: the longest rule a server might name, at an accessibility text size
 sheet-approval-draft-dark.png	sheet	approval-draft	dark	An email Otto wants to send in your name: every recipient and every word
@@ -105,6 +104,7 @@ details-server-check-failed-dark.png	details	server-check-failed	dark	Server che
 loops-list-dark.png	loops	list	dark	Loops screen
 schedules-list-dark.png	schedules	list	dark	Schedules screen
 calls-list-dark.png	calls	list	dark	Calls screen
+memory-list-dark.png	memory	list	dark	Memory screen
 people-list-dark.png	people	list	dark	People screen
 money-list-dark.png	money	list	dark	Money screen
 trips-list-dark.png	trips	list	dark	Trips screen
