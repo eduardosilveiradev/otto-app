@@ -12,6 +12,7 @@ chat-empty-dark.png	chat	empty	dark	Fresh thread, nothing yet
 chat-normal-dark.png	chat	normal	dark	Everyday thread: brief, draft with buttons, voice notes
 chat-long-a-dark.png	chat	long-a	dark	Long thread, part 1: quote reply, draft buttons, voice both ways, photo with tapback, link, terminal line
 chat-long-b-dark.png	chat	long-b	dark	Long thread, part 2: card, schedule chip, recorded chips, file, code chip, failed and pending sends
+chat-deleted-quote-dark.png	chat	deleted-quote	dark	Otto deleted the message a reply quotes: its bubble is gone and the quote reads Message deleted
 chat-actions-dark.png	chat	actions	dark	Reply quote, long text, photo, voice note, link preview, tapbacks
 chat-cards-all-dark.png	chat	cards-all	dark	Every card type (bottom of the thread)
 chat-cards-mixed-dark.png	chat	cards-mixed	dark	Mixed card: stat, bars, list, progress, actions
@@ -65,6 +66,7 @@ sheet-change-approval-detail-dark.png	sheet	change-approval-detail	dark	A change
 sheet-approval-scopes-dark.png	sheet	approval-scopes	dark	An ask the Mac will take a wider yes for: just this once is picked
 sheet-approval-out-of-reach-dark.png	sheet	approval-out-of-reach	dark	An ask while the Mac is out of reach: the buttons are off and a line says nothing can be sent yet
 sheet-schedule-dark.png	sheet	schedule	dark	A schedule's page from its chip: when it runs, what Otto will do, and Change or Stop (asked for in the chat)
+sheet-approval-over-card-dark.png	sheet	approval-over-card	dark	An approval raised while the contact card is up: its sheet shows over the card, not behind it
 sheet-approval-scopes-always-dark.png	sheet	approval-scopes-always	dark	Always picked: what it means in words, before Face ID
 sheet-approval-scopes-worst-dark.png	sheet	approval-scopes-worst	dark	Worst case: the longest rule a server might name, at an accessibility text size
 sheet-approval-draft-dark.png	sheet	approval-draft	dark	An email Otto wants to send in your name: every recipient and every word
@@ -154,4 +156,4 @@ pips-group-changed-dark.png	pips	group-changed	dark	Group renamed, member added 
 pips-group-delete-confirm-dark.png	pips	group-delete-confirm	dark	Delete group confirmation
 pips-group-rename-failed-dark.png	pips	group-rename-failed	dark	Group rename on a server without the routes
 pips-faces-dark.png	pips	faces	dark	Every face in every pose
-permissions-notifications-dark.png	permissions	notifications	dark	System notification permission alert on first launch
+permissions-notifications-dark.png	permissions	notifications	dark	A fresh install opened straight into the thread: no system alert here, notifications are asked for in onboarding
