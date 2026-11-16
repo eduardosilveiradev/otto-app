@@ -144,6 +144,7 @@ shot chat browser-tile-idle 6 "Tile still up after the reply ended (done comes 2
 shot media browser-full 6 "Browser tile tapped: the page full screen" $O -demoThread -thinking -browserTile -browserOpen
 shot media browser-take-over 6 "A page the Mac will hand over: Take over, behind Face ID" $O -demoThread -thinking -browserTile control -browserOpen
 shot media browser-holding 6 "The page in your hands: taps go to it, with typing, keys and Hand back" $O -demoThread -thinking -browserTile control -browserOpen -browserHold
+shot chat draft-unnamed 6 "A draft the Mac sent without saying who it goes to: the card says so above Send" $O -demoThread -draftBare
 shot chat offline 6 "Server unreachable: Otto asleep, reconnecting" $O -demoThread -offline
 shot chat no-network 6 "This phone has no network at all: the header says so, not that the Mac is out of reach" $O -demoThread -offline -noNetwork
 shot chat offline-pending 13 "Dead server with a send waiting: Will send when back online" $DEAD $N -longThread b

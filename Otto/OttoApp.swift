@@ -641,7 +641,8 @@ final class OttoStore {
             messages = [
                 Message(from: .otto, text: "morning. design review at 14:00, then you’re free until 16:30. enel bill, €112, due friday. and it’s thursday, so: the boiler"),
                 Message(from: .me, text: "can you tell the landlord tuesday morning works for the boiler guy", read: true),
-                Message(from: .otto, text: "draft:\n\"Hi, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks!\"",
+                // Named, as the Mac should always send it; `-draftBare` is one that isn't, for the line that says so.
+                Message(from: .otto, text: "\(ProcessInfo.processInfo.arguments.contains("-draftBare") ? "draft" : "draft to Luca (email)"):\n\"Hi, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks!\"",
                         buttons: [ActionButton(label: "send ✓", data: "send"), ActionButton(label: "discard", data: "discard")]),
                 Message(id: UUID(uuidString: "0D0D0D0D-0000-4000-8000-000000000001")!, from: .me, text: "remind me to call the plumber when I’m home, and is tuesday free for the dentist", isVoice: true, read: true),
                 Message(from: .otto, text: "plumber reminder set for when you’re home. tuesday after 16:00 is free.", isVoice: true,
@@ -1048,7 +1049,7 @@ final class OttoStore {
         await type(ask); sendTyped(ask)
         await wait(0.5)
         await think(["Reading your mail", "Finding the landlord’s thread", "Writing"])
-        say("draft:\n\"Hi, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks!\"",
+        say("draft to Luca (email):\n\"Hi, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks!\"",
             buttons: [ActionButton(label: "send ✓", data: "send"), ActionButton(label: "discard", data: "discard")])
         demoFocus = false
         await wait(2.8)
