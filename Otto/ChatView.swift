@@ -416,7 +416,7 @@ struct ChatView: View {
                             let runStarts = newBlock || prev?.author != m.author
                             GroupChrome(on: isGroup && m.from != .me, author: m.author, member: row?.memberStates.first { $0.id == m.author }, showName: runStarts, showFace: runEnds) {
                             Row(thread: thread, message: m,
-                                quote: quote,
+                                quote: quote, quoteGone: quote == nil && m.replyGone == true,
                                 names: authorNames,
                                 tail: runEnds,
                                 receipt: m.id == lastMine && m.pending != true && m.failed != true ? receipt(for: i, in: messages) : nil,
@@ -508,7 +508,9 @@ struct ChatView: View {
         // new bubble, the dots coming or going, or a tapback shoved the thread down a frame before
         // it slid back (measured frame by frame with -shiftLab). A burst (a catch-up) lands in one step
         // rather than sliding the whole thread by all of it.
-        .animation(thread.animated && !burst ? .spring(response: 0.42, dampingFraction: 0.82) : nil, value: messages.count)
+        // A row going (Otto deleted it) fades and the rest close up; under Reduce Motion a short fade, no spring.
+        .animation(thread.animated && !burst ? (still && messages.count < counted.rows ? .easeOut(duration: 0.2) : .spring(response: 0.42, dampingFraction: 0.82)) : nil,
+                   value: messages.count)
         // After this update's other handlers have run, so they all still see a burst as one.
         .onChange(of: messages.count, initial: true) { _, n in Task { counted.rows = n } }
         // Under Reduce Motion these heights change in one step; the rows' own fades still play.
@@ -1349,6 +1351,8 @@ private struct Row: View {
     let message: Message
     /// The message this one answers, shown small above the bubble.
     let quote: Message?
+    /// It answers a message Otto has since deleted: the quote is a stub, with nothing to jump to.
+    var quoteGone = false
     /// In a group, who wrote a message, by author id, so VoiceOver says "Planner:", not the group's name.
     var names: [String: String] = [:]
     let tail: Bool
@@ -1627,26 +1631,31 @@ private struct Row: View {
 
     var body: some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 6) {
-            if let quote {
+            if quote != nil || quoteGone {
+                // Only Otto's messages get deleted, so a stub sits on its side.
+                let quoteMine = quote?.from == .me
                 // The answered message, small and faded, on its own sender's side (Messages). Tap to go to it.
                 Button(action: onQuote) {
                     // Narrower and fainter than a bubble, so it reads as a quote and not a second copy.
-                    Label(Self.summary(quote), systemImage: "arrowshape.turn.up.left.fill")
+                    Label(quote.map(Self.summary) ?? String(localized: "Message deleted"), systemImage: "arrowshape.turn.up.left.fill")
                         .labelStyle(QuoteLabel())
                         .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .frame(maxWidth: 240, alignment: .leading)
-                        .background(quote.from == .me ? AnyShapeStyle(Color.outgoingBubble.opacity(0.35)) : AnyShapeStyle(Color.incomingBubble.opacity(0.6)),
+                        .background(quoteMine ? AnyShapeStyle(Color.outgoingBubble.opacity(0.35)) : AnyShapeStyle(Color.incomingBubble.opacity(0.6)),
                                     in: .rect(cornerRadius: 14, style: .continuous))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, alignment: quote.from == .me ? .trailing : .leading)
+                // Not `disabled`, which would dim the stub below a quote's own grey.
+                .allowsHitTesting(quote != nil)
+                .accessibilityRemoveTraits(quote == nil ? .isButton : [])
+                .frame(maxWidth: .infinity, alignment: quoteMine ? .trailing : .leading)
                 // Out past the row's inset when it's the other side's, so it lines up with their bubbles.
-                .padding(mine ? .leading : .trailing, quote.from == message.from ? 0 : -89)
-                .accessibilityLabel("In reply to \(quote.from == .me ? "you" : name(of: quote)): \(Self.summary(quote))")
-                .accessibilityHint("Shows the original message")
+                .padding(mine ? .leading : .trailing, quoteMine == mine ? 0 : -89)
+                .accessibilityLabel(quote.map { "In reply to \($0.from == .me ? "you" : name(of: $0)): \(Self.summary($0))" } ?? String(localized: "In reply to a deleted message"))
+                .accessibilityHint(quote == nil ? "" : "Shows the original message")
             }
             if let img = Thumbs.image(for: message) {
                 Image(uiImage: img).resizable().scaledToFit()

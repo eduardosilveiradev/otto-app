@@ -65,11 +65,13 @@ struct NotifierStub { func post(_ message: Message) {} }
     var syncCursor: Date?
     var sending: Set<UUID> = []
     var voiceReconcile: Task<Void, Never>?
+    var otpDrawer: Message?
+    var replyingTo: Message.ID?
     init(_ backend: FakeBackend) { self.backend = backend }
     func save() {}
     func armTypingTimeout() {}
 ''']
-for name in ['deliver', 'deliverVoice', 'retry', 'resendPending', 'markUndelivered', 'catchUp', 'reconcileDesktop']:
+for name in ['deliver', 'deliverVoice', 'retry', 'resendPending', 'markUndelivered', 'catchUp', 'drop', 'reconcileDesktop']:
     parts.append(method(store, name))
 # Optional on the pre-fix revision, so the check demonstrates its missing activity recovery.
 if 'func reconcileVoiceDelivery()' in store:
@@ -97,9 +99,10 @@ wire_end = live.index('    private struct WireBrief:')
 parts += ['''
 final class HistoryDecoder {
     let payload: Data
+    var deleted: String?
     init(_ payload: Data) { self.payload = payload }
     func fetch(_ path: String, background: Bool, query: [URLQueryItem]) async -> (Data, HTTPURLResponse)? {
-        (payload, HTTPURLResponse(url: URL(string: "http://otto.invalid")!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        (payload, HTTPURLResponse(url: URL(string: "http://otto.invalid")!, statusCode: 200, httpVersion: nil, headerFields: deleted.map { ["X-Otto-Deleted": $0] })!)
     }
     static func date(_ s: String?) -> Date? { LiveBackend.date(s) }
     static func terminal(_ text: String, ts: String) -> Message { Message(from: .terminal, text: text) }
@@ -192,6 +195,25 @@ cat >> "$T/check.swift" <<'SWIFT'
         store.messages = [note]
         await store.deliver(note.id)
         assert(store.messages[0].failed == true && store.messages[0].pending == nil)
+        // Otto deleted messages while the phone was away (history's X-Otto-Deleted): they leave the
+        // thread through the same removal as the live frame, and a reply to one is marked for its stub.
+        let gone = HistoryDecoder(Data("[]".utf8))
+        gone.deleted = "d1,d2,never-here"
+        backend.rows = await gone.history(background: false, limit: 50, since: nil) ?? []
+        assert(backend.rows.map(\.wireID).sorted() == ["d1", "d2", "never-here"])
+        let code = Message(from: .otto, text: "code", serverID: "d1")
+        let reply = Message(from: .me, text: "thanks", replyTo: "d2")
+        store.messages = [code, Message(from: .otto, text: "stale", serverID: "d2"), reply, Message(from: .otto, text: "kept", serverID: "k")]
+        store.otpDrawer = code
+        store.replyingTo = code.id
+        await store.catchUp(notify: false)
+        assert(store.messages.map(\.wireID) == [reply.wireID, "k"])
+        assert(store.messages[0].replyGone == true && store.otpDrawer == nil && store.replyingTo == nil)
+        // The live frame takes the same road; an id that isn't here changes nothing.
+        store.drop(["never-here"])
+        assert(store.messages.count == 2)
+        store.drop(["k"])
+        assert(store.messages.map(\.wireID) == [reply.wireID])
         print("voice delivery checks passed")
     }
 }
