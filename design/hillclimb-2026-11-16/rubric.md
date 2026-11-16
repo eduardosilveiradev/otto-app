@@ -57,3 +57,49 @@ covers it.
 **Empty, error and offline.** Otto: "Will send when back online", "Couldn't load · Retry", pairing and server-check errors, the face asleep while the Mac is out of reach. Grok Bot: Try Again, a Reconnect card, Check price again, Voice chat failed. Muse: failures reported in reviews, take control as the escape hatch. Dots, Duet, OpenBot: none described.
 
 **Perceived speed.** Otto: the thread opens from disk at once, sends morph out of the field immediately. Grok Bot: an update for faster sends and replies. Muse: slow shopping tasks. Duet: "so slow", by design checks every few hours.
+
+## After
+
+Otto rescored from this branch's screens and code. The rivals' apps didn't change, so neither did
+their scores; the two council seats scored them too (see the PR), mostly a point lower on the
+evidence-thin axes.
+
+| Axis | Otto before → after | Grok Bot | ChatGPT dots | Muse | Claude Duet | OpenBot |
+| --- | --- | --- | --- | --- | --- | --- |
+| First run and pairing | 8 → 8 | 7 | 6 | 7 | 5 | 7 |
+| Thread and composer | 9 → 9 | 8 | 6 | 7 | 6 | 7 |
+| Voice | 8 → 9 | 8 | 7 | 8 | 6~ | 5 |
+| Thinking and working | 9 → 9 | 7 | 6 | 8 | 4 | 6 |
+| Background work and notifications | 8 → 8 | 9 | 8 | 8 | 7 | 6 |
+| Memory | 8 → 8 | 7 | 6~ | 8 | 5 | 4~ |
+| Approvals and trust | 7 → 9 | 9 | 8 | 9 | 8 | 5~ |
+| System integration | 8 → 9 | 8 | 7 | 2~ | 5 | 4 |
+| Motion and haptics | 9 → 9 | 5~ | 5~ | 7 | 5~ | 4~ |
+| Visual craft | 9 → 9 | 6~ | 7~ | 8 | 6~ | 5~ |
+| Empty, error and offline states | 8 → 9 | 7 | 4~ | 5 | 4~ | 4~ |
+| Perceived speed | 8 → 8 | 7 | 6~ | 6 | 4 | 6~ |
+
+### What moved
+
+**Voice, 8 → 9.** A web call shows on the Lock Screen and in the Dynamic Island with Mute and Hang
+up; the Action Button starts or ends one; the walkie-talkie is a Control Center control and a Lock
+Screen widget.
+
+**Approvals, 7 → 9.** Later keeps an approval in a pill over the composer with the minutes the Mac
+still holds it; tapping it reopens the sheet. The sheet says when it expires, a lapsed one says so,
+and the payment sheet shows the card and "Before you pay" under the amount, so both are on screen
+when Face ID approves. Level with Grok Bot and Muse; scopes like theirs ("always allow") need the server.
+
+**System integration, 8 → 9.** A Home Screen and Lock Screen widget that says when an approval is
+waiting (what it asks is hidden while locked), the walkie in Control Center, the call's Live
+Activity, and a "Call Otto" shortcut. All of them open through one door into the app.
+
+**Empty, error and offline, 8 → 9.** "Can't reach your Mac" under the name after 3 seconds out of
+reach, an empty thread that says what to check, and Memory pages that say when search is running,
+couldn't reach the Mac, found nothing, or there's nothing yet.
+
+**Unchanged.** Background work stays at 8: the cloud agents keep working with every device off, and
+what Otto's phone learns while suspended still comes through Bark (an approval decided on the Mac
+can't clear the widget until the app runs). Memory stays at 8: forgetting from the page goes through
+Otto in the chat, since there's no route to do it directly. Speed was measured this time and didn't
+change (Release builds, same simulator, alternating with main).
