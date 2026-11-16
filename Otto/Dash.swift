@@ -223,6 +223,13 @@ struct Loaded<T: Decodable, Content: View>: View {
 }
 
 extension View {
+    /// A search field only where there's something to search: an empty page doesn't offer one.
+    @ViewBuilder func searchable(if on: Bool, text: Binding<String>, prompt: LocalizedStringKey) -> some View {
+        if on { searchable(text: text, prompt: prompt) } else { self }
+    }
+}
+
+extension View {
     /// A screen with nothing in it, drawn the way the system draws one (as "Can't reach your Mac" is), over
     /// the empty list so pull to refresh still works.
     func emptyState(_ empty: Bool, _ title: String, systemImage: String, _ description: String? = nil) -> some View {

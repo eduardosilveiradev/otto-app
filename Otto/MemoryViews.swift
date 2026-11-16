@@ -81,7 +81,7 @@ private struct MemoryList: View {
             }
         }
         .overlay { if items.isEmpty { empty } }
-        .searchable(text: $query, prompt: "Search memory")
+        .searchable(if: !m.items.isEmpty, text: $query, prompt: "Search memory")   // nothing kept yet: nothing to search
         .onSubmit(of: .search) { Task { await search() } }
         .onChange(of: query) { searchFailed = false; if query.isEmpty { rankedIn = nil } }
         .refreshable { await reload() }
@@ -281,7 +281,7 @@ struct PeopleScreen: View {
                 }
             }
             .emptyState(p.cards.isEmpty, "Nobody yet", systemImage: "person.2", "Tell Otto who someone is and they show up here.")
-            .searchable(text: $query, prompt: "Search people")
+            .searchable(if: !p.cards.isEmpty, text: $query, prompt: "Search people")
             .refreshable { await reload() }
         }
         .navigationTitle("People").navigationBarTitleDisplayMode(.inline)

@@ -120,8 +120,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// tells the Mac nothing, and the Mac's own push goes out.
     func post(approval a: ApprovalRequest) async -> Bool {
         let center = UNUserNotificationCenter.current()
-        let status = await center.notificationSettings().authorizationStatus
+        let settings = await center.notificationSettings()
+        let status = settings.authorizationStatus
         guard status == .authorized || status == .provisional else { return false }
+        // Allowed, but with banners and the Lock Screen both off (or delivered quietly), iOS takes the request and
+        // shows nothing: that isn't an alert, and the Mac must not be told it was one.
+        guard settings.alertSetting == .enabled || settings.lockScreenSetting == .enabled else { return false }
         let content = UNMutableNotificationContent()
         content.title = "Otto needs your OK"
         content.body = a.ask

@@ -99,6 +99,9 @@ final class CallManager {
         self.context = context
         Self.current = self
         error = nil; dropped = false
+        // A new call starts unmuted and on the earpiece, and says so: the last call's marks were kept without
+        // being applied to this one, so "muted" could show over an open microphone.
+        muted = false; speaker = false
         lines = []; hearing = nil; startedAt = nil
         phase = .connecting
         vapi.eventPublisher.receive(on: DispatchQueue.main).sink { [weak self] event in

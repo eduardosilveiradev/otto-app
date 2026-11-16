@@ -32,6 +32,9 @@ struct DetailsView: View {
     /// The Mac keeps a list of what Otto may do without asking. False until it has answered with one,
     /// so a server from before approval scopes shows no row that leads nowhere.
     @State private var hasRules = false
+    /// This Mac has answered for the rules list before: the row stays with the Mac out of reach, since that is
+    /// where a lasting yes is taken back (its page shows the kept list, or says it can't reach the Mac).
+    @AppStorage("otto.rulesSeen") private var rulesSeen = false
     @State private var scanning = false
     enum ServerCheck: Equatable { case checking, connected, failed(String) }
     #if DEBUG
@@ -83,7 +86,7 @@ struct DetailsView: View {
                 Section {
                     NavigationLink { StatusScreen() } label: { Label("Status", systemImage: "gauge.with.dots.needle.33percent") }
                     NavigationLink { DevicesScreen() } label: { Label("Devices", systemImage: "iphone") }
-                    if hasRules {
+                    if hasRules || rulesSeen {
                         NavigationLink { RulesScreen() } label: { Label("Allowed without asking", systemImage: "checkmark.shield") }
                     }
                     NavigationLink { GlassesScreen() } label: { Label { Text("Glasses") } icon: { Image(systemName: "eyeglasses").imageScale(.small) } }
@@ -187,6 +190,7 @@ struct DetailsView: View {
                 async let s: Void = store.setSnooze(nil)
                 speakReplies = await store.backend.speakReplies(set: nil)
                 hasRules = (await store.backend.dash("rules") as RulesScreen.Rules?) != nil
+                if hasRules { rulesSeen = true }
                 await s
             }
             .navigationDestination(item: $screen) { name in

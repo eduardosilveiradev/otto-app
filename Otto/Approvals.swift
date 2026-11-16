@@ -59,12 +59,13 @@ struct ApprovalDecision: Equatable, Codable { var approve: Bool; var scope = App
 extension ApprovalRequest {
     /// What it asks, in a few words: the payment's amount and payee, or the change's title.
     var ask: String { payment.map { "Pay \($0.money($0.total)) to \($0.merchant)" } ?? title }
-    /// What may be picked besides "just this once". Only what the Mac offered, and never for money or a
-    /// guarded change to Otto's core, whatever the frame says: those are approved one at a time. "Always"
-    /// also needs the Mac's words for what it would cover; without them there's nothing honest to show.
+    /// What may be picked besides "just this once". Only what the Mac offered, and never for money, a guarded
+    /// change to Otto's core or a message sent in your name, whatever the frame says: those are approved one at
+    /// a time (a lasting yes on "Send email" would cover the next email too, to anyone, saying anything). Either
+    /// wider yes also needs the Mac's words for what it would cover; without them there's nothing honest to show.
     var widerScopes: [ApprovalScope] {
-        guard payment == nil, !files.contains(where: { $0.tier == "guarded" }), let scopes else { return [] }
-        return [.task, .always].filter { scopes.contains($0.rawValue) && ($0 != .always || rule?.isEmpty == false) }
+        guard payment == nil, draft == nil, !files.contains(where: { $0.tier == "guarded" }), let scopes, rule?.isEmpty == false else { return [] }
+        return [.task, .always].filter { scopes.contains($0.rawValue) }
     }
     /// Whole minutes until the Mac drops it, rounded up; nil when the server sent no time.
     func minutesLeft(at now: Date) -> Int? {
@@ -98,7 +99,9 @@ enum ApprovalCheck {
         }
         assert(wider(nil).isEmpty && wider([]).isEmpty && wider(["once"]).isEmpty, "no wider scope unless offered")
         assert(wider(["always", "task", "forever"]) == [.task, .always], "offered scopes in order, unknown ones dropped")
-        assert(wider(["always"], rule: nil).isEmpty && wider(["always"], rule: "").isEmpty && wider(["task"], rule: nil) == [.task], "always needs its words")
+        assert(wider(["always"], rule: nil).isEmpty && wider(["always"], rule: "").isEmpty && wider(["task"], rule: nil).isEmpty && wider(["task"]) == [.task], "a wider yes needs its words")
+        assert(ApprovalRequest(id: "d", title: "Send email", summary: "", files: [], branch: nil, stat: nil, expires: nil, scopes: ["task", "always"], rule: "sending email",
+                               draft: .init(channel: "email", to: ["a@example.com"], body: "b")).widerScopes.isEmpty, "never a lasting yes on a send in your name")
         assert(wider(["task", "always"], tier: "guarded").isEmpty && wider(["task", "always"], pay: true).isEmpty, "never for money or a guarded change")
         // The Mac's list of what's pending: settled ones go, new ones come, a receipt on screen stays.
         func a(_ id: String) -> ApprovalRequest { ApprovalRequest(id: id, title: "", summary: "", files: [], branch: nil, stat: nil, expires: nil) }
@@ -521,7 +524,7 @@ struct ApprovalSheet: View {
     private var lasting: String? {
         switch scope {
         case .once: nil
-        case .task: "Otto won’t ask again until this task is done."
+        case .task: "Otto won’t ask again for \(request.rule ?? "") until this task is done."
         case .always: "Otto won’t ask again for \(request.rule ?? ""). You can take that back in Otto’s card."
         }
     }

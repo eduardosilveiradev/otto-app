@@ -124,24 +124,35 @@ build from. "Today" is the app against a server with none of the contract.
 | 2 | `0f83924` | 8.8 | 8.4 | 8.2 | 7.5 | 9 of 10 / 7 of 10 |
 | 3 | `9c66c86` | 9.0 | 8.7 | 8.0 | 7.3 | 9 of 11 / 8 of 11 |
 | 4 | `8a75f81` | 9.1 | 8.7 | 8.5 | 7.8 | 11 of 11 / 10 of 11 |
+| 5 | `9fe3953` | 8.6 | 8.3 | 8.4 | 7.6 | 11 of 11 / 10 of 11 |
+| 6 | `4cf2af9` | 9.1 | 8.6 | 8.6 | 7.7 | 11 of 11 / 11 of 11 |
 
 Otto's score per axis, each round (Opus / Sol):
 
-| Axis | Round 1 | Round 2 | Round 3 | Round 4 |
-| --- | --- | --- | --- | --- |
-| First run and pairing | 8.5 / 7.5 | 8.6 / 8.0 | 8.7 / 8 | 7.8 / 8.5 |
-| Thread and composer | 9 / 9 | 9.6 / 8.5 | 9.3 / 8.5 | 9.3 / 8.5 |
-| Voice | 8.3 / 7 | 8.0 / 7.5 | 9.0 / 8 | 9.0 / 8 |
-| Thinking and working | 8.8 / 8 | 9.0 / 8.5 | 9.2 / 8.5 | 9.2 / 10 |
-| Background work and notifications | 8.5 / 8 | 8.5 / 8.0 | 8.3 / 8 | 7.8 / 9 |
-| Memory | 8.5 / 8 | 10 / 9.0 | 9.2 / 9 | 9.4 / 9 |
-| Approvals and trust | 8.8 / 8 | 8.9 / 8.5 | 9.3 / 7.5 | 9.6 / 8 |
-| System integration | 9 / 9 | 9.5 / 8.5 | 9.3 / 8.5 | 9.5 / 9 |
-| Motion and haptics | 9.2 / 8.5 | 9.2 / 9.0 | 9.5 / 9 | 9.6 / 10 |
-| Visual craft | 8.8 / 8.5 | 9.0 / 8.5 | 9.0 / 9 | 9.4 / 10 |
-| Empty, error and offline states | 9 / 7.5 | 8.5 / 8.5 | 9.5 / 8.5 | 9.5 / 8.5 |
-| Perceived speed | 9.2 / 8 | 9.5 / 8.0 | 9.0 / 8.5 | 9.4 / 8.5 |
+| Axis | Round 1 | Round 2 | Round 3 | Round 4 | Round 5 | Round 6 |
+| --- | --- | --- | --- | --- | --- | --- |
+| First run and pairing | 8.5 / 7.5 | 8.6 / 8.0 | 8.7 / 8 | 7.8 / 8.5 | 7.5 / 8 | 6.8 / 7.5 |
+| Thread and composer | 9 / 9 | 9.6 / 8.5 | 9.3 / 8.5 | 9.3 / 8.5 | 9.0 / 8.5 | 9.2 / 9 |
+| Voice | 8.3 / 7 | 8.0 / 7.5 | 9.0 / 8 | 9.0 / 8 | 8.7 / 8 | 8.8 / 8 |
+| Thinking and working | 8.8 / 8 | 9.0 / 8.5 | 9.2 / 8.5 | 9.2 / 10 | 9.2 / 9 | 9.4 / 9 |
+| Background work and notifications | 8.5 / 8 | 8.5 / 8.0 | 8.3 / 8 | 7.8 / 9 | 7.8 / 8 | 8.0 / 8 |
+| Memory | 8.5 / 8 | 10 / 9.0 | 9.2 / 9 | 9.4 / 9 | 9.3 / 8 | 9.4 / 10 |
+| Approvals and trust | 8.8 / 8 | 8.9 / 8.5 | 9.3 / 7.5 | 9.6 / 8 | 9.5 / 8.5 | 9.1 / 8.5 |
+| System integration | 9 / 9 | 9.5 / 8.5 | 9.3 / 8.5 | 9.5 / 9 | 8.8 / 9 | 9.4 / 10 |
+| Motion and haptics | 9.2 / 8.5 | 9.2 / 9.0 | 9.5 / 9 | 9.6 / 10 | 9.0 / 9 | 9.5 / 9 |
+| Visual craft | 8.8 / 8.5 | 9.0 / 8.5 | 9.0 / 9 | 9.4 / 10 | 9.6 / 10 | 9.8 / 9 |
+| Empty, error and offline states | 9 / 7.5 | 8.5 / 8.5 | 9.5 / 8.5 | 9.5 / 8.5 | 9.4 / 9 | 9.5 / 9 |
+| Perceived speed | 9.2 / 8 | 9.5 / 8.0 | 9.0 / 8.5 | 9.4 / 8.5 | 9.0 / 8.5 | 9.3 / 8.5 |
 
 A blind reviewer's score moves by a few tenths from round to round on the same axis with no
-change behind it (Opus's first-run score fell from 8.7 to 7.8 in round 4 while pairing only got
-safer). Read the table for its direction, not its decimals.
+change behind it (Opus's first-run score fell from 8.7 to 6.8 over four rounds while pairing only
+got safer, and its overall fell to 8.6 in round 5 because that reviewer read far more of the code).
+Read the table for its direction, not its decimals.
+
+The climb stopped after round 6 without meeting its stop rule (10 from both, or two rounds in a row
+with no new real fix). Every round had new real fixes: about 15 across the two seats in round 3, 10 in
+round 4, 17 in round 5, 9 in round 6. From round 5 on only defects were applied, since new
+code kept supplying the next round's findings; by round 6 both seats passed all eleven contract
+items and Sol's list was down to three small ones. What both say blocks 10 is in the pull request:
+no APNs on a free signing team, an assistant that lives on one Mac, replies that arrive whole, and
+a server contract that isn't built yet.
