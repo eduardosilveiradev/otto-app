@@ -24,7 +24,8 @@ APP="$WORK/dd/Build/Products/Release-iphoneos/Otto.app"
 # Nothing on the phone reads them (crash logs symbolicate here), and every MB is install time.
 if [ "${STRIP:-1}" = 1 ]; then   # STRIP=0 Scripts/release.sh ships symbols, to rule stripping out
   xcrun strip -rSTx "$APP/Otto" "$APP/PlugIns/OttoShare.appex/OttoShare" "$APP/PlugIns/OttoWidget.appex/OttoWidget" 2>/dev/null
-  for f in "$APP"/Frameworks/*.framework; do xcrun strip -x "$f/$(basename "$f" .framework)" 2>/dev/null; done
+  # Some SDKs' binaries come read-only (the glasses' MWDAT ones), and a strip that can't write stops the script.
+  for f in "$APP"/Frameworks/*.framework; do b="$f/$(basename "$f" .framework)"; chmod u+w "$b"; xcrun strip -x "$b" 2>/dev/null; done
 fi
 # An unsigned build carries no entitlements, and SideStore reads them off the signature to
 # know which app group to register for the app and its extensions. Sign ad hoc with them,
