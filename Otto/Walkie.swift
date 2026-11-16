@@ -22,7 +22,7 @@ struct OpenWalkie: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        WalkieLauncher.shared.open = true
+        Doors.open("walkie")   // through the door that brings Otto's thread up first: the walkie's cover lives there, not on the Chats list
         return .result()
     }
 }
@@ -162,7 +162,7 @@ struct WalkieView: View {
         // Felt when the recording starts, not when the finger lands: a press the microphone refused gives none.
         .sensoryFeedback(.impact(weight: .medium), trigger: recorder.started != nil)
         .micProblem(recorder)
-        .sensoryFeedback(.success, trigger: reply?.id)
+        .sensoryFeedback(.success, trigger: reply?.id) { _, new in new != nil }   // an answer arriving, not the last one being cleared for the next note
         .sensoryFeedback(.error, trigger: stuck) { _, now in now }   // eyes on the street: felt, not just shown
     }
 
@@ -206,7 +206,7 @@ struct WalkieView: View {
         case .listening: "Let go to send"
         case .thinking: "Otto’s thinking"
         case .speaking: "Otto"
-        case .idle: "Hold to talk"
+        case .idle: store.asleep ? "Your Mac is out of reach. A note goes when it’s back." : "Hold to talk"
         }
     }
 
@@ -277,8 +277,9 @@ struct WalkieView: View {
             switch phase {
             case .listening: v = CGFloat(min(1, recorder.level() * 4))
             case .speaking:
+                // Otto's voice has no level to read, so this trace is drawn, not measured: under Reduce Motion it holds still.
                 let t = Date.now.timeIntervalSinceReferenceDate
-                v = 0.2 + 0.6 * abs(sin(t * 7.3)) * (0.5 + 0.5 * abs(sin(t * 2.1)))
+                v = still ? 0.4 : 0.2 + 0.6 * abs(sin(t * 7.3)) * (0.5 + 0.5 * abs(sin(t * 2.1)))
             default: v = 0
             }
             levels.removeFirst(); levels.append(v)

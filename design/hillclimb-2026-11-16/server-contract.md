@@ -160,6 +160,9 @@ The hello frame gains an optional list, and the app gains one frame:
 {"type":"approval_alerted","id":"a1"}                       app -> otto
 ```
 
+`approval_alerted` carries no `op`: the server doesn't ack it, and the app sends it once and
+never again (late, it would mean nothing).
+
 With `"approval"` in the hello's list the server holds its Bark push for an approval for 5 seconds
 after sending the frame. If any phone app socket (not a desktop's) answers `approval_alerted` for
 that id in that time, the push is dropped; otherwise it goes out as it does today. So responsibility

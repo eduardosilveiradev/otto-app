@@ -173,7 +173,8 @@ struct Loaded<T: Decodable, Content: View>: View {
                 } description: {
                     Text(why.detail)
                 } actions: {
-                    Button("Try again") { failed = false; Task { await load() } }
+                    // Sample data has no Mac to try again: the line above says what the page needs.
+                    if !(store.backend is MockBackend) { Button("Try again") { failed = false; Task { await load() } } }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(.systemGroupedBackground))

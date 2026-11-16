@@ -222,6 +222,9 @@ struct MemoryDetailScreen: View {
         // The words say which of the two will happen: gone now, or asked for in the chat.
         .confirmationDialog(direct ? "Forget this?" : "Ask Otto to forget this?", isPresented: $forgetting, titleVisibility: .visible) {
             Button(direct ? "Forget" : "Ask Otto to forget it", role: .destructive) {
+                // Asked to forget: what this phone kept of the Mac's pages goes now, whichever way the asking travels
+                // and whether or not its answer comes back. Nothing forgotten is left to read here with the Mac away.
+                store.backend.dropKept()
                 if direct { Task { await forget() } } else {
                     store.send("forget memory \(Self.slug(item.name))")
                     store.askedToForget.insert(item.id)
@@ -296,6 +299,7 @@ private struct PersonScreen: View {
     let card: PersonCard
     @Environment(OttoStore.self) private var store
     @State private var mentions: [MemoryItem] = []
+    @State private var canForget = false
 
     var body: some View {
         List {
@@ -323,14 +327,16 @@ private struct PersonScreen: View {
             }
             if !mentions.isEmpty {
                 Section("In memory") {
-                    ForEach(mentions) { it in NavigationLink { MemoryDetailScreen(item: it) } label: { MemoryRow(item: it) } }
+                    ForEach(mentions) { it in NavigationLink { MemoryDetailScreen(item: it, direct: canForget) } label: { MemoryRow(item: it, asked: store.askedToForget.contains(it.id)) } }
                 }
             }
         }
         .navigationTitle(card.name).navigationBarTitleDisplayMode(.inline)
         .task {
             guard !card.mentions.isEmpty, let m: DashMemory = await store.backend.dash("memory") else { return }
-            mentions = card.mentions.compactMap { m.items[safe: $0] }
+            // As the Memory page lists them: one that was forgotten stays off this list too, and Forget here works the same way.
+            mentions = card.mentions.compactMap { m.items[safe: $0] }.filter { !store.forgotten.contains($0.id) }
+            canForget = m.canForget == true
         }
     }
 }

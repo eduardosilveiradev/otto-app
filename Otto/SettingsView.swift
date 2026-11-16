@@ -56,7 +56,7 @@ struct SettingsView: View {
                          : store.backend is MockBackend ? "This page needs your Mac. You’re looking at sample data."
                          : store.backend.isLive ? "Otto didn’t answer. Try again in a moment." : "Check it’s awake and on Tailscale.")
                 } actions: {
-                    Button("Try again") { Task { await load() } }
+                    if !(store.backend is MockBackend) { Button("Try again") { Task { await load() } } }
                 }
                 .background(Color(.systemGroupedBackground))
             }

@@ -84,6 +84,11 @@ final class CallManager {
     func start(context: String? = nil) {
         let d = UserDefaults.standard
         guard let key = d.string(forKey: "vapiPublicKey"), let assistant = d.string(forKey: "vapiAssistantId") else { return }
+        // A refused microphone is said as that, before anything dials: it isn't a connection problem.
+        if AVAudioApplication.shared.recordPermission == .denied {
+            dropped = false; error = "Otto can’t use the microphone. Turn it on for Otto in Settings, then try again."; phase = .ended
+            return
+        }
         #if DEBUG
         // `-vapiHost localhost`: Vapi's API at localhost:3001, a dead or stalling stand-in, to test how calls fail.
         let vapi = Vapi(publicKey: key, host: d.string(forKey: "vapiHost"))

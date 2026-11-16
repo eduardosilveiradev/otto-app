@@ -192,7 +192,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
            !text.isEmpty {
             // On disk before iOS is told we're done: it may suspend the app the moment it hears that.
             Task { @MainActor in
-                if let conversation { await OttoStore.shared.pips.thread(conversation).sendNow(text) } else { OttoStore.shared.send(text); OttoStore.shared.saveNow() }
+                if let conversation { await OttoStore.shared.pips.thread(conversation).sendNow(text) } else {
+                    let id = UUID()
+                    OttoStore.shared.send(text, id: id); OttoStore.shared.saveNow()
+                    // A launch for a banner's Reply has no loop to send it once the socket is up (as Siri's has none):
+                    // it's delivered here, before iOS is told we're done, or left pending for the next time the app runs.
+                    _ = await OttoStore.shared.sendAndConfirm(id)
+                    OttoStore.shared.saveNow()
+                }
                 done()
             }
             return
