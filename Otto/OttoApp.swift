@@ -192,11 +192,13 @@ final class OttoStore {
     /// The newest one put off with Later, still live on the Mac: the pill that brings it back.
     var waitingApproval: ApprovalRequest? { approvals.last { hiddenApprovals.contains($0.id) } }
     /// Decisions sent without an answer, by approval: only the same one may be sent again.
-    var unconfirmedApprovals: [String: Bool] = [:]
+    var unconfirmedApprovals: [String: ApprovalDecision] = [:]
     /// The last one that lapsed on the Mac before it was answered: the pill says so until dismissed.
     var lapsedApproval: ApprovalRequest?
     /// Memories you asked Otto to forget from their page, marked on their rows while they're still listed.
     var askedToForget: Set<String> = []
+    /// Memories the Mac forgot at your word from their page: off the list at once, ahead of its next index.
+    var forgotten: Set<String> = []
     /// What the widget was last given, so the group's defaults are written only when it changes.
     @ObservationIgnored private var widgetAsk = WidgetData.ask
     /// The server sends "typing" frames; until one arrives (an older server), the app guesses.
@@ -356,6 +358,7 @@ final class OttoStore {
                 seen = backend.connections
                 if animated { Task { await catchUp(notify: !foreground) } }
                 Task { await resendPending() }
+                Task { await syncApprovals() }   // the connect brings the pending ones; this also drops the ones settled meanwhile
                 Task { await reportHealth("connect") }
                 Task { await pips.reconnected() }
             }
@@ -369,13 +372,7 @@ final class OttoStore {
                 if unconfirmedApprovals[gone.id] == nil { lapsedApproval = gone }
                 approvals.removeAll(where: lapsed)
             }
-            // The Home Screen widget's line: the approval waiting on you, until the Mac would drop it.
-            let ask = (shownApproval ?? waitingApproval).flatMap { a in LiveBackend.date(a.expires).map { WidgetData.Ask(text: a.ask, expires: $0) } }
-            if ask != widgetAsk {
-                widgetAsk = ask
-                WidgetData.ask = ask
-                WidgetCenter.shared.reloadTimelines(ofKind: "dev.otto.chat")
-            }
+            syncWidget()
             // An ack that never came on a socket that still looks fine: try again every 15s.
             if live && n % 15 == 0 { Task { await resendPending() } }
             if live != connected { connected = live }
@@ -385,6 +382,38 @@ final class OttoStore {
             if out != asleep { asleep = out }
             try? await Task.sleep(for: .seconds(1))
         }
+    }
+
+    /// The Home Screen widget's line: the approval waiting on you, until the Mac would drop it.
+    private func syncWidget() {
+        let ask = (shownApproval ?? waitingApproval).flatMap { a in LiveBackend.date(a.expires).map { WidgetData.Ask(text: a.ask, expires: $0) } }
+        guard ask != widgetAsk else { return }
+        widgetAsk = ask
+        WidgetData.ask = ask
+        WidgetCenter.shared.reloadTimelines(ofKind: "dev.otto.chat")
+    }
+
+    /// The Mac's own list of what's pending, for a phone whose socket was frozen or closed when an approval
+    /// was raised, answered on the Mac or dropped: the sheet, the pill and the widget then say what's true
+    /// without waiting out the half hour. No answer (out of reach, or a server without the route) changes nothing.
+    func syncApprovals(background: Bool = false) async {
+        let asked = Set(approvals.map(\.id))
+        guard let pending = await backend.pendingApprovals(background: background) else { return }
+        // Only what was here when the Mac was asked can be called gone: one that came in over the socket
+        // while the answer was on its way is newer than the list.
+        let since = Set(approvals.map(\.id)).subtracting(asked)
+        approvals = Self.reconciled(approvals, with: pending, keeping: keptApprovals.union(since), decided: decidedApprovals)
+        unconfirmedApprovals = unconfirmedApprovals.filter { id, _ in approvals.contains { $0.id == id } }
+        if !pending.isEmpty { lapsedApproval = nil }
+        syncWidget()   // here too: a background refresh may run with no scene, so no tick
+    }
+
+    /// What the phone holds once the Mac has said what's pending: those, in the order the phone had them and
+    /// then the new ones, plus any kept on screen (a receipt). One this phone has answered never comes back
+    /// from a list that was read before the answer landed.
+    nonisolated static func reconciled(_ held: [ApprovalRequest], with pending: [ApprovalRequest], keeping kept: Set<String>, decided: Set<String>) -> [ApprovalRequest] {
+        let live = Set(pending.map(\.id)), had = Set(held.map(\.id))
+        return held.filter { live.contains($0.id) || kept.contains($0.id) } + pending.filter { !had.contains($0.id) && !decided.contains($0.id) }
     }
 
     func start() async {
@@ -465,6 +494,32 @@ final class OttoStore {
                             .init(path: "~/.otto/memory/home/boiler-2025.md", tier: "free", why: "deleted, boiler-2026 replaces it")],
                     branch: nil, stat: "--- home/MEMORY.md\n- [Boiler service 2025](boiler-2025.md): the yearly check, the landlord books it\n- [Gym hours](gym-hours.md): closed since March\n--- home/boiler-2025.md (deleted; boiler-2026 replaces it)\n- The boiler is serviced every November.\n- The landlord books the engineer through the building office, which only takes requests by email and wants the flat number, the serial number from the sticker inside the boiler door, two mornings that work, and a phone number the engineer can ring from the street, because the entry phone on this stair has been broken since the spring before last.", expires: demoExpiry)]
             }
+        }
+        // `-approvalDemo scopes`: an everyday ask the Mac will take a wider yes for (`-approvalScope always` opens on it).
+        // `scopes-worst`: the longest rule a server might name, for the picker's line.
+        if let demo = UserDefaults.standard.string(forKey: "approvalDemo"), demo.hasPrefix("scopes") {
+            approvals = [ApprovalRequest(id: "demo-scopes", title: "Add 3 events to your calendar",
+                summary: "Adds the three parent meetings from Marta’s email to your Home calendar: 18 Nov, 25 Nov and 2 Dec, each at 16:00.",
+                files: [], branch: nil, stat: nil, expires: demoExpiry, scopes: ["task", "always"],
+                rule: demo == "scopes-worst" ? "adding, moving and deleting events on every calendar you own, shared ones too" : "adding events to your calendar")]
+        }
+        // `-approvalDemo draft`: an email Otto wants to send in your name, every recipient on the sheet.
+        // `-approvalDemo draft-worst`: fourteen recipients (a one-word name, an unbreakable address), no subject,
+        // a channel this build has no name for, and a body with a long link.
+        if UserDefaults.standard.string(forKey: "approvalDemo") == "draft-worst" {
+            approvals = [ApprovalRequest(id: "demo-draft-worst", title: "Send to the whole street group", summary: "",
+                files: [], branch: nil, stat: nil, expires: demoExpiry, scopes: ["task", "always"], rule: "messages to the street group",
+                draft: .init(channel: "signal",
+                             to: ["Jo", "Aleksandra Wiśniewska-Kowalczyk <aleksandra.wisniewska-kowalczyk@uniwersytet.example.pl>",
+                                  "bartholomew.fitzgerald@northwind-industries-holdings.example.com"] + (4...14).map { "Neighbour \($0) <n\($0)@via-roma.example>" },
+                             body: "The water is off on Thursday from 9 to 13. The notice is at https://comune.example.it/avvisi/2026/11/interruzione-idrica-via-roma-dal-civico-1-al-civico-48?lang=it and I’ll put a copy in every letterbox tonight.\n\nSam"))]
+        }
+        if UserDefaults.standard.string(forKey: "approvalDemo") == "draft" {
+            approvals = [ApprovalRequest(id: "demo-draft", title: "Send email", summary: "You asked me this morning to tell the parents once the hall was booked.",
+                files: [], branch: nil, stat: nil, expires: demoExpiry, scopes: ["task"],
+                draft: .init(channel: "email", to: ["Marta Bianchi <marta@studiobianchi.example>", "Luca Ferri <luca.ferri@example.com>", "parents-3b@scuola.example"],
+                             cc: ["segreteria@scuola.example"], subject: "Parent meetings: hall booked, three dates",
+                             body: "Hi all,\n\nThe hall is booked for the three parent meetings: 18 Nov, 25 Nov and 2 Dec, each at 16:00. Marta has the keys.\n\nSee you there,\nSam"))]
         }
         // `-approvalWorst`: a payment with a long payee and a five-figure total, for the pill's worst case.
         if ProcessInfo.processInfo.arguments.contains("-approvalWorst") {
@@ -957,6 +1012,7 @@ final class OttoStore {
     func backgroundSync() async {
         UserDefaults.standard.set(Date(), forKey: "lastRefresh")
         await catchUp(notify: true, background: true)
+        await syncApprovals(background: true)
         await pips.backgroundCatchUp()
         await reportHealth("refresh")
     }
@@ -984,7 +1040,7 @@ final class OttoStore {
     /// the fact that the server has it after all.
     /// Back in front: a socket iOS froze in the background looks alive but dropped what was sent into it
     /// (a tapback, an edit, a reply), and no reconnect means no catch-up. One history read fills it in.
-    func resync() { Task { await catchUp(notify: false) } }
+    func resync() { Task { await catchUp(notify: false) }; Task { await syncApprovals() } }
 
     private func catchUp(notify: Bool, background: Bool = false) async {
         guard !(backend is MockBackend) else { return }
@@ -1165,10 +1221,11 @@ final class OttoStore {
     /// True once the Mac has the decision. False leaves the approval up: it isn't queued for later,
     /// since a payment approved now shouldn't go through half an hour on, and the Mac shows it again
     /// on the next connect while it's still live.
-    func decide(_ id: String, approve: Bool, keep: Bool = false) async -> ApprovalOutcome {
+    func decide(_ id: String, approve: Bool, scope: ApprovalScope = .once, keep: Bool = false) async -> ApprovalOutcome {
         if keep { keptApprovals.insert(id) }   // before the send: the Mac's "done" can beat its reply
-        let outcome = await backend.decide(approval: id, approve: approve)
+        let outcome = await backend.decide(approval: id, approve: approve, scope: scope)
         if outcome != .done { keptApprovals.remove(id) }
+        if outcome != .unknown { decidedApprovals.insert(id) }
         if outcome == .gone || (outcome == .done && !keep) { approvals.removeAll { $0.id == id } }
         return outcome
     }
@@ -1182,6 +1239,8 @@ final class OttoStore {
 
     func closeApproval(_ id: String) { keptApprovals.remove(id); approvals.removeAll { $0.id == id } }
     @ObservationIgnored private var keptApprovals: Set<String> = []
+    /// Answered from this phone (or found gone): never shown again by a list of pending ones read just before.
+    @ObservationIgnored private var decidedApprovals: Set<String> = []
 
     /// Downscaled to 1600px so the upload is quick and the saved thread stays small.
     static func jpeg(_ image: UIImage) -> Data? {

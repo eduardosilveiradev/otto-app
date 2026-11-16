@@ -212,6 +212,67 @@ struct StatusScreen: View {
 // MARK: - Devices
 
 /// Paired apps and dashboards. A dashboard can be signed out from here; an app token only from the Mac.
+/// What Otto does without asking: each "Always" you gave on an approval, and the way to take it back.
+/// The Mac keeps the list (/app/dash/rules); the card only links here when it has one to show.
+struct RulesScreen: View {
+    struct Rules: Decodable { let rules: [Rule] }
+    struct Rule: Decodable, Identifiable {
+        let id: String; let label: String; let created: String; let uses: Int?; let lastUsed: String?
+    }
+    @Environment(OttoStore.self) private var store
+    /// A take-back the Mac didn't confirm: Otto may still be allowed, so it's said, not swallowed.
+    @State private var failed = false
+
+    var body: some View {
+        Loaded(path: "rules") { (r: Rules, reload) in
+            List {
+                Section {
+                    ForEach(r.rules) { rule in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(rule.label.prefix(1).uppercased() + rule.label.dropFirst())
+                            Text(detail(rule)).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        .swipeActions {
+                            Button("Ask Again", role: .destructive) {
+                                Task {
+                                    struct Revoked: Decodable { let revoked: Bool }
+                                    // `revoked` false is the Mac saying it has no such rule: gone either way. Only no answer is a failure.
+                                    let done: Revoked? = await store.backend.dash("rules/\(rule.id)", method: "DELETE")
+                                    if done == nil { failed = true }
+                                    await reload()
+                                }
+                            }
+                        }
+                    }
+                } footer: {
+                    if !r.rules.isEmpty { Text("Otto does these without asking. Swipe one to be asked again.") }
+                }
+            }
+            .emptyState(r.rules.isEmpty, "Otto asks every time", systemImage: "hand.raised",
+                        "Choose Always on an approval and it’s listed here, where you can take it back.")
+            .refreshable { await reload() }
+        }
+        .navigationTitle("Allowed without asking").navigationBarTitleDisplayMode(.inline)
+        .alert("Still allowed", isPresented: $failed) { Button("OK") {} } message: {
+            Text("Your Mac didn’t confirm, so Otto may still do this without asking. Try again.")
+        }
+    }
+
+    private func detail(_ r: Rule) -> String {
+        // With its year once that isn't this one: "3 Jan" alone would read as this January.
+        let given = dashDate(r.created).map { d in
+            let day = Date.FormatStyle.dateTime.day().month(.abbreviated)
+            return "Allowed \(d.formatted(Calendar.current.isDate(d, equalTo: .now, toGranularity: .year) ? day : day.year()))"
+        }
+        let used = switch r.uses ?? 0 {
+        case 0: "never used"
+        case 1: "used once" + (r.lastUsed.map { ", \(ago($0))" } ?? "")
+        case let n: "used \(n.formatted()) times" + (r.lastUsed.map { ", last \(ago($0))" } ?? "")
+        }
+        return [given, used].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
 struct DevicesScreen: View {
     struct Devices: Decodable { let devices: [Device] }
     struct Me: Decodable { let id: String }

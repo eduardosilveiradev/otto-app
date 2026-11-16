@@ -25,6 +25,8 @@ struct DashMemory: Decodable {
     struct Graph: Decodable { let c: [Int]?; let clusters: [Cluster]? }
     struct Summary: Decodable { let text: String; let note: String }
     let items: [MemoryItem]
+    /// The Mac forgets a memory itself when asked (POST memory/forget); absent on a server that can't.
+    var canForget: Bool? = nil
     let summary: Summary
     let generatedAt: String
     let graph: Graph

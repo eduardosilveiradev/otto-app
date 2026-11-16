@@ -8,6 +8,15 @@ enum MockDash {
         // `-emptyDash`: every list empty, for the empty states. `-mockCalls`: Otto on a live call.
         if CommandLine.arguments.contains("-emptyDash"), let e = empty[path] { return Data(e.utf8) }
         if path == "calls" { return CommandLine.arguments.contains("-mockCalls") ? Data(calls.utf8) : nil }
+        // `-rulesWorst`: the longest label a server might store, a rule used once, one used 1,284 times, one with no dates.
+        if path == "rules", CommandLine.arguments.contains("-rulesWorst") {
+            return Data(#"""
+            {"rules":[
+              {"id":"messages:send","label":"sending messages in your name to anyone in your contacts, including the groups other people added you to","created":"2026-11-15T20:05:00Z","uses":1,"lastUsed":"2026-11-16T07:02:00Z"},
+              {"id":"apply:diet","label":"memory clean-ups","created":"2025-01-03T09:12:00Z","uses":1284,"lastUsed":"2026-11-16T03:00:00Z"},
+              {"id":"x","label":"Überweisungsvorlagen für Aleksandra Wiśniewska-Kowalczyk vorbereiten","created":"not a date"}]}
+            """#.utf8)
+        }
         #endif
         return json[path].map { Data($0.utf8) }
     }
@@ -19,7 +28,7 @@ enum MockDash {
     private static let empty: [String: String] = [
         "loops": #"{"open":[],"plan":{"close":[],"propose":[],"avoidance":[]},"recent":[]}"#,
         "jobs": #"{"jobs":[]}"#, "capabilities": #"{"entries":[]}"#, "triggers": #"{"triggers":[]}"#,
-        "calls": #"{"calls":[]}"#, "packages": #"{"packages":[]}"#,
+        "calls": #"{"calls":[]}"#, "packages": #"{"packages":[]}"#, "rules": #"{"rules":[]}"#,
         "trips": #"{"trips":[],"current":null,"problems":{}}"#, "people": #"{"cards":[]}"#,
         "memory": #"{"items":[],"summary":{"text":"","note":"Rewritten nightly from what Otto keeps."},"generatedAt":"2026-11-04T03:00:00Z","graph":{"c":[],"clusters":[]}}"#,
     ]
@@ -37,6 +46,12 @@ enum MockDash {
     #endif
 
     private static let json: [String: String] = [
+        "rules": """
+        {"rules":[
+          {"id":"apply:diet","label":"memory clean-ups","created":"2026-11-03T09:12:00Z","uses":4,"lastUsed":"2026-11-14T03:00:00Z"},
+          {"id":"calendar:write","label":"adding events to your calendar","created":"2026-10-28T18:40:00Z","uses":1,"lastUsed":"2026-11-09T08:15:00Z"},
+          {"id":"reminders:write","label":"setting reminders","created":"2026-11-15T20:05:00Z","uses":0}]}
+        """,
         "loops": """
         {"open":[
           {"id":"l1","text":"Pay electric bill, €112","tags":["money"],"createdAt":"2026-11-01T09:00:00Z","due":"2026-11-07","status":"open"},

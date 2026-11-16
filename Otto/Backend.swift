@@ -221,7 +221,11 @@ protocol OttoBackend: AnyObject {
     var edits: AsyncStream<(String, String)> { get }
     /// The one banner for what a focused desktop held, once it lets go: (newest held id, text). No bubble.
     var notifies: AsyncStream<(String, String)> { get }
-    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome
+    /// `scope` rides along only when it's wider than once: a server that never offered one never sees the field.
+    func decide(approval id: String, approve: Bool, scope: ApprovalScope) async -> ApprovalOutcome
+    /// GET /app/approvals: every approval the Mac still holds. Nil when it couldn't be asked or has no
+    /// such route, which is not "none": the caller then leaves what it has alone.
+    func pendingApprovals(background: Bool) async -> [ApprovalRequest]?
     /// The newest `limit` messages of the thread on the server, or with `since`, every one after it.
     /// Nil when the server couldn't be reached or answered with an error.
     func history(background: Bool, limit: Int, since: Date?) async -> [Message]?
@@ -287,7 +291,8 @@ extension OttoBackend {
     func stamps() async -> StampsReply? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
-    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome { .done }
+    func decide(approval id: String, approve: Bool, scope: ApprovalScope) async -> ApprovalOutcome { .done }
+    func pendingApprovals(background: Bool) async -> [ApprovalRequest]? { nil }
     func wallet(_ fields: [String: String], id: String) async -> Bool { true }
     var conversationEvents: AsyncStream<ConversationEvent> { AsyncStream { _ in } }
     var jobLists: AsyncStream<[CodeJob]> { AsyncStream { _ in } }
