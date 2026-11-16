@@ -7,7 +7,8 @@ import Foundation
 ///     app -> otto  {"type":"message","id":"<uuid>","text":"...","reply_to":"<id>"?}
 ///                  {"type":"tap","id":"<source wire ID>","op":"<uuid>","data":"<button data>","label":"..."}
 ///                  {"type":"react","op":"<uuid>","id":"<id>","emoji":"❤️"}
-///                  {"type":"approval","op":"<uuid>","id":"<id>","decision":"approve"|"decline"}
+///                  {"type":"approval","op":"<uuid>","id":"<id>","decision":"approve"|"decline","scope":"task"|"always"?}
+///                   `scope` only when the approval frame offered it ("scopes") and you picked it; absent means this once
 ///                  Each op is kept until {"type":"ack","id":"<op or message id>"} comes back and resent on the
 ///                  next connect until it does; the server handles a repeat once. A server that says
 ///                  {"type":"hello","acks":true} on connect acks; with an older one the write is all we get.
@@ -18,6 +19,9 @@ import Foundation
 ///                  {"type":"edit","id":"<id>","text":"..."}   Otto rewrote a message it sent (also takes off its `otp`)
 ///                  a "message" may carry "otp":{"code","sender"?}: a verification code, shown in a drawer (OTP.swift)
 ///                  {"type":"status","text":"Reading ChatView.swift"}   while a reply is in the works
+///                  {"type":"approval","id","title","summary","files","expires",…}   something that needs your yes (Approvals.swift);
+///                   {"type":"approval_done","id"} once it's settled. It may carry "payment", and, from a server that has them,
+///                   "scopes":["task","always"] with "rule":"…" (a yes that lasts) and "draft":{"channel","to","cc"?,"subject"?,"body"}
 ///                  {"type":"read","ids":["<uuid>"]}   your messages Otto has taken in
 ///                  {"type":"terminal","text":"first six words…","ts":"<ISO>"}   a prompt typed in Otto's terminal
 ///                  {"type":"echo","id","text","ts","shared"?}   yours, from the share sheet or the dashboard
@@ -36,6 +40,8 @@ import Foundation
 ///                   POST /app/jobs/<answer|steer|stop|merge|resolve> {"id","text"?} acts on one and answers with it.
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
 ///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
+///   GET  <server>/app/approvals  [approval frame without "type"], the ones still pending ([] when none); not on every
+///                   server yet, and a 404 means "can't say", never "none" (design/hillclimb-2026-11-16/server-contract.md)
 ///   GET  <server>/app/brief    brief JSON
 ///   GET  <server>/app/history?limit=  [{"dir":"in"|"out","text","ts","id"?,"kind":"terminal"?,"read"?, and on Otto's: "files","voice","reply_to","buttons"?,"src"?,"why"?}]   (X-Otto-Background: 1 from the background refresh)
 ///   GET  <server>/app/file/<id>  a file or voice clip from a message
@@ -196,11 +202,15 @@ final class LiveBackend: OttoBackend {
 
     /// Straight to the socket and waited on, not the outbox: see OttoStore.decide. One op per
     /// approval, so "Try again" after a lost ack is recognised as the same decision.
-    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome {
+    func decide(approval id: String, approve: Bool, scope: ApprovalScope) async -> ApprovalOutcome {
         let op = "approval-\(id)"
-        guard await handOver(["type": "approval", "op": op, "id": id, "decision": approve ? "approve" : "decline"], op: op) else { return .unknown }
+        var frame = ["type": "approval", "op": op, "id": id, "decision": approve ? "approve" : "decline"]
+        if approve && scope != .once { frame["scope"] = scope.rawValue }
+        guard await handOver(frame, op: op) else { return .unknown }
         return lock.withLock { gone.remove(op) != nil } ? .gone : .done
     }
+
+    func pendingApprovals(background: Bool) async -> [ApprovalRequest]? { await get("app/approvals", background: background) }
 
     func react(to id: String, emoji: String) async {
         await write(["type": "react", "id": id, "emoji": emoji])

@@ -35,6 +35,12 @@ what Otto knows about your day.
   while it lasts
 - An approval put off with Later waits over the composer with the time the
   Mac still holds it
+- Built here and waiting on the server
+  (`design/hillclimb-2026-11-16/server-contract.md`): a yes that lasts for the
+  task or for good, with a page in the contact card to take it back; who a
+  message Otto wants to send goes to, on its approval; approvals kept right
+  while the phone was asleep; and Forget on a memory's page without a chat
+  message. Until the server sends them, none of these shows.
 - Siri: "Ask Otto" answers out loud, and anything that would change something
   opens the chat on its confirm buttons. "Save this place in Otto" saves where
   you are with what you say about it. "Snap to Otto" files a photo (homework,
@@ -79,8 +85,10 @@ It is not stable yet.
 
 Debug builds accept a few arguments for checking layout without a server:
 `-seedThread`, `-thinking`, `-keyboardDemo`, `-growDraft`, `-seedDraft`,
-`-seedAttachments`, `-jobsThread` (coding jobs; `-jobsThread worst` for the
-awkward ones, `-jobOpen <id>` to open one), and `-details -screen <Loops|Memory|People|Money|Trips|Activity|Status|Devices>`
+`-seedAttachments`, `-approvalDemo` (an approval sheet; `-approvalDemo scopes` for one
+that offers a longer yes, `-approvalScope always` to open with it picked,
+`-approvalDemo draft` for an email to approve), `-jobsThread` (coding jobs; `-jobsThread worst` for the
+awkward ones, `-jobOpen <id>` to open one), and `-details -screen <Loops|Memory|People|Money|Trips|Activity|Status|Devices|Rules>`
 to open the contact card on one of its pages, or `-details -checkServer` to open it on the
 server fields and check them.
 

@@ -143,7 +143,7 @@ shot chat browser-tile-long 6 "Worst case: the server's 100-character caption, t
 shot chat browser-tile-idle 6 "Tile still up after the reply ended (done comes 20 s later)" $O -demoThread -browserTile
 shot media browser-full 6 "Browser tile tapped: the page full screen" $O -demoThread -thinking -browserTile -browserOpen
 shot chat offline 6 "Server unreachable: Otto asleep, reconnecting" $O -demoThread -offline
-shot chat offline-pending 6 "Dead server with a send waiting: Will send when back online" $DEAD $N -longThread b
+shot chat offline-pending 13 "Dead server with a send waiting: Will send when back online" $DEAD $N -longThread b
 shot chat offline-empty 15 "Real dead server: empty thread, asleep" $DEAD $N -emptyThread
 shot chat update-available 6 "Update button in the header" $O -demoThread -fakeUpdate
 shot chat walkie-hint 7 "Hold-for-walkie-talkie hint" $O -demoThread -walkieHint
@@ -160,6 +160,11 @@ shot sheet payment 6 "Payment approval" $O -demoThread -paymentDemo
 shot sheet payment-receipt 6 "Payment approved: printed receipt" $O -demoThread -paymentDemo -receiptDemo
 shot sheet change-approval 6 "Approve a change to Otto's core" $O -demoThread -approvalDemo
 shot sheet change-approval-detail 6 "A change whose detail is its lines, not a git stat (the memory clean-up)" $O -demoThread -approvalDemo diet
+shot sheet approval-scopes 6 "An ask the Mac will take a wider yes for: just this once is picked" $O -demoThread -approvalDemo scopes
+shot sheet approval-scopes-always 6 "Always picked: what it means in words, before Face ID" $O -demoThread -approvalDemo scopes -approvalScope always
+shot sheet approval-scopes-worst 6 "Worst case: the longest rule a server might name, at an accessibility text size" $O -demoThread -approvalDemo scopes-worst -approvalScope always -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+shot sheet approval-draft 6 "An email Otto wants to send in your name: every recipient and every word" $O -demoThread -approvalDemo draft
+shot sheet approval-draft-worst 6 "Worst case: fourteen recipients, an unbreakable address, no subject, a channel this build can't name" $O -demoThread -approvalDemo draft-worst
 shot chat approval-waiting 6 "A payment put off with Later: waiting over the composer, with its time left" $O -demoThread -paymentDemo -approvalLater
 shot chat approval-waiting-todos 6 "A change put off with Later takes the to-dos' place until it's answered" $O -demoThread -approvalDemo -approvalLater -openTodos
 shot chat approval-waiting-worst 6 "Worst case: a long payee and a five-figure total, at an accessibility text size" $O -demoThread -approvalWorst -approvalLater -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
@@ -188,8 +193,8 @@ shot search jumped 9 "Tapped a match: thread scrolled to it, lit up" $O -actions
 # --- Contact card (details) -------------------------------------------------------------
 shot details card 6 "Contact card: today, sections, settings, server" $O -details
 shot details snoozed 6 "Snoozed, with what's held" $O -details -snoozed
-shot details server-check-failed 10 "Server check under the token: can't reach" $DEAD $N -details -checkServer
-for s in Loops Schedules Calls Memory People Money Trips Passport Packages Status Devices Glasses Settings; do
+shot details server-check-failed 13 "Server check under the token: can't reach" $DEAD $N -details -checkServer
+for s in Loops Schedules Calls Memory People Money Trips Passport Packages Status Devices Rules Glasses Settings; do
   l=$(echo $s | tr A-Z a-z)
   extra=""; [ $s = Calls ] && extra=-mockCalls
   shot "$l" list 6 "$s screen" $O -details -screen $s $extra
@@ -197,9 +202,10 @@ done
 for t in Unasked Changes Jobs Triggers; do
   shot activity "$(echo $t | tr A-Z a-z)" 6 "Activity, $t tab" $O -details -screen Activity -activityTab $t
 done
-for s in Loops Schedules Calls Memory People Trips Packages; do
+for s in Loops Schedules Calls Memory People Trips Packages Rules; do
   shot "$(echo $s | tr A-Z a-z)" empty 6 "$s with nothing in it" $O -details -screen $s -emptyDash
 done
+shot rules worst 6 "Worst case: the longest rule, one used once, one used 1,284 times, one with no dates" $O -details -screen Rules -rulesWorst
 shot activity jobs-empty 6 "No background jobs" $O -details -screen Activity -activityTab Jobs -emptyDash
 shot calls error 6 "Can't reach your Mac (no callbot)" $O -details -screen Calls
 shot loops error 12 "Can't reach your Mac (dead server)" $DEAD $N -details -screen Loops

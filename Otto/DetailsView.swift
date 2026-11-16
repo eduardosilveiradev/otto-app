@@ -19,6 +19,9 @@ struct DetailsView: View {
     /// Set each time the address or token is submitted; the check under the token answers for it.
     @State private var submitted: UUID?
     @State private var serverCheck: ServerCheck?
+    /// The Mac keeps a list of what Otto may do without asking. False until it has answered with one,
+    /// so a server from before approval scopes shows no row that leads nowhere.
+    @State private var hasRules = false
     enum ServerCheck: Equatable { case checking, connected, failed(String) }
     #if DEBUG
     /// `-details -checkServer` opens scrolled to the server fields and submits them, for screenshots.
@@ -69,6 +72,9 @@ struct DetailsView: View {
                 Section {
                     NavigationLink { StatusScreen() } label: { Label("Status", systemImage: "gauge.with.dots.needle.33percent") }
                     NavigationLink { DevicesScreen() } label: { Label("Devices", systemImage: "iphone") }
+                    if hasRules {
+                        NavigationLink { RulesScreen() } label: { Label("Allowed without asking", systemImage: "checkmark.shield") }
+                    }
                     NavigationLink { GlassesScreen() } label: { Label { Text("Glasses") } icon: { Image(systemName: "eyeglasses").imageScale(.small) } }
                 }
                 .labelStyle(PlainIcon())
@@ -129,6 +135,7 @@ struct DetailsView: View {
             .task {
                 async let s: Void = store.setSnooze(nil)
                 speakReplies = await store.backend.speakReplies(set: nil)
+                hasRules = (await store.backend.dash("rules") as RulesScreen.Rules?) != nil
                 await s
             }
             .navigationDestination(item: $screen) { name in
@@ -146,6 +153,7 @@ struct DetailsView: View {
                 case "Status": StatusScreen()
                 case "Settings": SettingsView()
                 case "Glasses": GlassesScreen()
+                case "Rules": RulesScreen()
                 default: DevicesScreen()
                 }
             }

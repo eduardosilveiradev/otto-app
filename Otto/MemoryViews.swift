@@ -33,7 +33,8 @@ private struct MemoryList: View {
         let q = typed
         return (ranked ?? m.items.indices.sorted { m.items[$0].updated > m.items[$1].updated }).filter { i in
             let it = m.items[i]
-            return (source == "all" || it.store == source)
+            return !store.forgotten.contains(it.id)   // gone on the Mac; the index catches up at its next rebuild
+                && (source == "all" || it.store == source)
                 && (cluster == nil || m.graph.c?[safe: i] == cluster)
                 && (!needsLook || it.badge != nil)
                 && (ranked != nil || q.isEmpty || it.name.localizedCaseInsensitiveContains(q) || it.description.localizedCaseInsensitiveContains(q))
@@ -66,10 +67,11 @@ private struct MemoryList: View {
             if !items.isEmpty {
                 Section {
                     ForEach(items) { it in
-                        NavigationLink { MemoryDetailScreen(item: it) } label: { MemoryRow(item: it, asked: store.askedToForget.contains(it.id)) }
+                        NavigationLink { MemoryDetailScreen(item: it, direct: m.canForget == true) } label: { MemoryRow(item: it, asked: store.askedToForget.contains(it.id)) }
                     }
                 } header: {
-                    Text(ranked != nil ? "Best matches · \(items.count)" : items.count == m.items.count ? "Everything · \(items.count)" : "\(items.count) of \(m.items.count)")
+                    let total = m.items.count { !store.forgotten.contains($0.id) }
+                    Text(ranked != nil ? "Best matches · \(items.count)" : items.count == total ? "Everything · \(items.count)" : "\(items.count) of \(total)")
                 } footer: {
                     Text("Indexed \(ago(m.generatedAt))")
                 }
@@ -174,9 +176,13 @@ struct MemoryDetailScreen: View {
     static func slug(_ name: String) -> String {
         String(String(name.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) || "-_.".unicodeScalars.contains($0) ? Character($0) : "-" }).prefix(80))
     }
+    /// The Mac forgets it itself (POST memory/forget, when its memory page says `canForget`). Without that,
+    /// forgetting goes through Otto in the chat, as the thread's "Forget it" does.
+    var direct = false
     @Environment(OttoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var forgetting = false
+    @State private var failed = false
     var body: some View {
         Loaded(path: "memory/item", query: ["id": item.id]) { (d: MemoryDetail, _) in
             List {
@@ -195,23 +201,36 @@ struct MemoryDetailScreen: View {
         }
         .navigationTitle(item.kind.capitalized)
         .navigationBarTitleDisplayMode(.inline)
-        // Forgetting goes through Otto, as the thread's "Forget it" does: a message in the chat, so it's
-        // on the record and Otto says when it's done. ponytail: no direct route; one would need the server.
         // Memories only: a note's name is its first line, not a handle "forget memory" can find.
         .toolbar {
             if item.store != "notes" { Button("Forget", systemImage: "trash") { forgetting = true } }
         }
-        .confirmationDialog("Ask Otto to forget this?", isPresented: $forgetting, titleVisibility: .visible) {
-            Button("Ask Otto to forget it", role: .destructive) {
-                store.send("forget memory \(Self.slug(item.name))")
-                store.askedToForget.insert(item.id)
-                dismiss()
+        // The words say which of the two will happen: gone now, or asked for in the chat.
+        .confirmationDialog(direct ? "Forget this?" : "Ask Otto to forget this?", isPresented: $forgetting, titleVisibility: .visible) {
+            Button(direct ? "Forget" : "Ask Otto to forget it", role: .destructive) {
+                if direct { Task { await forget() } } else {
+                    store.send("forget memory \(Self.slug(item.name))")
+                    store.askedToForget.insert(item.id)
+                    dismiss()
+                }
             }
         } message: {
             // A dialog's message is never clipped, so a long memory is cut to about what its row shows.
             let what = item.description.count > 80 ? String(item.description.prefix(79)) + "…" : item.description
-            Text("“\(what)” goes to Otto as a message in your chat, and Otto confirms there when it’s gone.")
+            Text(direct ? "“\(what)” is deleted from what Otto keeps. It can’t be brought back."
+                 : "“\(what)” goes to Otto as a message in your chat, and Otto confirms there when it’s gone.")
         }
+        .alert("Not forgotten", isPresented: $failed) { Button("OK") {} } message: {
+            Text("Couldn’t reach your Mac, so Otto still has it. Try again when Otto is back.")
+        }
+    }
+
+    /// Straight to the Mac. `ok` false means it had no such memory any more, which is what was asked for.
+    private func forget() async {
+        struct Done: Decodable { let ok: Bool }
+        guard (await store.backend.dash("memory/forget", method: "POST", body: ["id": item.id]) as Done?) != nil else { failed = true; return }
+        store.forgotten.insert(item.id)
+        dismiss()
     }
 }
 
