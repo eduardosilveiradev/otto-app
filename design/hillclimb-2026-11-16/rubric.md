@@ -30,7 +30,7 @@ covers it.
 | Motion and haptics | 9 | 5~ | 5~ | 7 | 5~ | 4~ |
 | Visual craft | 9 | 6~ | 7~ | 8 | 6~ | 5~ |
 | Empty, error and offline states | 8 | 7 | 4~ | 5 | 4~ | 4~ |
-| Perceived speed | 8 | 7 | 6~ | 6 | 4 | 6~ |
+| Perceived speed | 7 | 7 | 6~ | 6 | 4 | 6~ |
 
 ### Why
 
@@ -56,7 +56,7 @@ covers it.
 
 **Empty, error and offline.** Otto: "Will send when back online", "Couldn't load · Retry", pairing and server-check errors, the face asleep while the Mac is out of reach. Grok Bot: Try Again, a Reconnect card, Check price again, Voice chat failed. Muse: failures reported in reviews, take control as the escape hatch. Dots, Duet, OpenBot: none described.
 
-**Perceived speed.** Otto: the thread opens from disk at once, sends morph out of the field immediately. Grok Bot: an update for faster sends and replies. Muse: slow shopping tasks. Duet: "so slow", by design checks every few hours.
+**Perceived speed.** Otto: sends morph out of the field immediately. The saved thread is read from disk at launch, but the connecting splash covers it until the socket connects (or 12 s pass offline), so a slow tunnel shows the orb, not the thread. Grok Bot: an update for faster sends and replies. Muse: slow shopping tasks. Duet: "so slow", by design checks every few hours.
 
 ## After
 
@@ -77,7 +77,7 @@ evidence-thin axes.
 | Motion and haptics | 9 → 9 | 5~ | 5~ | 7 | 5~ | 4~ |
 | Visual craft | 9 → 9 | 6~ | 7~ | 8 | 6~ | 5~ |
 | Empty, error and offline states | 8 → 9 | 7 | 4~ | 5 | 4~ | 4~ |
-| Perceived speed | 8 → 8 | 7 | 6~ | 6 | 4 | 6~ |
+| Perceived speed | 7 → 7 | 7 | 6~ | 6 | 4 | 6~ |
 
 ### What moved
 
@@ -101,5 +101,6 @@ couldn't reach the Mac, found nothing, or there's nothing yet.
 **Unchanged.** Background work stays at 8: the cloud agents keep working with every device off, and
 what Otto's phone learns while suspended still comes through Bark (an approval decided on the Mac
 can't clear the widget until the app runs). Memory stays at 8: forgetting from the page goes through
-Otto in the chat, since there's no route to do it directly. Speed was measured this time and didn't
-change (Release builds, same simulator, alternating with main).
+Otto in the chat, since there's no route to do it directly. Speed stays at 7: frame pacing and launch were measured
+against main and didn't change, and the launch still waits for the connection behind the splash
+(kept on purpose when the crew was removed, `763e3fa`).
