@@ -23,6 +23,8 @@ struct DetailsView: View {
     /// Set each time the address or token is submitted; the check under the token answers for it.
     @State private var submitted: UUID?
     @State private var serverCheck: ServerCheck?
+    /// The pairing link the fields were just filled from, until its check has come back.
+    @State private var linked: PairingLink?
     /// The Mac keeps a list of what Otto may do without asking. False until it has answered with one,
     /// so a server from before approval scopes shows no row that leads nowhere.
     @State private var hasRules = false
@@ -133,11 +135,12 @@ struct DetailsView: View {
 
                 .listRowInsets(.vertical, 10)   // 20 between fields
                 .onChange(of: server) {
-                    submitted = nil; serverCheck = nil
                     // A pairing link pasted into the address is the whole pairing: both fields, then the check.
-                    if let link = PairingLink(server) { apply(link) }
+                    if let link = PairingLink(server) { apply(link); return }
+                    if linked?.server == server { return }   // just filled from a link: its check is on its way
+                    submitted = nil; serverCheck = nil
                 }
-                .onChange(of: token) { submitted = nil; serverCheck = nil }
+                .onChange(of: token) { if linked?.token == token { return }; submitted = nil; serverCheck = nil }
                 .task(id: submitted) { if submitted != nil { await checkServer() } }
 
                 Section {
@@ -223,6 +226,13 @@ struct DetailsView: View {
             }
             .scrollContentBackground(.hidden)
             .task {
+                #if DEBUG
+                // `-pasteLink <otto://pair…>`: as if a pairing link had just been pasted into the address, for screenshots.
+                if let link = UserDefaults.standard.string(forKey: "pasteLink") {
+                    try? await Task.sleep(for: .seconds(1)); server = link
+                    try? await Task.sleep(for: .seconds(1)); proxy.scrollTo("server", anchor: .center); return
+                }
+                #endif
                 guard checkOnOpen else { return }
                 submitted = UUID()
                 try? await Task.sleep(for: .seconds(2))   // after the brief has loaded above it
@@ -235,9 +245,9 @@ struct DetailsView: View {
     /// From the card's own scanner, or pasted into its address field: the owner's act, so it fills the fields,
     /// where every value it brought can be read, and runs the check.
     private func apply(_ link: PairingLink) {
+        linked = link
         server = link.server; token = link.token
-        if let key = link.callKey, let assistant = link.callAssistant { callKey = key; callAssistant = assistant }   // both or neither
-        submitted = UUID()
+        submitted = UUID()   // the call keys it brought wait for this check (checkServer)
     }
 
     /// A label over its field. The field carries the same name for VoiceOver, so the label is hidden from it.
@@ -290,7 +300,12 @@ struct DetailsView: View {
         case let problem?: .failed(problem.message)
         }
         if case .failed(let why) = serverCheck { AccessibilityNotification.Announcement(why).post() }
-        else { AccessibilityNotification.Announcement("Connected").post() }
+        else {
+            AccessibilityNotification.Announcement("Connected").post()
+            // What a link said about calls is kept only now: that Mac has taken the link's token. Both or neither.
+            if let link = linked, link.server == s, link.token == t, let key = link.callKey, let assistant = link.callAssistant { callKey = key; callAssistant = assistant }
+            linked = nil
+        }
     }
 
     /// How long Otto is holding things back, how far through the hold, and what's waiting.

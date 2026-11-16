@@ -96,6 +96,7 @@ struct ScheduleChip: View {
                 ScheduleDetail(id: trigger.id)
                     .toolbar { Button("Done") { open = false } }
             }
+            .buttonStyle(.automatic)   // not the chip's plain style, which would come down into its sheet
             .environment(store)
             .presentationDetents(Self.shot ? [.large] : [.medium, .large])
         }
@@ -136,11 +137,15 @@ struct ScheduleDetail: View {
                 Text(t.action).font(.callout).textSelection(.enabled)
             }
             // Otto changes its own schedules, so both open the composer on the words that ask it: you finish
-            // the sentence or just send, and Otto answers in the chat.
+            // the sentence or just send, and Otto answers in the chat. The schedule goes in by a slug of its
+            // line, as a memory does: its words come from the Mac and could be anything, and what's sent from
+            // here is sent as you.
             if t.enabled {
+                let name = MemoryDetailScreen.slug(t.gist)
                 Section {
-                    Button("Change", systemImage: "pencil") { ask("Change the schedule “\(t.gist)”: ") }
-                    Button(t.repeating ? "Stop It" : "Cancel It", systemImage: "stop.circle", role: .destructive) { ask("Stop the schedule “\(t.gist)”") }
+                    // Coloured here, not left to the tint: opened from a chip, the sheet inherits the bubble's ink.
+                    Button("Change", systemImage: "pencil") { ask("change schedule \(name): ") }.foregroundStyle(.blue)
+                    Button(t.repeating ? "Stop It" : "Cancel It", systemImage: "stop.circle", role: .destructive) { ask("stop schedule \(name)") }.foregroundStyle(.red)
                 } footer: {
                     Text("Opens the chat with the words ready. Nothing changes until you send them.")
                 }

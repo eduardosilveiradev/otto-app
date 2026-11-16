@@ -178,12 +178,16 @@ struct Loaded<T: Decodable, Content: View>: View {
         .task(id: query) { await load() }
     }
 
-    /// What went wrong, told apart: this phone is offline, the Mac didn't answer, its Otto has no such page
-    /// (an older one), it refused the token, or it hit an error.
+    /// What went wrong, told apart by the Mac's answer (otto/dash.ts): the thing asked for is gone (a 404 for
+    /// one item), the Mac has nothing for the page (a 404 for a page: no index yet, or an older Otto), it isn't
+    /// set up there (501: calls without a callbot), the token was refused, an error; or no answer at all, with
+    /// this phone offline or the Mac out of reach.
     private var why: (title: String, symbol: String, detail: String, stale: String) {
         switch store.backend.dashFailure(path) {
-        case 404?: ("Not on your Mac yet", "arrow.down.app", "The Otto on your Mac doesn’t have this page. Update it there.", "Your Mac no longer has this page.")
-        case 401?, 403?: ("Your Mac didn’t accept this phone", "lock", "Pair again from the contact card.", "Your Mac didn’t accept this phone.")
+        case 404? where !query.isEmpty: ("No longer on your Mac", "questionmark.folder", "It may have been removed since.", "Your Mac no longer has this.")
+        case 404?: ("Nothing here yet", "tray", "Your Mac has nothing for this page. If its Otto is older than this app, update it there.", "Your Mac has nothing for this page now.")
+        case 501?: ("Not set up on your Mac", "wrench.and.screwdriver", "Otto on your Mac isn’t set up for this yet.", "This isn’t set up on your Mac any more.")
+        case 401?, 403?: ("Your Mac didn’t accept this phone", "lock", "Its token doesn’t open this page. Pair again from the contact card.", "Your Mac didn’t accept this phone.")
         case let code? where code >= 400: ("Otto hit an error", "exclamationmark.triangle", "Your Mac answered with an error (\(code)). Try again in a moment.", "Otto hit an error (\(code)).")
         default:
             if store.noNetwork { ("You’re offline", "wifi.slash", "Connect to Wi-Fi or mobile data.", "You’re offline.") }

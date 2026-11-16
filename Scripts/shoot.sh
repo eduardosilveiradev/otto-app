@@ -144,6 +144,7 @@ shot chat browser-tile-idle 6 "Tile still up after the reply ended (done comes 2
 shot media browser-full 6 "Browser tile tapped: the page full screen" $O -demoThread -thinking -browserTile -browserOpen
 shot media browser-take-over 6 "A page the Mac will hand over: Take over, behind Face ID" $O -demoThread -thinking -browserTile control -browserOpen
 shot media browser-holding 6 "The page in your hands: taps go to it, with typing, keys and Hand back" $O -demoThread -thinking -browserTile control -browserOpen -browserHold
+shot chat voice-speed 6 "A voice reply paused part-way: the speed button (1x, 1.5x, 2x) beside its length" $O -demoThread -voicePaused
 shot chat draft-unnamed 6 "A draft the Mac sent without saying who it goes to: the card says so above Send" $O -demoThread -draftBare
 shot chat offline 6 "Server unreachable: Otto asleep, reconnecting" $O -demoThread -offline
 shot chat no-network 6 "This phone has no network at all: the header says so, not that the Mac is out of reach" $O -demoThread -offline -noNetwork
@@ -204,6 +205,7 @@ shot search jumped 9 "Tapped a match: thread scrolled to it, lit up" $O -actions
 # --- Contact card (details) -------------------------------------------------------------
 shot details card 6 "Contact card: today, sections, settings, server" $O -details
 shot details snoozed 6 "Snoozed, with what's held" $O -details -snoozed
+shot details pair-link-pasted 16 "A pairing link pasted into the address: both fields filled and checked at once; the call keys it carried wait for a Mac that answers" $O -details -pasteLink 'otto://pair?server=http://127.0.0.1:9&token=demo-token&vapiKey=pk_demo&vapiAssistant=asst_demo'
 shot details server-check-failed 13 "Server check under the token: can't reach" $DEAD $N -details -checkServer
 for s in Loops Schedules Calls Memory People Money Trips Passport Packages Status Devices Rules Glasses Settings; do
   l=$(echo $s | tr A-Z a-z)

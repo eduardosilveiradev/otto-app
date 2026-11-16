@@ -137,6 +137,15 @@ enum ApprovalCheck {
         assert(PairingLink("otto://pair?server=javascript:alert(1)&token=abc") == nil && PairingLink("otto://pair?server=https://x.example") == nil
                && PairingLink("https://evil.example/pair?server=https://x&token=t") == nil && PairingLink("otto://chat") == nil, "not a pairing link")
         print("approval check ok")
+        // An answer given with no socket never leaves the phone: it's said as that, and nothing is queued to
+        // go out on the next connect (a stale yes then would be the worst of both).
+        Task {
+            let queued = { UserDefaults.standard.stringArray(forKey: "otto.outbox") ?? [] }
+            let before = queued()
+            let out = await LiveBackend(serverURL: URL(string: "http://127.0.0.1:9")!, token: "t").decide(approval: "check", approve: true, scope: .always)
+            assert(out == .notSent && queued() == before, "an unsent answer stays unsent")
+            print("unsent check ok")
+        }
     }
 }
 #endif
@@ -242,8 +251,8 @@ struct ApprovalSheet: View {
                             .frame(maxWidth: .infinity).multilineTextAlignment(.center)
                     }
                 } else if let p = request.payment { paymentRows(p) } else if let d = request.draft { draftRows(d) } else { changeRows }
-                // Out of reach, the buttons are off and this says why, before Face ID is asked for an answer that can't go.
-                if let failed = failed ?? unconfirmed.map({ _ in Self.unconfirmedLine }) ?? (store.asleep && !paid ? Self.outOfReach : nil) {
+                // (Out of reach is said in the bar, beside the buttons it turns off.)
+                if let failed = (failed == Self.outOfReach ? nil : failed) ?? unconfirmed.map({ _ in Self.unconfirmedLine }) {
                     Section { Text(failed).foregroundStyle(Color.redInk).font(.footnote) }
                 }
             }
@@ -308,12 +317,19 @@ struct ApprovalSheet: View {
                         .accessibilityValue(scope == .once ? "Just this once" : scope == .task ? "For the rest of this task" : "Always for \(request.rule ?? "")")
                     }
                     // What the wider yes means, before Face ID: said in words, not left to the menu's label. At
-                    // accessibility sizes it's the list's last row instead: here it could push the buttons off the screen.
+                    // accessibility sizes it's the list's first row instead: here it could push the buttons off the screen.
                     if let lasting, !size.isAccessibilitySize {
                         Text(lasting).font(.footnote).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .transition(.opacity)
                     }
+                }
+                // Out of reach, the buttons are off and this says why, before Face ID is asked for an answer that
+                // can't go. After a try that never left the phone, it says that nothing was sent.
+                if store.asleep || failed == Self.outOfReach {
+                    Text(failed == Self.outOfReach ? Self.outOfReach : "Your Mac is out of reach. You can answer when it’s back.")
+                        .font(.footnote).foregroundStyle(failed == Self.outOfReach ? Color.redInk : Color.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 // Side by side; one over the other once the text is too large for two to share a line, yes on top.
                 let pair = size.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 12))
@@ -334,6 +350,8 @@ struct ApprovalSheet: View {
                 .disabled(busy || store.asleep)
                 }
                 .animation(.easeOut(duration: 0.2), value: scope)   // the line under the picker fades in; nothing slides
+                // Back in reach, the line that said it wasn't goes: the answer can be given now.
+                .onChange(of: store.connected) { _, on in if on, failed == Self.outOfReach { failed = nil } }
                 .padding(.horizontal, 20).padding(.vertical, 12)
                 }
                 }

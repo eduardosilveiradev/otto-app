@@ -99,6 +99,8 @@ private struct MainRoot: View {
     /// from disk at once, and an empty one says it's still loading and takes a message meanwhile (EmptyChat).
     /// Nothing here waits for the Mac.
     @State private var splashing = true
+    /// How a pairing link's Connect went, said once the Mac has answered (or hasn't).
+    @State private var paired: (title: String, message: String)?
 
     var body: some View {
         // A ZStack, not a Group: a Group hands its modifiers to whichever child is showing, so the
@@ -133,11 +135,23 @@ private struct MainRoot: View {
             // approval's sheet, never at the same time: two presentations from one place and neither shows.
             .alert(PairInbox.shared.link?.question ?? "", isPresented: Binding(get: { PairInbox.shared.link != nil && store.shownApproval == nil }, set: { if !$0 { PairInbox.shared.link = nil } }),
                    presenting: PairInbox.shared.link) { link in
-                Button("Connect") { link.save() }
+                // Nothing the link carries is kept until that Mac has taken its token.
+                Button("Connect") {
+                    Task {
+                        switch await link.problem() {
+                        case nil: link.save(); paired = ("Connected to \(link.host)", "Quit and reopen Otto to switch to it.")
+                        case .refused?: paired = ("Not connected", "\(link.host) didn’t accept this link’s token, so nothing was changed. Make a new link on your Mac.")
+                        case let problem?: paired = ("Not connected", "Nothing was changed. \(problem == .unreachable ? "Can’t reach \(link.host). Check it’s awake and on Tailscale." : problem.message)")
+                        }
+                    }
+                }
                 Button("Cancel", role: .cancel) {}
             } message: { link in
                 Text("\(link.consequence) It replaces the Mac you’re paired with, from the next time you quit and reopen the app.")
             }
+            .alert(paired?.title ?? "", isPresented: Binding(get: { paired != nil }, set: { if !$0 { paired = nil } })) {
+                Button("OK") {}
+            } message: { Text(paired?.message ?? "") }
             .environment(store)
             // Notifications are asked for once, in onboarding, where "Not now" stays not now.
             .task { await store.start() }

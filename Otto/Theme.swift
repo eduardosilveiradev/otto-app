@@ -113,7 +113,15 @@ extension View {
     }
 
     /// A neutral capsule button beside the blue one: grey fill, the text colour (or `ink`) on it.
-    func quietButton(ink: Color = .primary) -> some View {
-        buttonStyle(.bordered).buttonBorderShape(.capsule).tint(.secondary).foregroundStyle(ink)
+    func quietButton(ink: Color = .primary) -> some View { modifier(QuietButton(ink: ink)) }
+}
+
+/// The ink is set by hand (a bordered button's own would be the tint), so it has to fade by hand too when the
+/// button is off: a Decline that can't be pressed looked exactly like one that can.
+private struct QuietButton: ViewModifier {
+    let ink: Color
+    @Environment(\.isEnabled) private var enabled
+    func body(content: Content) -> some View {
+        content.buttonStyle(.bordered).buttonBorderShape(.capsule).tint(.secondary).foregroundStyle(ink.opacity(enabled ? 1 : 0.35))
     }
 }
