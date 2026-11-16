@@ -98,8 +98,8 @@ parts += ['''
 final class HistoryDecoder {
     let payload: Data
     init(_ payload: Data) { self.payload = payload }
-    func get<T: Decodable>(_ path: String, background: Bool, query: [URLQueryItem]) async -> T? {
-        try? JSONDecoder().decode(T.self, from: payload)
+    func fetch(_ path: String, background: Bool, query: [URLQueryItem]) async -> (Data, HTTPURLResponse)? {
+        (payload, HTTPURLResponse(url: URL(string: "http://otto.invalid")!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
     static func date(_ s: String?) -> Date? { LiveBackend.date(s) }
     static func terminal(_ text: String, ts: String) -> Message { Message(from: .terminal, text: text) }

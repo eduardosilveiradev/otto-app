@@ -176,6 +176,12 @@ struct ApprovalSheet: View {
         } footer: {
             if let totals { Text(totals) }
         }
+
+        // A stat that isn't git's summary is the change itself (the memory clean-up sends the lines it
+        // drops): what you approve stays on the screen, tinted like the previews.
+        if totals == nil, let stat = request.stat, !stat.isEmpty {
+            Section("Details") { DiffPreview(lines: stat.split(whereSeparator: \.isNewline).map(String.init), whole: true) }
+        }
     }
 
     /// The diff's size in words, read off the stat the server computed. The raw `git diff --stat` is never shown.
@@ -221,13 +227,19 @@ struct ApprovalSheet: View {
 /// line, so the tint is never the only cue.
 private struct DiffPreview: View {
     let lines: [String]
+    /// Every line in full, instead of the first six cut to one line each: this is what gets approved.
+    var whole = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(lines.prefix(6).enumerated()), id: \.offset) { _, l in
-                let removed = l.hasPrefix("-"), added = l.hasPrefix("+")
-                let code = l.dropFirst(removed || added || l.hasPrefix(" ") ? 1 : 0)
-                Text(verbatim: (removed ? "− " : added ? "+ " : "  ") + code)
-                    .font(.system(.caption, design: .monospaced)).lineLimit(1).truncationMode(.tail)
+            ForEach(Array(lines.prefix(whole ? .max : 6).enumerated()), id: \.offset) { _, l in
+                // "--- file" and "+++ file" name what follows; they aren't changed lines.
+                let names = l.hasPrefix("---") || l.hasPrefix("+++")
+                let removed = !names && l.hasPrefix("-"), added = !names && l.hasPrefix("+")
+                let code = names ? Substring(l.drop { $0 == "-" || $0 == "+" || $0 == " " }) : l.dropFirst(removed || added || l.hasPrefix(" ") ? 1 : 0)
+                let lead = removed ? "− " : added ? "+ " : "  "
+                Text(verbatim: names ? String(code) : lead + code)
+                    .font(.system(.caption, design: .monospaced).weight(names ? .semibold : .regular))
+                    .lineLimit(whole ? nil : 1).truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10).padding(.vertical, 2)
                     .background(removed ? Color.redTint : added ? Color.greenTint : Color.clear)

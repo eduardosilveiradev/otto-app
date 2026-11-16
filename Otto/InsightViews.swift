@@ -450,7 +450,8 @@ private struct StageBar: View {
         let reached = stages.firstIndex(of: status)
             ?? events.sorted { $0.at > $1.at }.lazy.compactMap { stages.firstIndex(of: $0.status) }.first
             ?? 2
-        let tint: Color = status == "exception" ? .red : status == "delivered" ? .green : .accentColor
+        // On its way is the text colour: blue is for actions, and this bar is not one.
+        let tint: Color = status == "exception" ? .red : status == "delivered" ? .green : .primary
         HStack(spacing: 4) {
             ForEach(stages.indices, id: \.self) { i in
                 Capsule().fill(i <= reached ? AnyShapeStyle(tint) : AnyShapeStyle(Color(.tertiarySystemFill))).frame(height: 4)

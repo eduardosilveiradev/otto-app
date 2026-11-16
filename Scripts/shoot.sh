@@ -159,6 +159,7 @@ shot sheet otp-drawer 6 "One-time code drawer" $O -demoThread -otpDemo
 shot sheet payment 6 "Payment approval" $O -demoThread -paymentDemo
 shot sheet payment-receipt 6 "Payment approved: printed receipt" $O -demoThread -paymentDemo -receiptDemo
 shot sheet change-approval 6 "Approve a change to Otto's core" $O -demoThread -approvalDemo
+shot sheet change-approval-detail 6 "A change whose detail is its lines, not a git stat (the memory clean-up)" $O -demoThread -approvalDemo diet
 shot sheet boarding-pass 11 "Flight-day boarding pass" $O -demoThread -mockGate -openGate
 shot sheet live-call 8 "A call Otto is placing, live transcript" $O -demoThread -mockCalls -openCall
 shot media viewer 6 "Full-screen photo viewer" $O -mediaThread -media

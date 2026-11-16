@@ -64,14 +64,14 @@ struct DetailsView: View {
                     NavigationLink { PackagesScreen() } label: { Label("Packages", systemImage: "shippingbox") }
                     NavigationLink { ActivityScreen() } label: { Label("Activity", systemImage: "waveform.path.ecg") }
                 }
-                .tint(.primary)   // glyphs in the text colour: nothing here is an action's blue
+                .labelStyle(PlainIcon())   // glyphs in the text colour: nothing here is an action's blue
 
                 Section {
                     NavigationLink { StatusScreen() } label: { Label("Status", systemImage: "gauge.with.dots.needle.33percent") }
                     NavigationLink { DevicesScreen() } label: { Label("Devices", systemImage: "iphone") }
                     NavigationLink { GlassesScreen() } label: { Label { Text("Glasses") } icon: { Image(systemName: "eyeglasses").imageScale(.small) } }
                 }
-                .tint(.primary)
+                .labelStyle(PlainIcon())
 
                 Section {
                     if store.snooze?.until.map({ $0 > .now }) != true {
