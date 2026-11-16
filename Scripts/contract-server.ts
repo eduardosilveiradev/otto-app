@@ -13,6 +13,7 @@
  *   curl -X POST 'localhost:<port>/test/settle?id=a-cal'     settle it as the Mac would
  *   add &quiet=1 to either to send no socket frame, so only GET /app/approvals can tell the phone
  *   curl -X POST 'localhost:<port>/test/browser'             show a page Otto is stuck on, that it will hand over
+ *   curl -X POST 'localhost:<port>/test/working'             Otto starts a turn ("Reading your mail"): the bubble that Stop is on
  */
 const port = Number(process.argv[2] ?? 4599), delay = Number(process.argv[3] ?? 0), old = process.argv[4] === 'old'
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 23), ...a)
@@ -59,6 +60,7 @@ Bun.serve({
     if (p === '/app/settings') return Response.json({ toggles: [] })
     if (old) return new Response('not found', { status: 404 })
     if (p === '/app/approvals') return Response.json([...approvals.values()])
+    if (p === '/test/working') { for (const ws of sockets) { ws.send(JSON.stringify({ type: 'typing', on: true })); ws.send(JSON.stringify({ type: 'status', text: 'Reading your mail' })) }; return Response.json({ ok: true }) }
     if (p === '/test/browser') { browsing = true; held = false; for (const ws of sockets) ws.send(browserFrame()); return Response.json({ ok: true }) }
     if (p === '/app/browser/hold') { held = (await req.json() as { hold: boolean }).hold === true; for (const ws of sockets) ws.send(browserFrame()); return Response.json({ held }) }
     if (p === '/app/browser/input') {
