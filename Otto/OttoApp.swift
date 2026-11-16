@@ -509,6 +509,13 @@ final class OttoStore {
             if i < args.count, args[i] == "a" { messages = Array(messages.prefix(8)) }
             if i < args.count, args[i] == "b" { messages = Array(messages.dropFirst(8)) }
         }
+        // `-deleteDemo`: Otto deletes a message you answered 2s in, as a live "delete" frame would.
+        if ProcessInfo.processInfo.arguments.contains("-deleteDemo") {
+            messages = [Message(from: .otto, text: "the 18:40 is on time, platform 4.", buttons: [ActionButton(label: "Remind me at 18:10", data: "remind")], serverID: "gone"),
+                        Message(from: .me, text: "great, I’ll take that one", read: true, replyTo: "gone"),
+                        Message(from: .otto, text: "scratch that: it’s cancelled. the 19:10 is running, same platform.")]
+            Task { try? await Task.sleep(for: .seconds(2)); drop(["gone"]) }
+        }
         // `-jobsThread`: coding jobs under Otto's messages (Jobs.swift); `-jobOpen <id>` opens one's sheet.
         if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-jobsThread"), i + 1 < ProcessInfo.processInfo.arguments.count,
            ProcessInfo.processInfo.arguments[i + 1] == "worst" {
@@ -772,6 +779,7 @@ final class OttoStore {
                 if otpDrawer?.wireID == id { otpDrawer = nil }
             }
         }
+        Task { for await id in backend.deletes { drop([id]) } }
         Task {
             for await (id, emoji) in backend.reactions {
                 // A tapback can be Otto's whole answer, so it ends the typing dots too.
@@ -980,6 +988,16 @@ final class OttoStore {
     /// (a tapback, an edit, a reply), and no reconnect means no catch-up. One history read fills it in.
     func resync() { Task { await catchUp(notify: false) } }
 
+    /// Otto deleted these (a live "delete" frame, or history on reconnect): out of the thread and the
+    /// saved copy, with what pointed at them. An id that isn't here changes nothing.
+    private func drop(_ gone: Set<String>) {
+        var kept = messages
+        guard kept.drop(gone) else { return }
+        if otpDrawer.map({ gone.contains($0.wireID) }) == true { otpDrawer = nil }
+        if let r = replyingTo, !kept.contains(where: { $0.id == r }) { replyingTo = nil }
+        messages = kept
+    }
+
     private func catchUp(notify: Bool, background: Bool = false) async {
         guard !(backend is MockBackend) else { return }
         var all = await backend.history(background: background, limit: 50, since: nil) ?? []
@@ -1023,7 +1041,7 @@ final class OttoStore {
                 if messages[i].text != h.text && !(h.text.count >= 8000 && messages[i].text.hasPrefix(h.text)) { messages[i].text = h.text }
             }
         }
-        if !gone.isEmpty, messages.contains(where: { gone.contains($0.wireID) }) { messages.removeAll { gone.contains($0.wireID) }; save() }
+        drop(gone)
         guard !fresh.isEmpty else { reconcileDesktop(); return }
         if !serverTyping && fresh.contains(where: { $0.from == .otto }) { ottoTyping = false }
         for m in fresh { messages.insert(m, at: messages.lastIndex { $0.date <= m.date }.map { $0 + 1 } ?? 0) }

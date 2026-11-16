@@ -77,6 +77,8 @@ struct Message: Identifiable, Codable {
     var read: Bool? = nil
     /// The wireID of the message this one answers (a swipe-reply, either way).
     var replyTo: String? = nil
+    /// The message it answers was deleted: its quote reads "Message deleted" (see `drop`).
+    var replyGone: Bool? = nil
     /// Photos and files Otto sent, fetched on demand with `OttoBackend.file`.
     var files: [RemoteFile]? = nil
     /// Otto's spoken version of `text`.
@@ -129,6 +131,21 @@ struct Message: Identifiable, Codable {
 
     /// The id both ends use for this message.
     var wireID: String { serverID ?? id.uuidString }
+}
+
+extension [Message] {
+    /// Takes out the messages Otto deleted, by wireID, and everything they carried (card, buttons, job cards).
+    /// A reply to one stays and is marked, so its quote can say so. False when nothing here changed.
+    mutating func drop(_ gone: Set<String>) -> Bool {
+        var changed = false
+        for i in indices where self[i].replyGone != true && self[i].replyTo.map(gone.contains) == true {
+            self[i].replyGone = true
+            changed = true
+        }
+        let before = count
+        removeAll { gone.contains($0.wireID) }
+        return changed || count != before
+    }
 }
 
 struct RemoteFile: Codable, Hashable {
@@ -219,6 +236,8 @@ protocol OttoBackend: AnyObject {
     var voices: AsyncStream<(String, RemoteFile?)> { get }
     /// Otto rewriting a message it already sent: (wireID, new text).
     var edits: AsyncStream<(String, String)> { get }
+    /// Otto deleting a message it already sent, by wireID.
+    var deletes: AsyncStream<String> { get }
     /// The one banner for what a focused desktop held, once it lets go: (newest held id, text). No bubble.
     var notifies: AsyncStream<(String, String)> { get }
     func decide(approval id: String, approve: Bool) async -> ApprovalOutcome
@@ -274,6 +293,7 @@ extension OttoBackend {
     var desktopSync: DesktopSync? { nil }
     var voices: AsyncStream<(String, RemoteFile?)> { AsyncStream { _ in } }
     var edits: AsyncStream<(String, String)> { AsyncStream { _ in } }
+    var deletes: AsyncStream<String> { AsyncStream { _ in } }
     var notifies: AsyncStream<(String, String)> { AsyncStream { _ in } }
     var openTodoLists: AsyncStream<[TodoItem]> { AsyncStream { _ in } }
     var browserTiles: AsyncStream<BrowserTile?> { AsyncStream { _ in } }

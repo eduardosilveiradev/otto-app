@@ -115,6 +115,7 @@ shot chat empty 6 "Fresh thread, nothing yet" $O -emptyThread
 shot chat normal 6 "Everyday thread: brief, draft with buttons, voice notes" $O -demoThread
 shot chat long-a 6 "Long thread, part 1: quote reply, draft buttons, voice both ways, photo with tapback, link, terminal line" $O -longThread a
 shot chat long-b 6 "Long thread, part 2: card, schedule chip, recorded chips, file, code chip, failed and pending sends" $O -longThread b
+shot chat deleted-quote 6 "Otto deleted the message a reply quotes: its bubble is gone and the quote reads Message deleted" $O -deleteDemo
 shot chat actions 6 "Reply quote, long text, photo, voice note, link preview, tapbacks" $O -actionsLab
 shot chat cards-all 6 "Every card type (bottom of the thread)" $O -cardThread
 shot chat cards-mixed 6 "Mixed card: stat, bars, list, progress, actions" $O -cardThread mixed
