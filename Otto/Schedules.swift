@@ -65,7 +65,13 @@ private extension String {
 /// Sits inside Otto's bubble under the text: what was just scheduled, tap for the whole of it.
 struct ScheduleChip: View {
     let trigger: DashTrigger
-    @State private var open = false
+    #if DEBUG
+    /// `-scheduleOpen`: the chip's sheet already up and at full height, for screenshots.
+    private static let shot = CommandLine.arguments.contains("-scheduleOpen")
+    #else
+    private static let shot = false
+    #endif
+    @State private var open = shot
     @Environment(OttoStore.self) private var store
 
     var body: some View {
@@ -90,14 +96,17 @@ struct ScheduleChip: View {
                 ScheduleDetail(id: trigger.id)
                     .toolbar { Button("Done") { open = false } }
             }
+            .buttonStyle(.automatic)   // not the chip's plain style, which would come down into its sheet
             .environment(store)
-            .presentationDetents([.medium, .large])
+            .presentationDetents(Self.shot ? [.large] : [.medium, .large])
         }
     }
 }
 
 struct ScheduleDetail: View {
     let id: String
+    @Environment(OttoStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         Loaded(path: "triggers/item", query: ["id": id]) { (t: TriggerDetail, reload) in
@@ -127,8 +136,24 @@ struct ScheduleDetail: View {
             Section("What Otto will do") {
                 Text(t.action).font(.callout).textSelection(.enabled)
             }
+            // Otto changes its own schedules, so both open the composer on the words that ask it: you finish
+            // the sentence or just send, and Otto answers in the chat. The schedule goes in by a slug of its
+            // line, as a memory does: its words come from the Mac and could be anything, and what's sent from
+            // here is sent as you.
+            if t.enabled {
+                let name = MemoryDetailScreen.slug(t.gist)
+                Section {
+                    // Coloured here, not left to the tint: opened from a chip, the sheet inherits the bubble's ink.
+                    Button("Change", systemImage: "pencil") { ask("change schedule \(name): ") }.foregroundStyle(.blue)
+                    Button(t.repeating ? "Stop It" : "Cancel It", systemImage: "stop.circle", role: .destructive) { ask("stop schedule \(name)") }.foregroundStyle(.red)
+                } footer: {
+                    Text("Opens the chat with the words ready. Nothing changes until you send them.")
+                }
+            }
         }
     }
+
+    private func ask(_ words: String) { store.prefill = words; dismiss() }
 }
 
 /// Everything armed, soonest first, and what has already run.

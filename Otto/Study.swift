@@ -169,6 +169,12 @@ private struct CardsPane: View {
                     .rotation3DEffect(.degrees(run.flipped && !still ? 180 : 0), axis: (0, 1, 0)).scaleEffect(x: run.flipped && !still ? -1 : 1)
                     .contentShape(.rect)
                     .onTapGesture { withAnimation(still ? .easeInOut(duration: 0.2) : .snappy) { run.flipped.toggle() } }
+                    // To VoiceOver the card is a button that says which side is up and what a tap does.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(run.flipped ? "Answer: \(c.back)" : "Question: \(c.front)")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint(run.flipped ? "Shows the question" : "Shows the answer")
+                    .accessibilityAction { run.flipped.toggle() }
                     .padding(.horizontal)
                 if run.flipped {
                     HStack(spacing: 12) {
@@ -192,7 +198,7 @@ private struct CardsPane: View {
 
     private func next(_ queue: [Int], knew: Bool) {
         let i = queue[0]
-        withAnimation(.snappy) {
+        withAnimation(still ? .easeInOut(duration: 0.2) : .snappy) {
             run.flipped = false
             if knew { run.known.insert(i); run.queue = Array(queue.dropFirst()) }
             else {

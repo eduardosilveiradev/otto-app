@@ -33,7 +33,8 @@ private struct MemoryList: View {
         let q = typed
         return (ranked ?? m.items.indices.sorted { m.items[$0].updated > m.items[$1].updated }).filter { i in
             let it = m.items[i]
-            return (source == "all" || it.store == source)
+            return !store.forgotten.contains(it.id)   // gone on the Mac; the index catches up at its next rebuild
+                && (source == "all" || it.store == source)
                 && (cluster == nil || m.graph.c?[safe: i] == cluster)
                 && (!needsLook || it.badge != nil)
                 && (ranked != nil || q.isEmpty || it.name.localizedCaseInsensitiveContains(q) || it.description.localizedCaseInsensitiveContains(q))
@@ -44,7 +45,10 @@ private struct MemoryList: View {
         let items = shown
         List {
             // Not on an empty page: the summary would open on nothing.
-            if query.isEmpty && cluster == nil && !needsLook && source == "all" && !m.items.isEmpty && !m.summary.text.isEmpty {
+            // After a forget the summary may still say what was forgotten, until the Mac rewrites it: not shown meanwhile.
+            if query.isEmpty && cluster == nil && !needsLook && source == "all" && !m.items.isEmpty && !m.summary.text.isEmpty && !store.forgotten.isEmpty {
+                Section { Text("Otto is rewriting what it knows about you without what you just forgot. It’s back here when that’s done.").foregroundStyle(.secondary) }
+            } else if query.isEmpty && cluster == nil && !needsLook && source == "all" && !m.items.isEmpty && !m.summary.text.isEmpty {
                 Section {
                     NavigationLink {
                         ScrollView { MarkdownText(text: m.summary.text).padding() }
@@ -66,20 +70,23 @@ private struct MemoryList: View {
             if !items.isEmpty {
                 Section {
                     ForEach(items) { it in
-                        NavigationLink { MemoryDetailScreen(item: it) } label: { MemoryRow(item: it, asked: store.askedToForget.contains(it.id)) }
+                        NavigationLink { MemoryDetailScreen(item: it, direct: m.canForget == true) } label: { MemoryRow(item: it, asked: store.askedToForget.contains(it.id)) }
                     }
                 } header: {
-                    Text(ranked != nil ? "Best matches · \(items.count)" : items.count == m.items.count ? "Everything · \(items.count)" : "\(items.count) of \(m.items.count)")
+                    let total = m.items.count { !store.forgotten.contains($0.id) }
+                    Text(ranked != nil ? "Best matches · \(items.count)" : items.count == total ? "Everything · \(items.count)" : "\(items.count) of \(total)")
                 } footer: {
                     Text("Indexed \(ago(m.generatedAt))")
                 }
             }
         }
         .overlay { if items.isEmpty { empty } }
-        .searchable(text: $query, prompt: "Search memory")
+        .searchable(if: !m.items.isEmpty, text: $query, prompt: "Search memory")   // nothing kept yet: nothing to search
         .onSubmit(of: .search) { Task { await search() } }
         .onChange(of: query) { searchFailed = false; if query.isEmpty { rankedIn = nil } }
         .refreshable { await reload() }
+        // A forgotten memory is kept off the list until the Mac's index stops listing it; after that its mark can go.
+        .task(id: m.generatedAt) { store.forgotten.formIntersection(m.items.map(\.id)) }
         .toolbar {
             Menu {
                 Picker("Show", selection: $source) {
@@ -109,6 +116,10 @@ private struct MemoryList: View {
         if m.items.isEmpty {
             ContentUnavailableView("No memories yet", systemImage: "text.alignleft",
                                    description: Text("Tell Otto something worth keeping and it shows up here."))
+        } else if m.items.allSatisfy({ store.forgotten.contains($0.id) }) {
+            // The last ones were just forgotten: gone, though the Mac's list hasn't caught up. Not a filter's doing.
+            ContentUnavailableView("Nothing left", systemImage: "checkmark.circle",
+                                   description: Text("Otto has forgotten what was here. Its list catches up overnight."))
         } else if !typed.isEmpty {
             ContentUnavailableView.search(text: typed)
         } else {
@@ -174,9 +185,13 @@ struct MemoryDetailScreen: View {
     static func slug(_ name: String) -> String {
         String(String(name.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) || "-_.".unicodeScalars.contains($0) ? Character($0) : "-" }).prefix(80))
     }
+    /// The Mac forgets it itself (POST memory/forget, when its memory page says `canForget`). Without that,
+    /// forgetting goes through Otto in the chat, as the thread's "Forget it" does.
+    var direct = false
     @Environment(OttoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var forgetting = false
+    @State private var failed = false
     var body: some View {
         Loaded(path: "memory/item", query: ["id": item.id]) { (d: MemoryDetail, _) in
             List {
@@ -195,23 +210,48 @@ struct MemoryDetailScreen: View {
         }
         .navigationTitle(item.kind.capitalized)
         .navigationBarTitleDisplayMode(.inline)
-        // Forgetting goes through Otto, as the thread's "Forget it" does: a message in the chat, so it's
-        // on the record and Otto says when it's done. ponytail: no direct route; one would need the server.
         // Memories only: a note's name is its first line, not a handle "forget memory" can find.
         .toolbar {
-            if item.store != "notes" { Button("Forget", systemImage: "trash") { forgetting = true } }
+            if item.store != "notes" {
+                // A wrong fact is put right in the chat, where Otto rewrites it and says so: the box opens on
+                // the memory's name, ready for what it should say instead.
+                Button("Correct", systemImage: "pencil") { store.prefill = "correct memory \(Self.slug(item.name)): " }
+                Button("Forget", systemImage: "trash") { forgetting = true }
+            }
         }
-        .confirmationDialog("Ask Otto to forget this?", isPresented: $forgetting, titleVisibility: .visible) {
-            Button("Ask Otto to forget it", role: .destructive) {
-                store.send("forget memory \(Self.slug(item.name))")
-                store.askedToForget.insert(item.id)
-                dismiss()
+        // The words say which of the two will happen: gone now, or asked for in the chat.
+        .confirmationDialog(direct ? "Forget this?" : "Ask Otto to forget this?", isPresented: $forgetting, titleVisibility: .visible) {
+            Button(direct ? "Forget" : "Ask Otto to forget it", role: .destructive) {
+                // Asked to forget: what this phone kept of the Mac's pages goes now, whichever way the asking travels
+                // and whether or not its answer comes back. Nothing forgotten is left to read here with the Mac away.
+                store.backend.dropKept()
+                if direct { Task { await forget() } } else {
+                    store.send("forget memory \(Self.slug(item.name))")
+                    store.askedToForget.insert(item.id)
+                    dismiss()
+                }
             }
         } message: {
             // A dialog's message is never clipped, so a long memory is cut to about what its row shows.
             let what = item.description.count > 80 ? String(item.description.prefix(79)) + "…" : item.description
-            Text("“\(what)” goes to Otto as a message in your chat, and Otto confirms there when it’s gone.")
+            Text(direct ? "“\(what)” is deleted from what Otto keeps. It can’t be brought back."
+                 : "“\(what)” goes to Otto as a message in your chat, and Otto confirms there when it’s gone.")
         }
+        // No answer isn't a no: the Mac may have deleted it and the reply been lost. Asking again is safe either way.
+        .alert("Couldn’t confirm", isPresented: $failed) {
+            Button("Try Again") { Task { await forget() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your Mac didn’t answer, so this may or may not be forgotten yet. Trying again does no harm.")
+        }
+    }
+
+    /// Straight to the Mac. `ok` false means it had no such memory any more, which is what was asked for.
+    private func forget() async {
+        struct Done: Decodable { let ok: Bool }
+        guard (await store.backend.dash("memory/forget", method: "POST", body: ["id": item.id]) as Done?) != nil else { failed = true; return }
+        store.forgotten.insert(item.id)
+        dismiss()
     }
 }
 
@@ -241,7 +281,7 @@ struct PeopleScreen: View {
                 }
             }
             .emptyState(p.cards.isEmpty, "Nobody yet", systemImage: "person.2", "Tell Otto who someone is and they show up here.")
-            .searchable(text: $query, prompt: "Search people")
+            .searchable(if: !p.cards.isEmpty, text: $query, prompt: "Search people")
             .refreshable { await reload() }
         }
         .navigationTitle("People").navigationBarTitleDisplayMode(.inline)
@@ -259,6 +299,7 @@ private struct PersonScreen: View {
     let card: PersonCard
     @Environment(OttoStore.self) private var store
     @State private var mentions: [MemoryItem] = []
+    @State private var canForget = false
 
     var body: some View {
         List {
@@ -286,14 +327,16 @@ private struct PersonScreen: View {
             }
             if !mentions.isEmpty {
                 Section("In memory") {
-                    ForEach(mentions) { it in NavigationLink { MemoryDetailScreen(item: it) } label: { MemoryRow(item: it) } }
+                    ForEach(mentions) { it in NavigationLink { MemoryDetailScreen(item: it, direct: canForget) } label: { MemoryRow(item: it, asked: store.askedToForget.contains(it.id)) } }
                 }
             }
         }
         .navigationTitle(card.name).navigationBarTitleDisplayMode(.inline)
         .task {
             guard !card.mentions.isEmpty, let m: DashMemory = await store.backend.dash("memory") else { return }
-            mentions = card.mentions.compactMap { m.items[safe: $0] }
+            // As the Memory page lists them: one that was forgotten stays off this list too, and Forget here works the same way.
+            mentions = card.mentions.compactMap { m.items[safe: $0] }.filter { !store.forgotten.contains($0.id) }
+            canForget = m.canForget == true
         }
     }
 }

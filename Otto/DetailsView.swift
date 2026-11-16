@@ -1,4 +1,6 @@
 import SwiftUI
+import UserNotifications
+import VisionKit
 
 /// The contact card: what Otto knows about today, and the few settings there are.
 struct DetailsView: View {
@@ -9,6 +11,9 @@ struct DetailsView: View {
     @AppStorage("serverURL") private var server = ""
     @AppStorage("serverToken") private var token = ""
     @AppStorage("callNumber") private var callNumber = ""
+    /// What a web call needs (CallManager reads them when one starts). Empty, the phone button dials the number above.
+    @AppStorage("vapiPublicKey") private var callKey = ""
+    @AppStorage("vapiAssistantId") private var callAssistant = ""
     /// Nil until the Mac has said; the switch shows on and stays put until then.
     @State private var speakReplies: Bool?
     /// Keepalive: instant notifications for some battery. Read by Keepalive.enabled.
@@ -19,6 +24,18 @@ struct DetailsView: View {
     /// Set each time the address or token is submitted; the check under the token answers for it.
     @State private var submitted: UUID?
     @State private var serverCheck: ServerCheck?
+    /// Whether this phone may show Otto's banners: read on opening and on coming back from Settings.
+    @State private var allowed: Notifier.Allowed?
+    @Environment(\.scenePhase) private var phase
+    /// The pairing link the fields were just filled from, until its check has come back.
+    @State private var linked: PairingLink?
+    /// The Mac keeps a list of what Otto may do without asking. False until it has answered with one,
+    /// so a server from before approval scopes shows no row that leads nowhere.
+    @State private var hasRules = false
+    /// This Mac has answered for the rules list before: the row stays with the Mac out of reach, since that is
+    /// where a lasting yes is taken back (its page shows the kept list, or says it can't reach the Mac).
+    @AppStorage("otto.rulesSeen") private var rulesSeen = false
+    @State private var scanning = false
     enum ServerCheck: Equatable { case checking, connected, failed(String) }
     #if DEBUG
     /// `-details -checkServer` opens scrolled to the server fields and submits them, for screenshots.
@@ -39,7 +56,7 @@ struct DetailsView: View {
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
                             if let line = store.backend is MockBackend ? "Sample data"
-                                : !store.connected ? "Asleep. Can’t reach your Mac." : nil {
+                                : store.asleep ? (store.noNetwork ? "Asleep. This phone is offline." : "Asleep. Can’t reach your Mac.") : nil {
                                 Text(line).font(.subheadline).foregroundStyle(.secondary)
                             }
                         }
@@ -69,6 +86,9 @@ struct DetailsView: View {
                 Section {
                     NavigationLink { StatusScreen() } label: { Label("Status", systemImage: "gauge.with.dots.needle.33percent") }
                     NavigationLink { DevicesScreen() } label: { Label("Devices", systemImage: "iphone") }
+                    if hasRules || rulesSeen {
+                        NavigationLink { RulesScreen() } label: { Label("Allowed without asking", systemImage: "checkmark.shield") }
+                    }
                     NavigationLink { GlassesScreen() } label: { Label { Text("Glasses") } icon: { Image(systemName: "eyeglasses").imageScale(.small) } }
                 }
                 .labelStyle(PlainIcon())
@@ -91,8 +111,24 @@ struct DetailsView: View {
                             }))
                     }
                     Toggle("Stay connected in background", isOn: $stayAwake)
+                    // Off or never asked (onboarding's "Not now"): said here, with the way to turn them on. Only
+                    // ever on this tap: the system's prompt is never thrown up unasked.
+                    if let allowed, allowed != .yes {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Button(allowed == .no ? "Turn On Notifications in Settings" : "Turn On Notifications") {
+                                Task {
+                                    if allowed == .no, let url = URL(string: UIApplication.openNotificationSettingsURLString) { await UIApplication.shared.open(url) }
+                                    else { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
+                                    self.allowed = await Notifier.allowed()
+                                }
+                            }
+                            Text("They’re off, so this phone can’t alert you itself: reminders and approvals reach you only through Bark, if your Mac has it set up.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
                     NavigationLink("Settings") { SettingsView() }
                 }
+                .task(id: phase) { allowed = await Notifier.allowed() }
 
                 Section {
                     labeled("Server address") {
@@ -110,16 +146,40 @@ struct DetailsView: View {
                         if let serverCheck { checkLine(serverCheck) }
                     }
                     .id("server")
+                    if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
+                        Button("Scan a pairing code", systemImage: "qrcode.viewfinder") { scanning = true }
+                    }
                     labeled("Otto’s phone number") {
                         TextField("Otto’s phone number", text: $callNumber, prompt: Text(verbatim: "+1 555 0100")).keyboardType(.phonePad)
                     }
                 } header: { Text("Server") } footer: {
-                    Text("Over Tailscale. Quit and reopen the app after changing these.")
+                    Text("Over Tailscale. Paste a pairing link into the address to fill both. Quit and reopen the app after changing these.")
                 }
+
                 .listRowInsets(.vertical, 10)   // 20 between fields
-                .onChange(of: server) { submitted = nil; serverCheck = nil }
-                .onChange(of: token) { submitted = nil; serverCheck = nil }
+                .onChange(of: server) {
+                    // A pairing link pasted into the address is the whole pairing: both fields, then the check.
+                    if let link = PairingLink(server) { apply(link); return }
+                    if linked?.server == server { return }   // just filled from a link: its check is on its way
+                    submitted = nil; serverCheck = nil
+                }
+                .onChange(of: token) { if linked?.token == token { return }; submitted = nil; serverCheck = nil }
                 .task(id: submitted) { if submitted != nil { await checkServer() } }
+
+                Section {
+                    labeled("Vapi public key") {
+                        TextField("Vapi public key", text: $callKey, prompt: Text(verbatim: "from your Vapi dashboard"))
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    }
+                    labeled("Vapi assistant ID") {
+                        TextField("Vapi assistant ID", text: $callAssistant, prompt: Text(verbatim: "the assistant that answers as Otto"))
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    }
+                } header: { Text("Calls in the app") } footer: {
+                    Text(callKey.isEmpty || callAssistant.isEmpty ? "With both filled in, the phone button calls Otto inside the app. Without them it dials the number above."
+                         : "The phone button calls Otto inside the app.")
+                }
+                .listRowInsets(.vertical, 10)
                 }
                 // Messages' rows are glass over the blurred thread, not solid grey.
                 .listRowBackground(Rectangle().fill(Color(UIColor { $0.userInterfaceStyle == .dark ? .white.withAlphaComponent(0.07) : .white.withAlphaComponent(0.65) })))
@@ -129,6 +189,8 @@ struct DetailsView: View {
             .task {
                 async let s: Void = store.setSnooze(nil)
                 speakReplies = await store.backend.speakReplies(set: nil)
+                hasRules = (await store.backend.dash("rules") as RulesScreen.Rules?) != nil
+                if hasRules { rulesSeen = true }
                 await s
             }
             .navigationDestination(item: $screen) { name in
@@ -146,6 +208,7 @@ struct DetailsView: View {
                 case "Status": StatusScreen()
                 case "Settings": SettingsView()
                 case "Glasses": GlassesScreen()
+                case "Rules": RulesScreen()
                 default: DevicesScreen()
                 }
             }
@@ -157,6 +220,20 @@ struct DetailsView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $scanning) {
+                QRScanner { code in
+                    scanning = false
+                    if let link = PairingLink(code) { apply(link) } else { serverCheck = .failed("That isn’t an Otto pairing code.") }
+                } failed: {
+                    scanning = false
+                    serverCheck = .failed("The scanner isn’t available right now. Paste the link into the address instead.")
+                }
+                .ignoresSafeArea()
+                .overlay(alignment: .topTrailing) {
+                    Button("Cancel", systemImage: "xmark") { scanning = false }
+                        .labelStyle(.iconOnly).buttonStyle(.glass).controlSize(.large).padding()
+                }
+            }
             // Rows scrolled up blur away under the clock and the back button, as in Settings; no ruled line.
             .scrollEdgeEffectStyle(.soft, for: .top)
             // The glass behind has no colour for that edge to fade into, so the rows fade themselves: clear
@@ -173,6 +250,17 @@ struct DetailsView: View {
             }
             .scrollContentBackground(.hidden)
             .task {
+                #if DEBUG
+                // `-pasteLink <otto://pair…>`: as if a pairing link had just been pasted into the address, for screenshots.
+                if let link = UserDefaults.standard.string(forKey: "pasteLink") {
+                    try? await Task.sleep(for: .seconds(1)); server = link
+                    try? await Task.sleep(for: .seconds(1)); proxy.scrollTo("server", anchor: .center); return
+                }
+                #endif
+                #if DEBUG
+                // `-notificationsOff`: the row that says so sits beside the settings, down the card.
+                if CommandLine.arguments.contains("-notificationsOff") { try? await Task.sleep(for: .seconds(2)); proxy.scrollTo("server", anchor: .bottom); return }
+                #endif
                 guard checkOnOpen else { return }
                 submitted = UUID()
                 try? await Task.sleep(for: .seconds(2))   // after the brief has loaded above it
@@ -180,6 +268,14 @@ struct DetailsView: View {
             }
             }
         }
+    }
+
+    /// From the card's own scanner, or pasted into its address field: the owner's act, so it fills the fields,
+    /// where every value it brought can be read, and runs the check.
+    private func apply(_ link: PairingLink) {
+        linked = link
+        server = link.server; token = link.token
+        submitted = UUID()   // the call keys it brought wait for this check (checkServer)
     }
 
     /// A label over its field. The field carries the same name for VoiceOver, so the label is hidden from it.
@@ -222,17 +318,26 @@ struct DetailsView: View {
         serverCheck = .checking
         var req = URLRequest(url: url.appending(path: "app/settings"), timeoutInterval: 10)
         req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
-        var status: Int?, failure: (any Error)?
-        do { status = (try await URLSession.shared.data(for: req).1 as? HTTPURLResponse)?.statusCode } catch { failure = error }
+        var status: Int?, failure: (any Error)?, otto = false
+        do {
+            let (body, answer) = try await URLSession.shared.data(for: req)
+            status = (answer as? HTTPURLResponse)?.statusCode; otto = ServerProblem.isOtto(body)
+        } catch { failure = error }
         guard !Task.isCancelled else { return }   // edited or submitted again meanwhile
         serverCheck = switch ServerProblem(status: status, error: failure) {
+        case nil where !otto: .failed(ServerProblem.notOtto.message)
         case nil: .connected
         case .unreachable?, .timedOut?: .failed("Can’t reach that address. Check it, and that Tailscale is on.")
         case .refused?: .failed("The server didn’t accept that token. Check it, or make a new one on your Mac.")
         case let problem?: .failed(problem.message)
         }
         if case .failed(let why) = serverCheck { AccessibilityNotification.Announcement(why).post() }
-        else { AccessibilityNotification.Announcement("Connected").post() }
+        else {
+            AccessibilityNotification.Announcement("Connected").post()
+            // What a link said about calls is kept only now: that Mac has taken the link's token. Both or neither.
+            if let link = linked, link.server == s, link.token == t, let key = link.callKey, let assistant = link.callAssistant { callKey = key; callAssistant = assistant }
+            linked = nil
+        }
     }
 
     /// How long Otto is holding things back, how far through the hold, and what's waiting.

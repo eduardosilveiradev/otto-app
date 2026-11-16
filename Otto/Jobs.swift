@@ -198,7 +198,9 @@ struct JobCard: View {
 
             Divider().padding(.top, 12)
             Button { open = true } label: {
-                Text("Open job").font(size: 15, relativeTo: .subheadline).foregroundStyle(Color.actionInk)
+                // The card shows three answers at most; the rest are in the sheet, and the way in says so.
+                let more = job.needsYou ? max(0, (job.question?.answers.count ?? 0) - 3) : 0
+                Text(more > 0 ? "Open job · ^[\(more) more answer](inflect: true)" : "Open job").font(size: 15, relativeTo: .subheadline).foregroundStyle(Color.actionInk)
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -265,7 +267,7 @@ struct JobSheet: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(job.title.isEmpty ? String(localized: "Coding job") : job.title)
                         .font(.title3.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                    HStack(spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {   // the pill starts the line when the text beside it wraps
                         if job.needsYou { NeedsMark() } else { Pill(text: job.stateLabel, tint: job.state == "failed" ? .red : .secondary) }
                         TimelineView(.periodic(from: .now, by: 30)) { tl in
                             Text([job.project, job.meta(now: tl.date)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))

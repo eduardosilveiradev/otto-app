@@ -104,3 +104,55 @@ can't clear the widget until the app runs). Memory stays at 8: forgetting from t
 Otto in the chat, since there's no route to do it directly. Speed stays at 7: frame pacing and launch were measured
 against main and didn't change, and the launch still waits for the connection behind the splash
 (kept on purpose when the crew was removed, `763e3fa`).
+
+## Second run, 16 Nov 2026: a blind council
+
+The first run's scores above were given by reviewers who had been told what changed each round,
+and they wandered between 8.5 and 9. This run scored the same twelve axes with two reviewers who
+were told nothing: Claude Opus 5.5 (effort xhigh) and GPT-6.1-Sol. Every round was a new review
+from one fixed prompt (`council-prompt.md`, sent word for word), over a folder holding only the
+current screenshots, the current source, the rival notes and `server-contract.md`. No round number,
+no earlier scores, no list of changes.
+
+Each reviewer gave two overall scores. "Overall" counts a server-dependent feature as present when
+the app's side is complete and safe against today's server and the contract is exact enough to
+build from. "Today" is the app against a server with none of the contract.
+
+| Round | Code reviewed | Opus overall | Opus today | Sol overall | Sol today | Contract items passing (Opus / Sol) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `2fedd46` | 8.7 | 8.3 | 8.0 | 7.3 | 6 of 6 / not noted |
+| 2 | `0f83924` | 8.8 | 8.4 | 8.2 | 7.5 | 9 of 10 / 7 of 10 |
+| 3 | `9c66c86` | 9.0 | 8.7 | 8.0 | 7.3 | 9 of 11 / 8 of 11 |
+| 4 | `8a75f81` | 9.1 | 8.7 | 8.5 | 7.8 | 11 of 11 / 10 of 11 |
+| 5 | `9fe3953` | 8.6 | 8.3 | 8.4 | 7.6 | 11 of 11 / 10 of 11 |
+| 6 | `4cf2af9` | 9.1 | 8.6 | 8.6 | 7.7 | 11 of 11 / 11 of 11 |
+
+Otto's score per axis, each round (Opus / Sol):
+
+| Axis | Round 1 | Round 2 | Round 3 | Round 4 | Round 5 | Round 6 |
+| --- | --- | --- | --- | --- | --- | --- |
+| First run and pairing | 8.5 / 7.5 | 8.6 / 8.0 | 8.7 / 8 | 7.8 / 8.5 | 7.5 / 8 | 6.8 / 7.5 |
+| Thread and composer | 9 / 9 | 9.6 / 8.5 | 9.3 / 8.5 | 9.3 / 8.5 | 9.0 / 8.5 | 9.2 / 9 |
+| Voice | 8.3 / 7 | 8.0 / 7.5 | 9.0 / 8 | 9.0 / 8 | 8.7 / 8 | 8.8 / 8 |
+| Thinking and working | 8.8 / 8 | 9.0 / 8.5 | 9.2 / 8.5 | 9.2 / 10 | 9.2 / 9 | 9.4 / 9 |
+| Background work and notifications | 8.5 / 8 | 8.5 / 8.0 | 8.3 / 8 | 7.8 / 9 | 7.8 / 8 | 8.0 / 8 |
+| Memory | 8.5 / 8 | 10 / 9.0 | 9.2 / 9 | 9.4 / 9 | 9.3 / 8 | 9.4 / 10 |
+| Approvals and trust | 8.8 / 8 | 8.9 / 8.5 | 9.3 / 7.5 | 9.6 / 8 | 9.5 / 8.5 | 9.1 / 8.5 |
+| System integration | 9 / 9 | 9.5 / 8.5 | 9.3 / 8.5 | 9.5 / 9 | 8.8 / 9 | 9.4 / 10 |
+| Motion and haptics | 9.2 / 8.5 | 9.2 / 9.0 | 9.5 / 9 | 9.6 / 10 | 9.0 / 9 | 9.5 / 9 |
+| Visual craft | 8.8 / 8.5 | 9.0 / 8.5 | 9.0 / 9 | 9.4 / 10 | 9.6 / 10 | 9.8 / 9 |
+| Empty, error and offline states | 9 / 7.5 | 8.5 / 8.5 | 9.5 / 8.5 | 9.5 / 8.5 | 9.4 / 9 | 9.5 / 9 |
+| Perceived speed | 9.2 / 8 | 9.5 / 8.0 | 9.0 / 8.5 | 9.4 / 8.5 | 9.0 / 8.5 | 9.3 / 8.5 |
+
+A blind reviewer's score moves by a few tenths from round to round on the same axis with no
+change behind it (Opus's first-run score fell from 8.7 to 6.8 over four rounds while pairing only
+got safer, and its overall fell to 8.6 in round 5 because that reviewer read far more of the code).
+Read the table for its direction, not its decimals.
+
+The climb stopped after round 6 without meeting its stop rule (10 from both, or two rounds in a row
+with no new real fix). Every round had new real fixes: about 15 across the two seats in round 3, 10 in
+round 4, 17 in round 5, 9 in round 6. From round 5 on only defects were applied, since new
+code kept supplying the next round's findings; by round 6 both seats passed all eleven contract
+items and Sol's list was down to three small ones. What both say blocks 10 is in the pull request:
+no APNs on a free signing team, an assistant that lives on one Mac, replies that arrive whole, and
+a server contract that isn't built yet.
