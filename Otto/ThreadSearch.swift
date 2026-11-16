@@ -76,6 +76,9 @@ struct SearchResults: View {
     /// The older history is still on its way, or didn't come.
     let loading: Bool
     let failed: Bool
+    /// How many messages were searched, when that isn't all of them (the Mac hands over its newest 500 at
+    /// most): "no results" then says how far back it looked instead of sounding final.
+    var reach: Int? = nil
     /// What the composer and keyboard cover.
     let bottomInset: CGFloat
     /// Who wrote it, for VoiceOver.
@@ -88,7 +91,11 @@ struct SearchResults: View {
         Group {
             if hits.isEmpty {
                 Group {
-                    if loading { searchingOlder } else if failed { couldntLoad } else { ContentUnavailableView.search(text: query) }
+                    if loading { searchingOlder } else if failed { couldntLoad }
+                    else if let reach {
+                        ContentUnavailableView("No results in your newest \(reach) messages", systemImage: "magnifyingglass",
+                                               description: Text("Search on the phone doesn’t reach further back yet. Ask Otto to look for it."))
+                    } else { ContentUnavailableView.search(text: query) }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.bottom, bottomInset)
@@ -97,6 +104,10 @@ struct SearchResults: View {
                     LazyVStack(spacing: 14) {
                         // Where the older ones go: above the rest.
                         if loading { searchingOlder } else if failed { couldntLoad }
+                        else if let reach {
+                            Text("From your newest \(reach) messages. Search doesn’t reach further back yet.")
+                                .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        }
                         ForEach(hits) { m in
                             SearchHit(message: m, query: query, who: who(m)) { open(m) }
                         }

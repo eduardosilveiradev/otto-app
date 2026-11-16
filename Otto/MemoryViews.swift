@@ -116,6 +116,10 @@ private struct MemoryList: View {
         if m.items.isEmpty {
             ContentUnavailableView("No memories yet", systemImage: "text.alignleft",
                                    description: Text("Tell Otto something worth keeping and it shows up here."))
+        } else if m.items.allSatisfy({ store.forgotten.contains($0.id) }) {
+            // The last ones were just forgotten: gone, though the Mac's list hasn't caught up. Not a filter's doing.
+            ContentUnavailableView("Nothing left", systemImage: "checkmark.circle",
+                                   description: Text("Otto has forgotten what was here. Its list catches up overnight."))
         } else if !typed.isEmpty {
             ContentUnavailableView.search(text: typed)
         } else {

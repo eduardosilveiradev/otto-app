@@ -1,4 +1,5 @@
 import ActivityKit
+import AudioToolbox
 import MWDATCore
 import Network
 import SwiftUI
@@ -131,11 +132,7 @@ private struct MainRoot: View {
                 #endif
                 withAnimation(.easeOut(duration: 0.25)) { splashing = false }
             }
-            // An approval shows over whatever is on screen (the Chats list, a pip's thread), not only Otto's own
-            // thread. Closed only by its own buttons (Later hides it), so the setter has nothing to do.
-            .sheet(item: Binding(get: { store.shownApproval }, set: { _ in })) {
-                ApprovalSheet(request: $0).environment(store)
-            }
+            // (An approval's sheet goes up from ApprovalPresenter, over whatever is on top.)
             // A pairing link opened once the app is set up: named and confirmed before it replaces the Mac. After an
             // approval's sheet, never at the same time: two presentations from one place and neither shows.
             .alert(PairInbox.shared.link?.question ?? "", isPresented: Binding(get: { PairInbox.shared.link != nil && store.shownApproval == nil }, set: { if !$0 { PairInbox.shared.link = nil } }),
@@ -220,15 +217,29 @@ final class OttoStore {
     /// it comes from; the picture is decoded once here, not on every pass of the thread.
     var browser: LiveBrowser?
     /// Approval screens waiting on you, newest last; `Later` moves one into the pill over the composer.
-    var approvals: [ApprovalRequest] = []
-    var hiddenApprovals: Set<String> = []
+    var approvals: [ApprovalRequest] = [] { didSet { ApprovalPresenter.shared.sync(self) } }
+    var hiddenApprovals: Set<String> = [] { didSet { ApprovalPresenter.shared.sync(self) } }
     /// A code that just came in, open in its drawer (OTP.swift); the chip in its bubble reopens it.
     var otpDrawer: Message? = nil
     var shownApproval: ApprovalRequest? { approvals.last { !hiddenApprovals.contains($0.id) } }
     /// The newest one put off with Later, still live on the Mac: the pill that brings it back.
     var waitingApproval: ApprovalRequest? { approvals.last { hiddenApprovals.contains($0.id) } }
-    /// Decisions sent without an answer, by approval: only the same one may be sent again.
-    var unconfirmedApprovals: [String: ApprovalDecision] = [:]
+    /// Decisions sent without an answer, by approval: only the same one may be sent again. Kept across a
+    /// relaunch: the app killed after a lost ack must not come back offering the other answer for a decision
+    /// that may already have landed. Never resent on its own; dropped once the Mac no longer lists the approval.
+    var unconfirmedApprovals: [String: ApprovalDecision] = OttoStore.savedUnconfirmed() {
+        didSet {
+            UserDefaults.standard.set(try? JSONEncoder().encode(unconfirmedApprovals), forKey: "otto.unconfirmedApprovals")
+            UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: "otto.unconfirmedApprovalsAt")
+        }
+    }
+    /// What was saved, unless it's over an hour old: the Mac holds an approval for half an hour, so by then
+    /// every one of them is gone and nothing here can still bind (a server without the pending list never prunes).
+    private static func savedUnconfirmed(now: Date = .now) -> [String: ApprovalDecision] {
+        let d = UserDefaults.standard
+        guard now.timeIntervalSince1970 - d.double(forKey: "otto.unconfirmedApprovalsAt") < 3600 else { return [:] }
+        return d.data(forKey: "otto.unconfirmedApprovals").flatMap { try? JSONDecoder().decode([String: ApprovalDecision].self, from: $0) } ?? [:]
+    }
     /// The last one that lapsed on the Mac before it was answered: the pill says so until dismissed.
     var lapsedApproval: ApprovalRequest?
     /// Words for Otto's composer from elsewhere in the app, taken by it once (ChatView).
@@ -411,6 +422,7 @@ final class OttoStore {
             }
             expireVoiceWaits()
             markUndelivered()
+            ApprovalPresenter.shared.sync(self)   // again each second: a sheet that couldn't go up mid-transition goes up now
             // An approval past its time is gone on the Mac too: off the screen, unless it's showing its receipt.
             let lapsed = { (a: ApprovalRequest) in !self.keptApprovals.contains(a.id) && (LiveBackend.date(a.expires).map { $0 < .now } ?? false) }
             if let gone = approvals.last(where: lapsed) {
@@ -462,6 +474,9 @@ final class OttoStore {
         let since = Set(approvals.map(\.id)).subtracting(asked)
         approvals = Self.reconciled(approvals, with: pending, keeping: keptApprovals.union(since), decided: decidedApprovals)
         unconfirmedApprovals = unconfirmedApprovals.filter { id, _ in approvals.contains { $0.id == id } }
+        // One the Mac no longer lists takes its banner with it, as an approval_done does.
+        let gone = alertedApprovals.filter { id in !approvals.contains { $0.id == id } }
+        alertedApprovals.subtract(gone); Notifier.clear(gone.map(Notifier.approvalID))
         if !pending.isEmpty { lapsedApproval = nil }
         syncWidget()   // here too: a background refresh may run with no scene, so no tick
     }
@@ -877,10 +892,11 @@ final class OttoStore {
                         // When the Mac leaves the alert to the app: in front, the sheet is the alert; in the background
                         // (keep-awake holds the socket) it's a banner, if iOS will show one. Only then is the Mac told.
                         // Untold (notifications off, the app frozen), it sends its own push, so one always arrives.
-                        if backend.alertsApprovals {
+                        // In front it's told from the sheet itself, once that is on screen (sawApproval): a call, the
+                        // card or another sheet can be in its way, and then the Mac's push must still come.
+                        if backend.alertsApprovals, !foreground {
                             Task {
-                                if foreground { await backend.alerted(approval: a.id) }
-                                else if await Notifier.shared.post(approval: a) { alertedApprovals.insert(a.id); await backend.alerted(approval: a.id) }
+                                if await Notifier.shared.post(approval: a) { alertedApprovals.insert(a.id); await backend.alerted(approval: a.id) }
                             }
                         }
                     }
@@ -1314,7 +1330,23 @@ final class OttoStore {
     func stopTurn() async {
         let ok = await backend.stopTurn()
         UINotificationFeedbackGenerator().notificationOccurred(ok ? .success : .error)
+        stopUnconfirmed = !ok
     }
+    /// The Mac didn't confirm a Stop: said in an alert with Try Again, since Otto may still be working.
+    var stopUnconfirmed = false
+
+    /// An approval's sheet is on screen: when the Mac leaves the alert to the app, that is the alert, and only now
+    /// is the Mac told (within its 5 s, or its own push goes out as well, which is the safe way to be late).
+    func sawApproval(_ id: String) {
+        guard backend.alertsApprovals, sawApprovals.insert(id).inserted else { return }
+        // The Mac's push would have chimed; the sheet that stands in for it shouldn't arrive in silence. The
+        // system's message tone, or a buzz with the phone on silent.
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        AudioServicesPlayAlertSound(1007)
+        Task { await backend.alerted(approval: id) }
+    }
+
+    @ObservationIgnored private var sawApprovals: Set<String> = []
 
     func hideApproval(_ id: String) { hiddenApprovals.insert(id) }
     func reopenApproval(_ id: String) { hiddenApprovals.remove(id) }

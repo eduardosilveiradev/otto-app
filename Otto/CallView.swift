@@ -93,7 +93,7 @@ final class CallManager {
         self.vapi = vapi
         self.context = context
         Self.current = self
-        error = nil
+        error = nil; dropped = false
         lines = []; hearing = nil; startedAt = nil
         phase = .connecting
         vapi.eventPublisher.receive(on: DispatchQueue.main).sink { [weak self] event in
@@ -114,7 +114,9 @@ final class CallManager {
                 if t.transcriptType == .final { lines.append(line); hearing = nil } else { hearing = line }
             // The app's own words, not the system's ("Could not connect to the server."). A web call goes over
             // the internet to the call service, not to the Mac, so the Mac isn't what it blames.
-            case .error: fail("Couldn’t start the call. Check your connection and try again.")
+            // One that was already live dropped: it ends as a call does (its line and what was said go in the
+            // thread), and says so instead of claiming it never started.
+            case .error: fail(phase == .live ? "The call dropped. What was said up to then is in the chat." : "Couldn’t start the call. Check your connection and try again.")
             default: break
             }
         }.store(in: &bag)
@@ -141,12 +143,14 @@ final class CallManager {
     private func finish() {
         if phase == .live, context == nil, let start = startedAt {
             if let hearing { lines.append(hearing) }   // cut off mid-sentence: what was heard of it still counts
-            OttoStore.shared.logCall(CallRecord(seconds: max(1, Int(Date.now.timeIntervalSince(start).rounded())), lines: lines))
+            OttoStore.shared.logCall(CallRecord(seconds: max(1, Int(Date.now.timeIntervalSince(start).rounded())), lines: lines, dropped: dropped ? true : nil))
         }
         phase = .ended
     }
 
-    private func fail(_ message: String) { error = message; hangUp() }
+    private func fail(_ message: String) { dropped = phase == .live; error = message; hangUp() }
+    /// The error came once the call was live: it dropped, as against never starting.
+    private(set) var dropped = false
 
     /// Loudspeaker vs earpiece. The call's audio session is Vapi's; this only reroutes it.
     func toggleSpeaker() {
@@ -247,7 +251,7 @@ struct CallView: View {
     @ViewBuilder private var status: some View {
         switch call.phase {
         case .idle, .connecting: Text("calling…")
-        case .ended: Text(call.error == nil ? "call ended" : "call failed")
+        case .ended: Text(call.error == nil ? "call ended" : call.dropped ? "call dropped" : "call failed")
         case .live:
             if let start = call.startedAt {
                 Text(start, style: .timer).monospacedDigit()
