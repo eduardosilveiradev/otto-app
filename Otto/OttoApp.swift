@@ -1,6 +1,8 @@
+import ActivityKit
 import MWDATCore
 import SwiftUI
 import ThinkingOrbsKit
+import WidgetKit
 
 @main
 struct OttoApp: App {
@@ -11,8 +13,17 @@ struct OttoApp: App {
         Notifier.shared.register()   // the background task must be registered before launch ends
         Dictation.shared.setUp()     // the keyboard's mic requests arrive any time
         try? Wearables.configure()
+        // A call's Live Activity outlives an app that was killed mid-call; no call is live at launch.
+        Task { for a in Activity<CallActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
+        // `-callActivity`: a call's Live Activity 83 seconds in, for screenshots of the Lock Screen and the Dynamic Island.
+        if CommandLine.arguments.contains("-callActivity") {
+            Task {
+                try? await Task.sleep(for: .seconds(1))   // after the clean-up above
+                _ = try? Activity.request(attributes: CallActivityAttributes(), content: .init(state: .init(started: .now.addingTimeInterval(-83)), staleDate: nil))
+            }
+        }
         #endif
     }
 
@@ -163,6 +174,8 @@ final class OttoStore {
     var unconfirmedApprovals: [String: Bool] = [:]
     /// The last one that lapsed on the Mac before it was answered: the pill says so until dismissed.
     var lapsedApproval: ApprovalRequest?
+    /// What the widget was last given, so the group's defaults are written only when it changes.
+    @ObservationIgnored private var widgetAsk = WidgetData.ask
     /// The server sends "typing" frames; until one arrives (an older server), the app guesses.
     @ObservationIgnored private var serverTyping = false
 
@@ -331,6 +344,13 @@ final class OttoStore {
                 // went out unconfirmed: that may have landed, and "expired" might not be true.
                 if unconfirmedApprovals[gone.id] == nil { lapsedApproval = gone }
                 approvals.removeAll(where: lapsed)
+            }
+            // The Home Screen widget's line: the approval waiting on you, until the Mac would drop it.
+            let ask = (shownApproval ?? waitingApproval).flatMap { a in LiveBackend.date(a.expires).map { WidgetData.Ask(text: a.ask, expires: $0) } }
+            if ask != widgetAsk {
+                widgetAsk = ask
+                WidgetData.ask = ask
+                WidgetCenter.shared.reloadTimelines(ofKind: "dev.otto.chat")
             }
             // An ack that never came on a socket that still looks fine: try again every 15s.
             if live && n % 15 == 0 { Task { await resendPending() } }

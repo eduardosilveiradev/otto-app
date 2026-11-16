@@ -323,12 +323,13 @@ struct ChatView: View {
                         .font(.system(size: 16, weight: .semibold))
                         .frame(width: 40, height: 40)
                         .glassEffect(.regular.interactive(), in: .circle)
+                        .padding(2).contentShape(.rect).padding(-2)   // 44pt to tap, drawn at 40
                 }
                 .tint(.primary)
                 .accessibilityLabel("Scroll to bottom")
                 .padding(.trailing, 16)
                 .padding(.bottom, ui.bottomInset + 12)
-                .transition(.scale(scale: 0.6).combined(with: .opacity))
+                .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
             }
         }
         .animation(.snappy, value: scrolledUp)
@@ -344,14 +345,14 @@ struct ChatView: View {
                             .contentTransition(.interpolate)
                             .animation(.snappy, value: step)
                     }
-                    // 36pt to tap without reaching down into the composer or far up into the bubbles over it.
-                    .padding(.horizontal, 10).padding(.vertical, 10).contentShape(.rect)
+                    // 44pt to tap: half above the line, half below, the lower part under the composer's own touches.
+                    .padding(.horizontal, 10).padding(.vertical, 14).contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .font(size: 12, design: .monospaced, relativeTo: .caption).foregroundStyle(.secondary)
                 .accessibilityLabel("Otto: \(step)").accessibilityHint("Scrolls down to it")
                 .padding(.leading, 10).padding(.trailing, 62)
-                .padding(.bottom, ui.bottomInset - 4)
+                .padding(.bottom, ui.bottomInset - 8)
                 .transition(.opacity)
             }
         }
@@ -899,6 +900,7 @@ struct Composer: View {
                                 .symbolRenderingMode(.palette)
                                 .foregroundStyle(.white, Color.red)
                                 .frame(width: 36, height: 36)
+                                .padding(4).contentShape(.rect).padding(-4)   // 44pt to tap, laid out at 36
                         }
                         .accessibilityLabel("Send voice message")
                     } else {
@@ -1057,7 +1059,7 @@ struct Composer: View {
                         .frame(width: 64, height: 64)
                         .clipShape(.rect(cornerRadius: 12, style: .continuous))
                         .overlay(alignment: .topTrailing) {
-                            Button { withAnimation(.snappy) { attachments.removeAll { $0.id == a.id } } } label: {
+                            Button { withAnimation(still ? nil : .snappy) { attachments.removeAll { $0.id == a.id } } } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .symbolRenderingMode(.palette)
                                     .foregroundStyle(.white, Color.black.opacity(0.6))
@@ -1068,7 +1070,7 @@ struct Composer: View {
                             }
                             .accessibilityLabel("Remove photo")
                         }
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                        .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                 }
             }
             .padding(.horizontal, 10).padding(.top, 10)
@@ -2586,9 +2588,10 @@ private struct EmptyChat: View {
     let asleep: Bool
     let connected: Bool
 
-    private var title: LocalizedStringKey { connected ? "Say hi" : "Can’t reach your Mac" }
+    // Offline, the header already says the Mac is out of reach: this says what to check.
+    private var title: LocalizedStringKey { connected ? "Say hi" : "Waiting for your Mac" }
     private var line: String {
-        if !connected { return "What you send goes out when it’s back." }
+        if !connected { return "Check it’s awake and online. What you send goes out when it’s back." }
         return "Reminders, mail, plans: I’ll keep track of the rest."
     }
     var body: some View {

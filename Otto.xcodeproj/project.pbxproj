@@ -40,6 +40,7 @@
 		0A0000000000000000000032 /* Shared */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Shared; sourceTree = "<group>"; };
 		0A0000000000000000000061 /* OttoKeyboard */ = {isa = PBXFileSystemSynchronizedRootGroup; path = OttoKeyboard; sourceTree = "<group>"; };
 		0A00000000000000000000D1 /* OttoWidget */ = {isa = PBXFileSystemSynchronizedRootGroup; path = OttoWidget; sourceTree = "<group>"; };
+		0A00000000000000000000E0 /* WidgetData */ = {isa = PBXFileSystemSynchronizedRootGroup; path = WidgetData; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -50,7 +51,7 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		0A0000000000000000000004 = {isa = PBXGroup; children = (0A0000000000000000000002 /* Otto */, 0A0000000000000000000031 /* OttoShare */, 0A0000000000000000000061 /* OttoKeyboard */, 0A00000000000000000000D1 /* OttoWidget */, 0A0000000000000000000032 /* Shared */, 0A0000000000000000000005 /* Products */); sourceTree = "<group>"; };
+		0A0000000000000000000004 = {isa = PBXGroup; children = (0A0000000000000000000002 /* Otto */, 0A0000000000000000000031 /* OttoShare */, 0A0000000000000000000061 /* OttoKeyboard */, 0A00000000000000000000D1 /* OttoWidget */, 0A00000000000000000000E0 /* WidgetData */, 0A0000000000000000000032 /* Shared */, 0A0000000000000000000005 /* Products */); sourceTree = "<group>"; };
 		0A0000000000000000000005 /* Products */ = {isa = PBXGroup; children = (0A0000000000000000000001 /* Otto.app */, 0A0000000000000000000030 /* OttoShare.appex */, 0A0000000000000000000060 /* OttoKeyboard.appex */, 0A00000000000000000000D0 /* OttoWidget.appex */); name = Products; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
@@ -61,7 +62,7 @@
 			buildPhases = (0A0000000000000000000008 /* Sources */, 0A0000000000000000000003 /* Frameworks */, 0A0000000000000000000009 /* Resources */, 0A000000000000000000003A /* Embed Foundation Extensions */);
 			buildRules = ();
 			dependencies = (0A000000000000000000003D /* PBXTargetDependency */, 0A000000000000000000006B /* PBXTargetDependency */, 0A00000000000000000000DB /* PBXTargetDependency */);
-			fileSystemSynchronizedGroups = (0A0000000000000000000002 /* Otto */, 0A0000000000000000000032 /* Shared */);
+			fileSystemSynchronizedGroups = (0A0000000000000000000002 /* Otto */, 0A0000000000000000000032 /* Shared */, 0A00000000000000000000E0 /* WidgetData */);
 			packageProductDependencies = (0A0000000000000000000021 /* Vapi */, 0A0000000000000000000053 /* ThinkingOrbsKit */, 0A0000000000000000000054 /* VoiceGlowKit */, 0A00000000000000000000C2 /* MWDATCore */, 0A00000000000000000000C3 /* MWDATCamera */);
 			name = Otto;
 			productName = Otto;
@@ -98,7 +99,7 @@
 			buildPhases = (0A00000000000000000000D6 /* Sources */, 0A00000000000000000000D7 /* Frameworks */, 0A00000000000000000000D8 /* Resources */);
 			buildRules = ();
 			dependencies = ();
-			fileSystemSynchronizedGroups = (0A00000000000000000000D1 /* OttoWidget */);
+			fileSystemSynchronizedGroups = (0A00000000000000000000D1 /* OttoWidget */, 0A00000000000000000000E0 /* WidgetData */);
 			name = OttoWidget;
 			productName = OttoWidget;
 			productReference = 0A00000000000000000000D0 /* OttoWidget.appex */;
@@ -188,6 +189,7 @@
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Otto saves where you are when you ask it to.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Otto listens when you record a voice message, call, or dictate from the Otto keyboard.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "When your Mac can't be reached, the Otto keyboard's dictation is transcribed on this iPhone.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
@@ -215,6 +217,7 @@
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Otto saves where you are when you ask it to.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Otto listens when you record a voice message, call, or dictate from the Otto keyboard.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "When your Mac can't be reached, the Otto keyboard's dictation is transcribed on this iPhone.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
@@ -313,6 +316,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				CODE_SIGN_ENTITLEMENTS = OttoWidget.entitlements;
 				INFOPLIST_FILE = "OttoWidget-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Otto;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
@@ -332,6 +336,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				CODE_SIGN_ENTITLEMENTS = OttoWidget.entitlements;
 				INFOPLIST_FILE = "OttoWidget-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Otto;
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");

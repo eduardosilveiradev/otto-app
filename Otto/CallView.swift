@@ -1,3 +1,4 @@
+import ActivityKit
 import AVFoundation
 import Combine
 import SwiftUI
@@ -12,7 +13,7 @@ import VoiceGlowKit
 @MainActor @Observable
 final class CallManager {
     enum Phase { case idle, connecting, live, ended }
-    var phase = Phase.idle { didSet { Self.active = phase == .connecting || phase == .live } }
+    var phase = Phase.idle { didSet { Self.active = phase == .connecting || phase == .live; showOutside() } }
     /// The keepalive's silent audio must stay out of a call's audio session.
     static var active = false
     var muted = false
@@ -25,6 +26,18 @@ final class CallManager {
     private var bag = Set<AnyCancellable>()
     /// The request that sets the call up; cancelled when it's given up on, so it can't connect later.
     private var attempt: Task<Void, Never>?
+    /// The call on the Lock Screen and in the Dynamic Island while it's live (the audio keeps the app
+    /// running in the background, so it can end it itself).
+    private var activity: Activity<CallActivityAttributes>?
+
+    private func showOutside() {
+        if phase == .live, activity == nil, ActivityAuthorizationInfo().areActivitiesEnabled {
+            activity = try? Activity.request(attributes: CallActivityAttributes(), content: .init(state: .init(started: .now), staleDate: nil))
+        } else if phase == .ended || phase == .idle, let a = activity {
+            activity = nil
+            Task { await a.end(nil, dismissalPolicy: .immediate) }
+        }
+    }
 
     static var configured: Bool {
         let d = UserDefaults.standard

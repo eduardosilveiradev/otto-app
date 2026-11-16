@@ -184,6 +184,9 @@ struct ApprovalSheet: View {
                 Text(p.money(p.total)).monospacedDigit().font(size: 34, weight: .semibold, relativeTo: .largeTitle)
                 Text(p.merchant).font(.headline)
                 if let site = p.site { Text(site).font(.subheadline).foregroundStyle(.secondary) }
+                // The card is part of what Face ID approves, so it's with the amount, never under the fade.
+                Label(p.method, systemImage: "creditcard").font(.subheadline).foregroundStyle(.secondary)
+                    .labelStyle(PlainIcon()).padding(.top, 6)
             }
             .padding(.vertical, 4)
             .accessibilityElement(children: .combine)
@@ -218,10 +221,6 @@ struct ApprovalSheet: View {
             }
         } header: { Text("Items") }
 
-        Section {
-            Label(p.method, systemImage: "creditcard")
-        } header: { Text("Paying with") }
-        .labelStyle(PlainIcon())
 
     }
 
@@ -314,9 +313,12 @@ private struct DiffPreview: View {
                 let removed = !names && l.hasPrefix("-"), added = !names && l.hasPrefix("+")
                 let code = names ? Substring(l.drop { $0 == "-" || $0 == "+" || $0 == " " }) : l.dropFirst(removed || added || l.hasPrefix(" ") ? 1 : 0)
                 let lead = removed ? "− " : added ? "+ " : "  "
-                Text(verbatim: names ? String(code) : lead + code)
+                // The sign in its own column, so a wrapped line hangs under the code, not under the sign.
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    if !names { Text(verbatim: lead) }
+                    Text(verbatim: String(code)).fixedSize(horizontal: false, vertical: true)
+                }
                     .font(.system(.caption, design: .monospaced).weight(names ? .semibold : .regular))
-                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10).padding(.vertical, 2)
                     .background(removed ? Color.redTint : added ? Color.greenTint : Color.clear)
