@@ -208,7 +208,9 @@ struct MemoryDetailScreen: View {
                 dismiss()
             }
         } message: {
-            Text("“\(item.description)” goes to Otto as a message in your chat, and Otto confirms there when it’s gone.")
+            // A dialog's message is never clipped, so a long memory is cut to about what its row shows.
+            let what = item.description.count > 80 ? String(item.description.prefix(79)) + "…" : item.description
+            Text("“\(what)” goes to Otto as a message in your chat, and Otto confirms there when it’s gone.")
         }
     }
 }
