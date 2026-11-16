@@ -100,9 +100,12 @@ struct WalkieView: View {
             Group {
                 if stuck {
                     // The thread's own words for an unsent message, and the same way on.
-                    Button(action: retry) {
-                        (Text(sent?.pending == true ? "Not delivered · " : "Otto didn’t answer · ").foregroundStyle(Color.redInk)
-                         + Text("Try again").foregroundStyle(Color.actionInk)).hitSlop()
+                    // Not delivered: the same note again (the thread's retry, so no second copy). Delivered and
+                    // unanswered: Otto has it and may be acting on it, so the way on is the chat, not a second send.
+                    let undelivered = sent?.pending == true
+                    Button { if undelivered { retry() } else { dismiss() } } label: {
+                        (Text(undelivered ? "Not delivered · " : "No answer yet · ").foregroundStyle(Color.redInk)
+                         + Text(undelivered ? "Try again" : "Check the chat").foregroundStyle(Color.actionInk)).hitSlop()
                     }
                     .buttonStyle(.plain)
                 } else {
@@ -133,7 +136,7 @@ struct WalkieView: View {
             }
             #endif
         }
-        // "Thinking" gives up after a minute, and the note is offered again.
+        // "Thinking" gives up after a minute: the caption then points at the chat, or offers the note again if it never left.
         .task(id: sentAt) {
             guard sentAt != nil else { return }
             try? await Task.sleep(for: .seconds(60))
@@ -229,25 +232,18 @@ struct WalkieView: View {
         note = store.sendVoice(url)
     }
 
-    /// The same note while it's still unsent (the thread's retry, so no second copy); said again
-    /// once it got there and nothing came back.
+    /// The same note again while it's still unsent: the thread's retry, so no second copy.
     private func retry() {
         guard let m = sent else { return }
-        if m.pending == true {
-            store.retry(m.id)
-            gaveUp = false
-            sentAt = .now
-        } else {
-            let copy = URL.temporaryDirectory.appending(path: "\(UUID().uuidString).m4a")
-            guard (try? FileManager.default.copyItem(at: VoiceStore.url(m.id), to: copy)) != nil else { return }
-            send(copy)
-        }
+        store.retry(m.id)
+        gaveUp = false
+        sentAt = .now
     }
 
-    /// The first thing Otto says after the note went up. Plays its voice when it has one;
-    /// a text-only answer is read out on the phone so you never have to look.
+    /// Otto's answer to the note. Plays its voice when it has one; a text-only answer is read out on the
+    /// phone so you never have to look.
     private func pickUpReply() {
-        if let since = sentAt, let m = store.messages.last(where: { $0.from == .otto && $0.date >= since }) {
+        if let since = sentAt, let m = Self.answer(in: store.messages, to: sent?.wireID, since: since) {
             sentAt = nil
             reply = m
         }
@@ -262,6 +258,14 @@ struct WalkieView: View {
             speech.speak(AVSpeechUtterance(string: m.text))
         }
         // Otherwise its voice is still on the way: the text goes out first and the clip follows.
+    }
+
+    /// Which message answers the note: the one that names it (reply_to) when there is one, else the first thing
+    /// Otto said after it that it wasn't saying anyway. Something sent unprompted (it has a `src`: a reminder,
+    /// a brief) in the meantime is news, not the answer, and isn't read out as one.
+    nonisolated static func answer(in messages: [Message], to note: String?, since: Date) -> Message? {
+        let after = messages.filter { $0.from == .otto && $0.date >= since }
+        return after.first { note != nil && $0.replyTo == note } ?? after.first { $0.src == nil }
     }
 
     /// Feeds the waveform: your level while you talk, a bouncing trace while Otto talks.

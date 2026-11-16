@@ -278,6 +278,8 @@ struct DevicesScreen: View {
     struct Me: Decodable { let id: String }
     @Environment(OttoStore.self) private var store
     @State private var me: String?
+    /// A sign-out the Mac didn't confirm: that dashboard may still be signed in, so it's said.
+    @State private var failed = false
 
     var body: some View {
         Loaded(path: "devices") { (d: Devices, reload) in
@@ -299,7 +301,8 @@ struct DevicesScreen: View {
                                 Button("Sign Out", role: .destructive) {
                                     Task {
                                         struct Revoked: Decodable { let revoked: Bool }
-                                        let _: Revoked? = await store.backend.dash("devices/\(dev.id)", method: "DELETE")
+                                        let done: Revoked? = await store.backend.dash("devices/\(dev.id)", method: "DELETE")
+                                        if done == nil { failed = true }
                                         await reload()
                                     }
                                 }
@@ -311,6 +314,9 @@ struct DevicesScreen: View {
             .refreshable { await reload() }
         }
         .navigationTitle("Devices").navigationBarTitleDisplayMode(.inline)
+        .alert("Still signed in", isPresented: $failed) { Button("OK") {} } message: {
+            Text("Your Mac didn’t confirm, so that dashboard may still be signed in. Try again.")
+        }
         .task { me = (await store.backend.dash("me") as Me?)?.id }
     }
 

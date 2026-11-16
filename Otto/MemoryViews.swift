@@ -82,6 +82,8 @@ private struct MemoryList: View {
         .onSubmit(of: .search) { Task { await search() } }
         .onChange(of: query) { searchFailed = false; if query.isEmpty { rankedIn = nil } }
         .refreshable { await reload() }
+        // A forgotten memory is kept off the list until the Mac's index stops listing it; after that its mark can go.
+        .task(id: m.generatedAt) { store.forgotten.formIntersection(m.items.map(\.id)) }
         .toolbar {
             Menu {
                 Picker("Show", selection: $source) {
@@ -203,7 +205,12 @@ struct MemoryDetailScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         // Memories only: a note's name is its first line, not a handle "forget memory" can find.
         .toolbar {
-            if item.store != "notes" { Button("Forget", systemImage: "trash") { forgetting = true } }
+            if item.store != "notes" {
+                // A wrong fact is put right in the chat, where Otto rewrites it and says so: the box opens on
+                // the memory's name, ready for what it should say instead.
+                Button("Correct", systemImage: "pencil") { store.prefill = "correct memory \(Self.slug(item.name)): " }
+                Button("Forget", systemImage: "trash") { forgetting = true }
+            }
         }
         // The words say which of the two will happen: gone now, or asked for in the chat.
         .confirmationDialog(direct ? "Forget this?" : "Ask Otto to forget this?", isPresented: $forgetting, titleVisibility: .visible) {
@@ -217,11 +224,15 @@ struct MemoryDetailScreen: View {
         } message: {
             // A dialog's message is never clipped, so a long memory is cut to about what its row shows.
             let what = item.description.count > 80 ? String(item.description.prefix(79)) + "…" : item.description
-            Text(direct ? "“\(what)” is deleted from what Otto keeps. It can’t be brought back."
+            Text(direct ? "“\(what)” is deleted from what Otto keeps. It can’t be brought back. The summary catches up when it’s next rewritten, tonight."
                  : "“\(what)” goes to Otto as a message in your chat, and Otto confirms there when it’s gone.")
         }
-        .alert("Not forgotten", isPresented: $failed) { Button("OK") {} } message: {
-            Text("Couldn’t reach your Mac, so Otto still has it. Try again when Otto is back.")
+        // No answer isn't a no: the Mac may have deleted it and the reply been lost. Asking again is safe either way.
+        .alert("Couldn’t confirm", isPresented: $failed) {
+            Button("Try Again") { Task { await forget() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your Mac didn’t answer, so this may or may not be forgotten yet. Trying again does no harm.")
         }
     }
 

@@ -35,12 +35,22 @@ what Otto knows about your day.
   while it lasts
 - An approval put off with Later waits over the composer with the time the
   Mac still holds it
+- Otto's work on the Lock Screen and in the Dynamic Island once it has taken
+  20 seconds (a reply in the making, or a coding job), kept current while the
+  app runs
+- PDFs: shared from any app, or from the composer's + menu; they go as
+  pictures of their pages
+- Pairing from a link: an `otto://pair` link tapped anywhere (the Camera's QR
+  banner, a message), pasted into the card's address field, or scanned there
 - Built here and waiting on the server
   (`design/hillclimb-2026-11-16/server-contract.md`): a yes that lasts for the
   task or for good, with a page in the contact card to take it back; who a
   message Otto wants to send goes to, on its approval; approvals kept right
-  while the phone was asleep; and Forget on a memory's page without a chat
-  message. Until the server sends them, none of these shows.
+  while the phone was asleep; Forget on a memory's page without a chat
+  message; the app's own alert for an approval; and taking over the page Otto
+  has open in Chrome when it's stuck at a sign-in. Until the server sends
+  them, none of these shows. `Scripts/contract-server.ts` stands in for that
+  server on the simulator.
 - Siri: "Ask Otto" answers out loud, and anything that would change something
   opens the chat on its confirm buttons. "Save this place in Otto" saves where
   you are with what you say about it. "Snap to Otto" files a photo (homework,
@@ -68,10 +78,10 @@ handy for poking at the UI.
    on the server and scan the QR code it opens (or paste its `otto://pair` link,
    or type the URL and token in). Later changes go in Otto's contact card.
 
-Optional, also in the contact card: a phone number for Otto's line. In-app
-calls need a Vapi public key and assistant id, which have no settings screen
-yet: they are read from the app's defaults (`vapiPublicKey`,
-`vapiAssistantId`, and `ownerNumber` for caller recognition).
+Optional, also in the contact card: a phone number for Otto's line, and under
+"Calls in the app" the Vapi public key and assistant id that in-app calls
+need. `ownerNumber` (for caller recognition) is still read from the app's
+defaults only.
 
 ## How it talks to the server
 

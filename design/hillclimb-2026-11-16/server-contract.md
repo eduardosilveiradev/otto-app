@@ -1,6 +1,6 @@
 # What the iPhone app expects from otto-core that the server doesn't send yet
 
-Six additions to `otto/server.ts` (the "App transport" block) and `otto/dash.ts`. The app's side of
+Ten additions to `otto/server.ts` (the "App transport" block) and `otto/dash.ts`. The app's side of
 each is built. Every one is switched on by something the server sends first, so against today's
 server the app behaves exactly as it does now: no new button, row or request that leads nowhere.
 
@@ -38,6 +38,8 @@ The app's answer gains one optional field:
   `title`) from that turn or job itself, without raising them. On `always` it stores a rule (item 2)
   and does the same from then on. Either way the action is still journaled as today.
 - The server must refuse a scope it didn't offer: treat it as once.
+- A `task` answer that arrives after its turn or job has ended (the approval was put off with Later)
+  counts as once.
 - Never offer a scope on a payment (`payment` present) or on a change with a `guarded` file.
 
 App side (`Otto/Approvals.swift`): a menu beside "Expires in N min" on the sheet, "Just this once"
@@ -77,7 +79,7 @@ GET /app/approvals   → 200 [Approval]     ([] when none)
 
 Each element is the approval frame without `type`: the same object `approvalFrame` builds, for
 every approval `liveApprovals()` returns. The background refresh sends `X-Otto-Background: 1`, as it
-does on `/app/history`.
+does on `/app/history`; the server may record it as it does there, and answers the same either way.
 
 App side (`OttoStore.syncApprovals` in `Otto/OttoApp.swift`): read on every connect, on coming to
 the front and in the background refresh. An approval answered on the Mac, or dropped, leaves the
@@ -97,14 +99,19 @@ For something Otto wants to send in the owner's name, the approval frame gains:
 
 - `channel`: `"email"`, `"imessage"`, `"sms"`, `"whatsapp"`, or any other name (shown capitalised).
 - `to`: every recipient, at least one. `cc` and `subject` are optional. `body` is the whole text
-  that will be sent, not a preview.
+  that will be sent, not a preview. `attachments` is optional: the name of each file that goes with
+  it (`["Quote.pdf"]`).
 - `title` stays the sheet's title ("Send email"); `summary`, when not empty, is shown as why Otto is
   sending it. `files` is `[]`.
 - On approve, the server sends exactly that draft. Item 1's scopes apply as to any approval.
+- Use it for every send in the owner's name that Otto starts on its own. The draft card in the
+  thread (a message whose text starts "draft to <name>:", with Send and Discard buttons) stays for
+  what the owner just asked for; it should always name who it goes to and by which channel:
+  "draft to Marta (email):".
 
 App side (`draftRows` in `Otto/Approvals.swift`): the channel, each recipient on a line of its own
-(never "and 3 more"), the subject and the full body, then the buttons, "Decline" and "Send", behind
-Face ID.
+(never "and 3 more"), the subject, any attachments by name and the full body, then the buttons,
+"Decline" and "Send", behind Face ID.
 
 Without it: no `draft`, so approvals draw as today.
 
@@ -119,9 +126,12 @@ POST /app/dash/memory/forget     {"id":"<MemoryItem.id>"} → 200 {"ok":true}
 The server deletes that memory and its index line; the next `GET /app/dash/memory` may still list
 it until the index is rebuilt.
 
+The POST is idempotent: asked twice, the second answers `{"ok":false}`.
+
 App side (`MemoryDetailScreen` in `Otto/MemoryViews.swift`): with `canForget`, the page's Forget
-asks "Forget this?", says it can't be brought back, deletes and takes the row off the list at once.
-Any non-2xx or no answer: "Not forgotten", and the row stays.
+asks "Forget this?", says it can't be brought back, deletes and takes the row off the list at once;
+the row stays off across a relaunch until a rebuilt index no longer lists it. Any non-2xx or no
+answer: "Couldn't confirm", with Try Again, since the memory may or may not be gone.
 
 Without it: no `canForget`, so Forget asks Otto in the chat (`forget memory <name>`), as today.
 
@@ -133,3 +143,79 @@ default `otto://`, which opens the app on the thread).
 App side (`Doors.open` in `Otto/OttoApp.swift`, already shipped): `otto://approval` opens Otto's
 thread and brings back an approval that was put off with Later. One not yet seen shows its sheet as
 soon as the app connects, with either link.
+
+## 7. The app alerts for an approval while it's connected
+
+The hello frame gains an optional list:
+
+```json
+{"type":"hello","acks":true,"alerts":["approval"]}
+```
+
+With `"approval"` in it, the server promises this: when it raises an approval while at least one
+phone app socket is open (not a desktop's), it sends no Bark push for it. Today `raiseApproval`
+forces the push because the app never alerted for one. With no phone socket open it pushes as now.
+
+App side (`OttoStore`'s approval updates in `Otto/OttoApp.swift`, `Notifier.post(approval:)`): an
+approval frame that arrives while the app is in the background (keep-awake holds the socket) becomes
+Otto's own notification, "Otto needs your OK" with what it asks; a tap opens the approval. It is
+removed when the approval is settled.
+
+Without it: no `alerts`, so the app posts nothing and the forced Bark push is the only alert, as
+today. Never both.
+
+## 8. Taking over the page Otto has open
+
+For a step only the owner can do (a sign-in, a CAPTCHA, a code), the browser frame gains two flags
+and two routes take the owner's hands:
+
+```json
+{"type":"browser","image":"data:image/jpeg;base64,…","caption":"…","url":"…","ts":1794840000000,
+ "control":true,"held":false}
+```
+
+```
+POST /app/browser/hold    {"hold":true}  → 200 {"held":true}     Otto stops acting on the page and waits
+                          {"hold":false} → 200 {"held":false}    the page is Otto's again
+POST /app/browser/input   one of                                 → 200 {"ok":true}; 409 when not held
+     {"tap":{"x":0.42,"y":0.63}}     fractions of the picture's width and height, from its top left
+     {"text":"…"}                    typed into whatever has focus on the page
+     {"key":"enter"|"tab"|"backspace"|"escape"}
+     {"scroll":0.8}                  viewport heights, positive is down
+```
+
+- `control`: the server takes a hold for this page. Absent or false: view only, as today.
+- While held, frames carry `"held":true`, keep coming (at most one a second, and one right after
+  each input), and carry the picture even for a page the tile would otherwise show without one (a
+  sign-in page): the owner asked to see it, behind Face ID.
+- The server lets go on its own after 5 minutes with no input, when the app's socket closes, or
+  when the work ends, and says so with a frame whose `held` is false.
+- What arrives as `text` is typed into the page and nowhere else: not logged, not put in the
+  thread, not shown to the session.
+
+App side (`BrowserFullScreen` in `Otto/ChatView.swift`): with `control`, the full-screen page has
+"Take over" behind Face ID. Holding, a tap on the picture is a tap on the page, a field types into
+it, and there are Enter, Tab and scroll keys and "Hand back". Closing the screen hands back too. A
+request that gets no 2xx is said under the picture.
+
+Without it: no `control`, so the page is view only and closes on a tap, as today.
+
+## 9. What to know before any approval
+
+The approval frame gains `"notes": ["Can't be undone", "Goes to people outside your contacts"]`:
+optional, each at most 120 characters. A payment already has its own (`payment.notes`).
+
+App side (`caveats` in `Otto/Approvals.swift`): shown first on the sheet, as "Before you approve"
+(or "Before you send" on a draft), in the text colour.
+
+Without it: no `notes`, no section.
+
+## 10. Call keys in the pairing link
+
+`otto/apptokens.ts new` may add two query items to the `otto://pair` link it prints as a QR code,
+when the Mac has them: `vapiKey=<Vapi public key>&vapiAssistant=<assistant id>`.
+
+App side (`PairingLink` in `Otto/Onboarding.swift`): pairing by scan, paste or a tapped link then
+also sets up calls inside the app. They can be typed in the contact card too ("Calls in the app").
+
+Without them: the phone button dials Otto's number, as today.

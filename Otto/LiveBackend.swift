@@ -12,6 +12,8 @@ import Foundation
 ///                  Each op is kept until {"type":"ack","id":"<op or message id>"} comes back and resent on the
 ///                  next connect until it does; the server handles a repeat once. A server that says
 ///                  {"type":"hello","acks":true} on connect acks; with an older one the write is all we get.
+///                  Its hello may add "alerts":["approval"]: it then sends no push for an approval while this
+///                  socket is up, and the app posts the alert itself (server-contract.md, item 7).
 ///     otto -> app  {"type":"message","id":"...","text":"...","ts":"<ISO>","buttons":[{"label","data"} or {"label","url"}],
 ///                   "files":[{"id","name","kind"}]?,"voice":{"id","name","kind"}?,"reply_to":"<id>"?,
 ///                   "src"?,"why"?  (only on messages Otto sent unprompted)}
@@ -28,7 +30,9 @@ import Foundation
 ///                  {"type":"todos","items":[{"text","status":"pending"|"in_progress"|"completed"}]}   Otto's to-do list while it works; [] when done
 ///                  {"type":"open_todos","items":[{"text","status":"pending"|"in_progress"}]}   its open to-dos, idle too; on connect and on change
 ///                  {"type":"browser","image":"data:image/jpeg;base64,…"|null,"caption":"example.com · clicks Generate","url","ts":<epoch ms>}
-///                   what Otto is doing in Chrome, whole each time (≤ 1/s; on connect only while live); {"type":"browser","done":true} ends it
+///                   what Otto is doing in Chrome, whole each time (≤ 1/s; on connect only while live); {"type":"browser","done":true} ends it.
+///                   From a server that can hand the page over it may carry "control":true, and "held":true while you have it:
+///                   POST /app/browser/hold {"hold":bool} and POST /app/browser/input (server-contract.md, item 8)
 ///                  a "message" (and its history row) may carry "quiet":true: a desktop was focused, so no banner
 ///                  {"type":"notify","id":"<newest held id>","text":"...","count":N}   focus ended: one banner for what was held, no bubble
 ///                  {"type":"reminders","items":[{"id","at":"<ISO>","text"}]}   every upcoming reminder, on connect and on change:
@@ -107,6 +111,10 @@ final class LiveBackend: OttoBackend {
     }
     /// Whether this connection's server acks (its hello); nil until it has said, or 3s have passed.
     private var acksOn: Bool?
+    /// What this connection's server leaves to the app to alert for (its hello's "alerts"): with "approval"
+    /// there, it sends no push of its own for one while this socket is up, so the app must.
+    private var appAlerts: Set<String> = []
+    var alertsApprovals: Bool { lock.withLock { live && appAlerts.contains("approval") } }
     /// Op ids the server has acked and nobody has collected yet, and those it acked as gone.
     private var acked: Set<String> = []
     private var gone: Set<String> = []
@@ -211,6 +219,20 @@ final class LiveBackend: OttoBackend {
     }
 
     func pendingApprovals(background: Bool) async -> [ApprovalRequest]? { await get("app/approvals", background: background) }
+
+    func holdBrowser(_ hold: Bool) async -> Bool { await postJSON("app/browser/hold", ["hold": hold]) }
+    func browserInput(_ input: BrowserInput) async -> Bool { await postJSON("app/browser/input", input.body) }
+
+    /// A small JSON POST that either landed (a 2xx) or didn't. Ten seconds: these answer a tap.
+    private func postJSON(_ path: String, _ body: [String: Any]) async -> Bool {
+        var req = URLRequest(url: base.appending(path: path), timeoutInterval: 10)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (_, resp) = try? await session.data(for: req), let code = (resp as? HTTPURLResponse)?.statusCode else { return false }
+        return (200..<300).contains(code)
+    }
 
     func react(to id: String, emoji: String) async {
         await write(["type": "react", "id": id, "emoji": emoji])
@@ -342,7 +364,7 @@ final class LiveBackend: OttoBackend {
             }
             do {
                 try await ping(task)                    // handshake done, token accepted
-                lock.withLock { socket = task; live = true; connects += 1; acksOn = nil; acked = [] }
+                lock.withLock { socket = task; live = true; connects += 1; acksOn = nil; acked = []; appAlerts = [] }
                 // A live tile comes again right after connect; a `done` missed while away must not leave one up.
                 browserOut.yield(nil)
                 delay = 1
@@ -380,6 +402,13 @@ final class LiveBackend: OttoBackend {
     /// Bounded: a handshake caught in a network switch (wifi to cellular) can leave the pong
     /// handler never called, and an unbounded wait here parks the reconnect loop for good,
     /// asleep while HTTP (voice, history) still works.
+    /// Back in front: a socket iOS froze, or one whose network changed under it, still reads as live until the
+    /// 20 s keep-alive finds out. One quick ping settles it now; a dead one is dropped and the loop reconnects.
+    func probe() async {
+        guard let task = lock.withLock({ socket }) else { return }
+        do { try await ping(task, timeout: 2) } catch { task.cancel(with: .goingAway, reason: nil) }
+    }
+
     private func ping(_ task: URLSessionWebSocketTask, timeout: Double = 10) async throws {
         try await withCheckedThrowingContinuation { (k: CheckedContinuation<Void, Error>) in
             let done = NSLock()
@@ -410,7 +439,12 @@ final class LiveBackend: OttoBackend {
             if k.type == "browser" { if let f = BrowserFrame(json: data) { browserOut.yield(f.tile) }; return }
             // The coding jobs, whole: on connect when the Mac has them, and whenever one changes.
             if k.type == "jobs" { if let w = try? JSONDecoder().decode(CodeJobs.self, from: data) { jobsOut.yield(w.jobs) }; return }
-            if k.type == "hello" { lock.withLock { acksOn = true }; return }
+            if k.type == "hello" {
+                struct Hello: Decodable { let alerts: [String]? }
+                let alerts = (try? JSONDecoder().decode(Hello.self, from: data))?.alerts ?? []
+                lock.withLock { acksOn = true; appAlerts = Set(alerts) }
+                return
+            }
             if k.type == "reminders" {
                 struct Frame: Decodable { let items: [ReminderItem] }
                 guard let set = try? JSONDecoder().decode(Frame.self, from: data), let task = lock.withLock({ socket }) else { return }

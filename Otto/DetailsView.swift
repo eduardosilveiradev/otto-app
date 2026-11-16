@@ -1,4 +1,5 @@
 import SwiftUI
+import VisionKit
 
 /// The contact card: what Otto knows about today, and the few settings there are.
 struct DetailsView: View {
@@ -9,6 +10,9 @@ struct DetailsView: View {
     @AppStorage("serverURL") private var server = ""
     @AppStorage("serverToken") private var token = ""
     @AppStorage("callNumber") private var callNumber = ""
+    /// What a web call needs (CallManager reads them when one starts). Empty, the phone button dials the number above.
+    @AppStorage("vapiPublicKey") private var callKey = ""
+    @AppStorage("vapiAssistantId") private var callAssistant = ""
     /// Nil until the Mac has said; the switch shows on and stays put until then.
     @State private var speakReplies: Bool?
     /// Keepalive: instant notifications for some battery. Read by Keepalive.enabled.
@@ -22,6 +26,7 @@ struct DetailsView: View {
     /// The Mac keeps a list of what Otto may do without asking. False until it has answered with one,
     /// so a server from before approval scopes shows no row that leads nowhere.
     @State private var hasRules = false
+    @State private var scanning = false
     enum ServerCheck: Equatable { case checking, connected, failed(String) }
     #if DEBUG
     /// `-details -checkServer` opens scrolled to the server fields and submits them, for screenshots.
@@ -116,16 +121,39 @@ struct DetailsView: View {
                         if let serverCheck { checkLine(serverCheck) }
                     }
                     .id("server")
+                    if DataScannerViewController.isSupported {
+                        Button("Scan a pairing code", systemImage: "qrcode.viewfinder") { scanning = true }
+                    }
                     labeled("Otto’s phone number") {
                         TextField("Otto’s phone number", text: $callNumber, prompt: Text(verbatim: "+1 555 0100")).keyboardType(.phonePad)
                     }
                 } header: { Text("Server") } footer: {
-                    Text("Over Tailscale. Quit and reopen the app after changing these.")
+                    Text("Over Tailscale. Paste a pairing link into the address to fill both. Quit and reopen the app after changing these.")
                 }
+
                 .listRowInsets(.vertical, 10)   // 20 between fields
-                .onChange(of: server) { submitted = nil; serverCheck = nil }
+                .onChange(of: server) {
+                    submitted = nil; serverCheck = nil
+                    // A pairing link pasted into the address is the whole pairing: both fields, then the check.
+                    if let link = PairingLink(server) { apply(link) }
+                }
                 .onChange(of: token) { submitted = nil; serverCheck = nil }
                 .task(id: submitted) { if submitted != nil { await checkServer() } }
+
+                Section {
+                    labeled("Vapi public key") {
+                        TextField("Vapi public key", text: $callKey, prompt: Text(verbatim: "from your Vapi dashboard"))
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    }
+                    labeled("Vapi assistant ID") {
+                        TextField("Vapi assistant ID", text: $callAssistant, prompt: Text(verbatim: "the assistant that answers as Otto"))
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    }
+                } header: { Text("Calls in the app") } footer: {
+                    Text(callKey.isEmpty || callAssistant.isEmpty ? "With both filled in, the phone button calls Otto inside the app. Without them it dials the number above."
+                         : "The phone button calls Otto inside the app.")
+                }
+                .listRowInsets(.vertical, 10)
                 }
                 // Messages' rows are glass over the blurred thread, not solid grey.
                 .listRowBackground(Rectangle().fill(Color(UIColor { $0.userInterfaceStyle == .dark ? .white.withAlphaComponent(0.07) : .white.withAlphaComponent(0.65) })))
@@ -165,6 +193,17 @@ struct DetailsView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $scanning) {
+                QRScanner { code in
+                    scanning = false
+                    if let link = PairingLink(code) { apply(link) } else { serverCheck = .failed("That isn’t an Otto pairing code.") }
+                }
+                .ignoresSafeArea()
+                .overlay(alignment: .topTrailing) {
+                    Button("Cancel", systemImage: "xmark") { scanning = false }
+                        .labelStyle(.iconOnly).buttonStyle(.glass).controlSize(.large).padding()
+                }
+            }
             // Rows scrolled up blur away under the clock and the back button, as in Settings; no ruled line.
             .scrollEdgeEffectStyle(.soft, for: .top)
             // The glass behind has no colour for that edge to fade into, so the rows fade themselves: clear
@@ -188,6 +227,12 @@ struct DetailsView: View {
             }
             }
         }
+    }
+
+    private func apply(_ link: PairingLink) {
+        server = link.server; token = link.token
+        link.saveCallKeys()
+        submitted = UUID()
     }
 
     /// A label over its field. The field carries the same name for VoiceOver, so the label is hidden from it.
