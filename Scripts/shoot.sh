@@ -80,7 +80,9 @@ shot() {
     xcrun simctl terminate "$DEV" $ID >/dev/null 2>&1
     sleep 0.5
     clean
-    xcrun simctl launch "$DEV" $ID "$@" >/dev/null
+    # -wipeDefaults: the app's own saved settings live in its container, where `defaults delete` above doesn't
+    # reach; without it a draft or a pasted pairing link from one state shows up in the next.
+    xcrun simctl launch "$DEV" $ID -wipeDefaults "$@" >/dev/null
     sleep "$wait"
     [[ " $* " == *" -pipsFixture "* ]] && sleep 1.5   # the list, then Otto's thread pushed over it
     local f="$screen-$state-$theme.png"

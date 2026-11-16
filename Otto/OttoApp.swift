@@ -11,6 +11,11 @@ struct OttoApp: App {
     @AppStorage("onboarded") private var onboarded = UserDefaults.standard.string(forKey: "serverURL")?.isEmpty == false
 
     init() {
+        #if DEBUG
+        // `-wipeDefaults` (Scripts/shoot.sh, on every launch): start from no saved settings, so what one
+        // screenshot's state left behind (a draft in the composer, a pasted pairing link) can't show in the next.
+        if CommandLine.arguments.contains("-wipeDefaults"), let id = Bundle.main.bundleIdentifier { UserDefaults.standard.removePersistentDomain(forName: id) }
+        #endif
         Notifier.shared.register()   // the background task must be registered before launch ends
         Dictation.shared.setUp()     // the keyboard's mic requests arrive any time
         try? Wearables.configure()

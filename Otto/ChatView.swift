@@ -1262,7 +1262,12 @@ private struct CallLine: View {
     let date: Date
     /// Right under a Stamp, which already has the spacing above.
     let afterStamp: Bool
+    #if DEBUG
+    /// `-callTranscript`: the sheet already up, for screenshots.
     @State private var open = ProcessInfo.processInfo.arguments.contains("-callTranscript")
+    #else
+    @State private var open = false
+    #endif
     var body: some View {
         Button { open = true } label: {
             (Text(Image(systemName: "phone.fill")) + Text(" Call with Otto · \(record.length)").fontWeight(.semibold)
@@ -2106,25 +2111,32 @@ private struct VoiceRow: View {
             }
             if failed {
                 Text("Couldn’t play").font(size: 14, weight: .medium, relativeTo: .subheadline).foregroundStyle(ink)
-            } else if let duration {
-                Text(Duration.seconds(duration.rounded()).formatted(.time(pattern: .minuteSecond)))
-                    .monospacedDigit().font(size: 14, weight: .medium, relativeTo: .subheadline)
-                    .foregroundStyle(ink)
-            }
-            // While it plays (or is paused part-way), how fast: a tap goes 1×, 1.5×, 2×.
-            if playing || held {
-                Button { player.nextRate() } label: {
-                    Text("\(player.rate.formatted())×")
-                        .monospacedDigit().font(size: 12, weight: .semibold, relativeTo: .caption)
-                        .foregroundStyle(ink)
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(ink.opacity(0.18), in: .capsule)
-                        .padding(.vertical, 10).padding(.horizontal, 4).contentShape(.rect).padding(.vertical, -10).padding(.horizontal, -4)
+            } else {
+                // One slot for the clip's length and, while it plays or is paused part-way, how fast (a tap goes
+                // 1×, 1.5×, 2×). Both are always laid out, so the bubble is the same size at rest and playing: in
+                // a bubble that grew, the pause button would move out from under the finger that pressed play.
+                let active = playing || held
+                ZStack(alignment: .trailing) {
+                    if let duration {
+                        Text(Duration.seconds(duration.rounded()).formatted(.time(pattern: .minuteSecond)))
+                            .monospacedDigit().font(size: 14, weight: .medium, relativeTo: .subheadline)
+                            .foregroundStyle(ink)
+                            .opacity(active ? 0 : 1).accessibilityHidden(active)
+                    }
+                    Button { player.nextRate() } label: {
+                        Text("\(player.rate.formatted())×")
+                            .monospacedDigit().font(size: 12, weight: .semibold, relativeTo: .caption)
+                            .foregroundStyle(ink)
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(ink.opacity(0.18), in: .capsule)
+                            .padding(.vertical, 10).padding(.horizontal, 4).contentShape(.rect).padding(.vertical, -10).padding(.horizontal, -4)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Playback speed")
+                    .accessibilityValue("\(player.rate.formatted()) times")
+                    .opacity(active ? 1 : 0).allowsHitTesting(active).accessibilityHidden(!active)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Playback speed")
-                .accessibilityValue("\(player.rate.formatted()) times")
-                .transition(.opacity)
+                .animation(.easeOut(duration: 0.15), value: active)
             }
         }
         .padding(.vertical, 2)
