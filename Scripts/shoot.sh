@@ -145,10 +145,13 @@ shot media browser-full 6 "Browser tile tapped: the page full screen" $O -demoTh
 shot media browser-take-over 6 "A page the Mac will hand over: Take over, behind Face ID" $O -demoThread -thinking -browserTile control -browserOpen
 shot media browser-holding 6 "The page in your hands: taps go to it, with typing, keys and Hand back" $O -demoThread -thinking -browserTile control -browserOpen -browserHold
 shot chat offline 6 "Server unreachable: Otto asleep, reconnecting" $O -demoThread -offline
+shot chat no-network 6 "This phone has no network at all: the header says so, not that the Mac is out of reach" $O -demoThread -offline -noNetwork
 shot chat offline-pending 13 "Dead server with a send waiting: Will send when back online" $DEAD $N -longThread b
 shot chat offline-empty 15 "Real dead server: empty thread, asleep" $DEAD $N -emptyThread
 shot chat update-available 6 "Update button in the header" $O -demoThread -fakeUpdate
 shot chat walkie-hint 7 "Hold-for-walkie-talkie hint" $O -demoThread -walkieHint
+shot chat call-row 6 "A call with Otto that just ended: its line in the thread, with how long it ran" $O -demoThread -callRow
+shot sheet call-transcript 7 "The call's line tapped: what was said" $O -demoThread -callRow -callTranscript
 shot chat flight-banner 6 "Flight-day card under the header" $O -demoThread -mockGate
 shot chat call-banner 7 "Live call banner under the header" $O -demoThread -mockCalls
 shot composer focused 6 "Composer focused with text" $O -demoThread -kbdDemo "running 10 min late, start without me"
@@ -163,6 +166,8 @@ shot sheet payment-receipt 6 "Payment approved: printed receipt" $O -demoThread 
 shot sheet change-approval 6 "Approve a change to Otto's core" $O -demoThread -approvalDemo
 shot sheet change-approval-detail 6 "A change whose detail is its lines, not a git stat (the memory clean-up)" $O -demoThread -approvalDemo diet
 shot sheet approval-scopes 6 "An ask the Mac will take a wider yes for: just this once is picked" $O -demoThread -approvalDemo scopes
+shot sheet approval-out-of-reach 6 "An ask while the Mac is out of reach: the buttons are off and a line says nothing can be sent yet" $O -demoThread -approvalDemo scopes -offline
+shot sheet schedule 7 "A schedule's page from its chip: when it runs, what Otto will do, and Change or Stop (asked for in the chat)" $O -scheduleThread -scheduleOpen
 shot sheet approval-scopes-always 6 "Always picked: what it means in words, before Face ID" $O -demoThread -approvalDemo scopes -approvalScope always
 shot sheet approval-scopes-worst 6 "Worst case: the longest rule a server might name, at an accessibility text size" $O -demoThread -approvalDemo scopes-worst -approvalScope always -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
 shot sheet approval-draft 6 "An email Otto wants to send in your name: every recipient and every word" $O -demoThread -approvalDemo draft

@@ -100,7 +100,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// An approval that arrived while the app was in the background: Otto's own alert, which opens its sheet.
-    func post(approval a: ApprovalRequest) {
+    /// False when iOS won't show one (notifications off or never allowed) or didn't take it: the caller then
+    /// tells the Mac nothing, and the Mac's own push goes out.
+    func post(approval a: ApprovalRequest) async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        let status = await center.notificationSettings().authorizationStatus
+        guard status == .authorized || status == .provisional else { return false }
         let content = UNMutableNotificationContent()
         content.title = "Otto needs your OK"
         content.body = a.ask
@@ -109,7 +114,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.threadIdentifier = "approval"
         content.userInfo["approval"] = a.id
         content.relevanceScore = 1
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: Self.approvalID(a.id), content: content, trigger: nil))
+        return (try? await center.add(UNNotificationRequest(identifier: Self.approvalID(a.id), content: content, trigger: nil))) != nil
     }
     static func approvalID(_ id: String) -> String { "approval-\(id)" }
 

@@ -20,6 +20,7 @@ const sockets = new Set<any>()
 const expires = () => new Date(Date.now() + 24 * 60_000).toISOString()
 type Approval = Record<string, unknown> & { id: string }
 const approvals = new Map<string, Approval>()
+const alerted = new Set<string>()
 const rules = new Map<string, Record<string, unknown>>([
   ['apply:diet', { id: 'apply:diet', label: 'memory clean-ups', created: '2026-11-03T09:12:00Z', uses: 4, lastUsed: '2026-11-14T03:00:00Z' }],
 ])
@@ -45,7 +46,13 @@ Bun.serve({
     const u = new URL(req.url), p = u.pathname
     if (p !== '/app') log(req.method, p + u.search, req.headers.get('x-otto-background') ? '(background)' : '')
     if (p === '/app') { await Bun.sleep(delay); return server.upgrade(req) ? undefined : new Response('upgrade failed', { status: 400 }) }
-    if (p === '/test/raise') { const a = demo(u.searchParams.get('kind') ?? 'cal'); approvals.set(a.id, a); if (u.searchParams.get('quiet') !== '1') for (const ws of sockets) ws.send(frame(a)); return Response.json(a) }
+    if (p === '/test/raise') {
+      const a = demo(u.searchParams.get('kind') ?? 'cal'); approvals.set(a.id, a); alerted.delete(a.id)
+      if (u.searchParams.get('quiet') !== '1') for (const ws of sockets) ws.send(frame(a))
+      // Item 7: the push waits 5 s for a phone to say it alerted.
+      if (!old) setTimeout(() => log(alerted.has(a.id) ? `no push for ${a.id}: the app alerted` : `PUSH for ${a.id}: no app said it alerted`), 5000)
+      return Response.json(a)
+    }
     if (p === '/test/settle') { const id = u.searchParams.get('id')!; approvals.delete(id); if (u.searchParams.get('quiet') !== '1') for (const ws of sockets) ws.send(JSON.stringify({ type: 'approval_done', id })); return Response.json({ ok: true }) }
     if (p === '/app/history') return Response.json([{ dir: 'out', text: 'Morning. Two things today: the dentist at 16:00 and the boiler man between 9 and 11.', ts: new Date(Date.now() - 3600_000).toISOString(), id: 'h1' }])
     if (p === '/app/brief') return Response.json({ asOf: new Date().toISOString(), events: [], inbox: [], bulk: 0, loops: [], triggers: [] })
@@ -71,7 +78,7 @@ Bun.serve({
   websocket: {
     open(ws) {
       sockets.add(ws); log('socket open')
-      ws.send(JSON.stringify({ type: 'hello', acks: true, ...(old ? {} : { alerts: ['approval'] }) }))
+      ws.send(JSON.stringify({ type: 'hello', acks: true, ...(old ? {} : { alerts: ['approval'], stop: true }) }))
       for (const a of approvals.values()) ws.send(frame(a))
       if (browsing && !old) ws.send(browserFrame())
     },
@@ -80,6 +87,12 @@ Bun.serve({
       log('frame', String(m).slice(0, 300))
       try {
         const f = JSON.parse(String(m)); const op = f.op ?? (f.type === 'message' ? f.id : undefined)
+        if (f.type === 'approval_alerted') { alerted.add(f.id); return }
+        if (f.type === 'stop') {
+          // The turn ends: typing off, and a word in the thread about where it got to.
+          for (const s of sockets) { s.send(JSON.stringify({ type: 'typing', on: false })); s.send(JSON.stringify({ type: 'todos', items: [] })) }
+          for (const s of sockets) s.send(JSON.stringify({ type: 'message', id: crypto.randomUUID(), text: 'Stopped. Nothing was sent.', ts: new Date().toISOString() }))
+        }
         if (f.type === 'approval') {
           const a = approvals.get(f.id)
           if (a && f.decision === 'approve' && f.scope === 'always' && typeof a.rule === 'string') rules.set(`rule:${a.id}`, { id: `rule:${a.id}`, label: a.rule, created: new Date().toISOString(), uses: 0 })

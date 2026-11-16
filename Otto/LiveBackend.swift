@@ -7,13 +7,14 @@ import Foundation
 ///     app -> otto  {"type":"message","id":"<uuid>","text":"...","reply_to":"<id>"?}
 ///                  {"type":"tap","id":"<source wire ID>","op":"<uuid>","data":"<button data>","label":"..."}
 ///                  {"type":"react","op":"<uuid>","id":"<id>","emoji":"❤️"}
+///                  {"type":"stop","op":"<uuid>"}   end the turn Otto is on; only to a server whose hello says "stop":true
 ///                  {"type":"approval","op":"<uuid>","id":"<id>","decision":"approve"|"decline","scope":"task"|"always"?}
 ///                   `scope` only when the approval frame offered it ("scopes") and you picked it; absent means this once
 ///                  Each op is kept until {"type":"ack","id":"<op or message id>"} comes back and resent on the
 ///                  next connect until it does; the server handles a repeat once. A server that says
 ///                  {"type":"hello","acks":true} on connect acks; with an older one the write is all we get.
-///                  Its hello may add "alerts":["approval"]: it then sends no push for an approval while this
-///                  socket is up, and the app posts the alert itself (server-contract.md, item 7).
+///                  Its hello may add "alerts":["approval"]: the app then alerts for an approval itself and says so with
+///                  {"type":"approval_alerted","id":"<id>"}; unacked within 5 s, the server pushes as before (server-contract.md, item 7).
 ///     otto -> app  {"type":"message","id":"...","text":"...","ts":"<ISO>","buttons":[{"label","data"} or {"label","url"}],
 ///                   "files":[{"id","name","kind"}]?,"voice":{"id","name","kind"}?,"reply_to":"<id>"?,
 ///                   "src"?,"why"?  (only on messages Otto sent unprompted)}
@@ -115,6 +116,11 @@ final class LiveBackend: OttoBackend {
     /// there, it sends no push of its own for one while this socket is up, so the app must.
     private var appAlerts: Set<String> = []
     var alertsApprovals: Bool { lock.withLock { live && appAlerts.contains("approval") } }
+    /// Its hello's "stop": it takes {"type":"stop"} and ends the turn Otto is on.
+    private var canStopTurn = false
+    /// The last failure of each card page, by path (see `dashFailure`).
+    private var dashFailures: [String: Int] = [:]
+    func dashFailure(_ path: String) -> Int? { lock.withLock { dashFailures[path] } }
     /// Op ids the server has acked and nobody has collected yet, and those it acked as gone.
     private var acked: Set<String> = []
     private var gone: Set<String> = []
@@ -214,24 +220,44 @@ final class LiveBackend: OttoBackend {
         let op = "approval-\(id)"
         var frame = ["type": "approval", "op": op, "id": id, "decision": approve ? "approve" : "decline"]
         if approve && scope != .once { frame["scope"] = scope.rawValue }
-        guard await handOver(frame, op: op) else { return .unknown }
-        return lock.withLock { gone.remove(op) != nil } ? .gone : .done
+        switch await hand(frame, op: op) {
+        case .notSent: return .notSent   // no socket, or the write failed: nothing reached the Mac
+        case .unconfirmed: return .unknown
+        case .confirmed: return lock.withLock { gone.remove(op) != nil } ? .gone : .done
+        }
     }
+
+    /// Ends the turn Otto is on. True once the Mac has the ask; it says in the thread that it stopped.
+    func stopTurn() async -> Bool {
+        let op = UUID().uuidString
+        return await handOver(["type": "stop", "op": op], op: op)
+    }
+    var canStop: Bool { lock.withLock { live && canStopTurn } }
 
     func pendingApprovals(background: Bool) async -> [ApprovalRequest]? { await get("app/approvals", background: background) }
 
-    func holdBrowser(_ hold: Bool) async -> Bool { await postJSON("app/browser/hold", ["hold": hold]) }
-    func browserInput(_ input: BrowserInput) async -> Bool { await postJSON("app/browser/input", input.body) }
+    func alerted(approval id: String) async { await write(["type": "approval_alerted", "id": id]) }
 
-    /// A small JSON POST that either landed (a 2xx) or didn't. Ten seconds: these answer a tap.
-    private func postJSON(_ path: String, _ body: [String: Any]) async -> Bool {
+    /// The Mac's own word for it, not just a 2xx: `held` as asked, `ok` true.
+    func holdBrowser(_ hold: Bool) async -> Bool {
+        struct Held: Decodable { let held: Bool }
+        return (await postJSON("app/browser/hold", ["hold": hold]).flatMap { try? JSONDecoder().decode(Held.self, from: $0) })?.held == hold
+    }
+    func browserInput(_ input: BrowserInput) async -> Bool {
+        struct Done: Decodable { let ok: Bool }
+        return (await postJSON("app/browser/input", input.body).flatMap { try? JSONDecoder().decode(Done.self, from: $0) })?.ok == true
+    }
+
+    /// A small JSON POST: the body of a 2xx, or nil. Ten seconds: these answer a tap.
+    private func postJSON(_ path: String, _ body: [String: Any]) async -> Data? {
         var req = URLRequest(url: base.appending(path: path), timeoutInterval: 10)
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        guard let (_, resp) = try? await session.data(for: req), let code = (resp as? HTTPURLResponse)?.statusCode else { return false }
-        return (200..<300).contains(code)
+        guard let (data, resp) = try? await session.data(for: req), let code = (resp as? HTTPURLResponse)?.statusCode,
+              (200..<300).contains(code) else { return nil }
+        return data
     }
 
     func react(to id: String, emoji: String) async {
@@ -240,12 +266,16 @@ final class LiveBackend: OttoBackend {
 
     /// True once the server has it: a write into a socket iOS froze also "succeeds", so a
     /// server that acks is waited on, and one that doesn't answer in time is a failure to retry.
-    private func handOver(_ frame: [String: Any], op: String) async -> Bool {
+    private func handOver(_ frame: [String: Any], op: String) async -> Bool { await hand(frame, op: op) == .confirmed }
+
+    /// How far a frame got: never out of the phone, out with no ack, or acked.
+    private enum Handed { case notSent, unconfirmed, confirmed }
+    private func hand(_ frame: [String: Any], op: String) async -> Handed {
         guard let task = lock.withLock({ socket }),
               let json = try? JSONSerialization.data(withJSONObject: frame),
-              let s = String(data: json, encoding: .utf8) else { return false }
-        do { try await task.send(.string(s)) } catch { return false }
-        return await confirmed(op, on: task)
+              let s = String(data: json, encoding: .utf8) else { return .notSent }
+        do { try await task.send(.string(s)) } catch { return .notSent }
+        return await confirmed(op, on: task) ? .confirmed : .unconfirmed
     }
 
     /// The server's ack for `op`, or true at once for a server too old to send one.
@@ -364,7 +394,7 @@ final class LiveBackend: OttoBackend {
             }
             do {
                 try await ping(task)                    // handshake done, token accepted
-                lock.withLock { socket = task; live = true; connects += 1; acksOn = nil; acked = []; appAlerts = [] }
+                lock.withLock { socket = task; live = true; connects += 1; acksOn = nil; acked = []; appAlerts = []; canStopTurn = false }
                 // A live tile comes again right after connect; a `done` missed while away must not leave one up.
                 browserOut.yield(nil)
                 delay = 1
@@ -440,9 +470,9 @@ final class LiveBackend: OttoBackend {
             // The coding jobs, whole: on connect when the Mac has them, and whenever one changes.
             if k.type == "jobs" { if let w = try? JSONDecoder().decode(CodeJobs.self, from: data) { jobsOut.yield(w.jobs) }; return }
             if k.type == "hello" {
-                struct Hello: Decodable { let alerts: [String]? }
-                let alerts = (try? JSONDecoder().decode(Hello.self, from: data))?.alerts ?? []
-                lock.withLock { acksOn = true; appAlerts = Set(alerts) }
+                struct Hello: Decodable { let alerts: [String]?; let stop: Bool? }
+                let hello = try? JSONDecoder().decode(Hello.self, from: data)
+                lock.withLock { acksOn = true; appAlerts = Set(hello?.alerts ?? []); canStopTurn = hello?.stop == true }
                 return
             }
             if k.type == "reminders" {
@@ -574,9 +604,12 @@ final class LiveBackend: OttoBackend {
         req.httpMethod = method
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body { req.httpBody = body; req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
-        guard let (data, resp) = try? await session.data(for: req),
-              let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else { return nil }
-        return data
+        let answer = try? await session.data(for: req)
+        let code = (answer?.1 as? HTTPURLResponse)?.statusCode
+        // Remembered so the page can say what went wrong: no such page on this Mac, an error there, or no answer.
+        lock.withLock { dashFailures[path] = code.map { (200..<300).contains($0) ? nil : $0 } ?? 0 }
+        guard let answer, let code, (200..<300).contains(code) else { return nil }
+        return answer.0
     }
 
     func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse? {

@@ -125,6 +125,15 @@ enum ApprovalCheck {
         // A pairing link: only otto://pair with an http(s) server and a token; call keys ride along when present.
         let link = PairingLink("otto://pair?server=https://mac.example.ts.net&token=abc&vapiKey=k&vapiAssistant=a")
         assert(link?.host == "mac.example.ts.net" && link?.token == "abc" && link?.callKey == "k" && link?.callAssistant == "a", "pairing link")
+        // A tap on the zoomed, dragged page lands where it points: the centre stays the centre, a corner is never off the page.
+        let frame = CGSize(width: 300, height: 200)
+        let mid = BrowserFullScreen.spot(CGPoint(x: 150, y: 100), in: frame, zoom: 3, pan: .zero)
+        let dragged = BrowserFullScreen.spot(CGPoint(x: 150, y: 100), in: frame, zoom: 2, pan: CGSize(width: 150, height: 0))
+        let corner = BrowserFullScreen.spot(.zero, in: frame, zoom: 1, pan: CGSize(width: 40, height: 40))
+        assert(mid == UnitPoint(x: 0.5, y: 0.5) && dragged == UnitPoint(x: 0.25, y: 0.5) && corner == UnitPoint(x: 0, y: 0), "page taps undo the zoom")
+        assert(BrowserFullScreen.kept(CGSize(width: 999, height: -999), in: frame, zoom: 2) == CGSize(width: 150, height: -100)
+               && BrowserFullScreen.kept(CGSize(width: 5, height: 5), in: frame, zoom: 1) == .zero, "a drag can't pull the page out of its frame")
+        assert(link?.consequence.contains("calls") == true && PairingLink("otto://pair?server=https://m.example&token=t")?.consequence.contains("calls") == false, "a link that changes calls says so")
         assert(PairingLink("otto://pair?server=javascript:alert(1)&token=abc") == nil && PairingLink("otto://pair?server=https://x.example") == nil
                && PairingLink("https://evil.example/pair?server=https://x&token=t") == nil && PairingLink("otto://chat") == nil, "not a pairing link")
         print("approval check ok")
@@ -221,6 +230,11 @@ struct ApprovalSheet: View {
                 if !paid, request.payment == nil, request.title.count > (size.isAccessibilitySize ? 20 : 30) {
                     Section { Text(request.title).font(.headline) }
                 }
+                // At accessibility sizes what a lasting yes means is the first thing on the sheet (in the bar it could
+                // push the buttons off the screen; at the end of the list it would be out of sight of them).
+                if !paid, size.isAccessibilitySize, let lasting, !request.widerScopes.isEmpty, unconfirmed == nil {
+                    Section { Text(lasting).fontWeight(.semibold) }
+                }
                 if paid, let p = request.payment {
                     Section { PrintedReceipt(payment: p).listRowBackground(Color.clear).listRowInsets(EdgeInsets()) } footer: {
                         // What the slip is: your yes, on its way. The payment is Otto's to make and to report.
@@ -228,11 +242,8 @@ struct ApprovalSheet: View {
                             .frame(maxWidth: .infinity).multilineTextAlignment(.center)
                     }
                 } else if let p = request.payment { paymentRows(p) } else if let d = request.draft { draftRows(d) } else { changeRows }
-                if !paid, size.isAccessibilitySize, let lasting, !request.widerScopes.isEmpty, unconfirmed == nil {
-                    Section { Text(lasting).foregroundStyle(.secondary) }
-                }
-
-                if let failed = failed ?? unconfirmed.map({ _ in Self.unconfirmedLine }) {
+                // Out of reach, the buttons are off and this says why, before Face ID is asked for an answer that can't go.
+                if let failed = failed ?? unconfirmed.map({ _ in Self.unconfirmedLine }) ?? (store.asleep && !paid ? Self.outOfReach : nil) {
                     Section { Text(failed).foregroundStyle(Color.redInk).font(.footnote) }
                 }
             }
@@ -320,7 +331,7 @@ struct ApprovalSheet: View {
                 }
                 .font(.headline)
                 .controlSize(.large)
-                .disabled(busy)
+                .disabled(busy || store.asleep)
                 }
                 .animation(.easeOut(duration: 0.2), value: scope)   // the line under the picker fades in; nothing slides
                 .padding(.horizontal, 20).padding(.vertical, 12)
@@ -404,7 +415,9 @@ struct ApprovalSheet: View {
     }
 
     /// A header line of the message, as Mail writes one: its name small above, each value on a line of its
-    /// own from the leading edge. "Name <address>" gives the name, then the address under it, never cut short.
+    /// own from the leading edge. "Name <address>" gives the address in full ink, never cut short, with the
+    /// name small over it: the address is where it goes, and a display name is only what the sender chose to
+    /// call it ("Marta <someone-else@…>" must not read as Marta).
     private func field(_ label: String, _ values: [String]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(values.count > 3 ? "\(label) · \(values.count)" : label).font(.footnote).foregroundStyle(.secondary)
@@ -412,8 +425,8 @@ struct ApprovalSheet: View {
                 if let m = v.firstMatch(of: /^\s*(.+?)\s*<([^<>]+)>\s*$/) {
                     // fixedSize: in a list row a long address was cut to one line with an ellipsis instead of wrapping.
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(verbatim: String(m.1)).fixedSize(horizontal: false, vertical: true)
-                        Text(verbatim: String(m.2)).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text(verbatim: String(m.1)).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text(verbatim: String(m.2)).fixedSize(horizontal: false, vertical: true)
                     }
                 } else { Text(verbatim: v).fixedSize(horizontal: false, vertical: true) }
             }
@@ -508,6 +521,8 @@ struct ApprovalSheet: View {
         if !(keep && outcome == .done) { UINotificationFeedbackGenerator().notificationOccurred(outcome == .done ? .success : .warning) }
         switch outcome {
         case .done: if keep { withAnimation(.snappy) { paid = true } }
+        // It never left the phone: nothing was decided, so nothing is held to, and either answer is still open.
+        case .notSent: failed = Self.outOfReach
         case .gone: failed = "This had expired before your answer reached your Mac, so nothing was done. Ask Otto again."
         // The decision may have landed and only its answer been lost: trying again is safe (same decision),
         // but saying "nothing was paid" might not be true.
@@ -517,6 +532,7 @@ struct ApprovalSheet: View {
         }
     }
     private static let unconfirmedLine = "Couldn’t confirm with your Mac. Check the chat, or try again."
+    private static let outOfReach = "Your Mac is out of reach, so nothing was sent. Answer when it’s back."
 }
 
 /// A few changed lines of one file: removed on the red tint, added on the green. The sign leads each
