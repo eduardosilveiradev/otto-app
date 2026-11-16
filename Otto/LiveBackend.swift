@@ -16,6 +16,7 @@ import Foundation
 ///                   "src"?,"why"?  (only on messages Otto sent unprompted)}
 ///                  {"type":"react","id":"<id>","emoji":"👍"}
 ///                  {"type":"edit","id":"<id>","text":"..."}   Otto rewrote a message it sent (also takes off its `otp`)
+///                  {"type":"delete","id":"<id>"}   Otto deleted a message it sent (history names it in X-Otto-Deleted)
 ///                  a "message" may carry "otp":{"code","sender"?}: a verification code, shown in a drawer (OTP.swift)
 ///                  {"type":"status","text":"Reading ChatView.swift"}   while a reply is in the works
 ///                  {"type":"read","ids":["<uuid>"]}   your messages Otto has taken in
@@ -66,6 +67,7 @@ final class LiveBackend: OttoBackend {
     let approvalUpdates: AsyncStream<ApprovalUpdate>
     let voices: AsyncStream<(String, RemoteFile?)>
     let edits: AsyncStream<(String, String)>
+    let deletes: AsyncStream<String>
     let notifies: AsyncStream<(String, String)>
     let conversationEvents: AsyncStream<ConversationEvent>
 
@@ -83,6 +85,7 @@ final class LiveBackend: OttoBackend {
     private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
     private let voiceOut: AsyncStream<(String, RemoteFile?)>.Continuation
     private let edited: AsyncStream<(String, String)>.Continuation
+    private let deleted: AsyncStream<String>.Continuation
     private let notifyOut: AsyncStream<(String, String)>.Continuation
     private let conversationOut: AsyncStream<ConversationEvent>.Continuation
     private let session = URLSession(configuration: .default)
@@ -126,6 +129,7 @@ final class LiveBackend: OttoBackend {
         (approvalUpdates, approvalOut) = AsyncStream.makeStream()
         (voices, voiceOut) = AsyncStream.makeStream()
         (edits, edited) = AsyncStream.makeStream()
+        (deletes, deleted) = AsyncStream.makeStream()
         (notifies, notifyOut) = AsyncStream.makeStream()
         (conversationEvents, conversationOut) = AsyncStream.makeStream()
         loop = Task { [weak self] in await self?.run() }
@@ -413,6 +417,7 @@ final class LiveBackend: OttoBackend {
         guard let f = try? JSONDecoder().decode(WireMessage.self, from: data) else { return }
         if f.type == "react", let id = f.id, let emoji = f.emoji { reacted.yield((id, emoji)); return }
         if f.type == "edit", let id = f.id, let text = f.text { edited.yield((id, text)); return }
+        if f.type == "delete", let id = f.id { deleted.yield(id); return }
         if f.type == "status", let text = f.text { status.yield(text); return }
         if f.type == "todos" { todosOut.yield(f.items ?? []); return }
         if f.type == "open_todos" { openTodosOut.yield(f.items ?? []); return }
