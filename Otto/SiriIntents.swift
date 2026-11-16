@@ -166,7 +166,8 @@ extension AppIntent {
 }
 
 /// The Action Button's call: a web call with Otto, or, during one, its end, so one press starts it and
-/// the next hangs up (in the background, without opening the app). Without calls set up it opens the chat.
+/// the next hangs up (in the background, without opening the app). Without web calls it does what the
+/// header's phone button does: Otto's number, or the alert saying where to set one up.
 struct CallOtto: AppIntent {
     static let title: LocalizedStringResource = "Call Otto"
     static let description = IntentDescription("Start a call with Otto over the internet, or hang up the one you're on.")
@@ -195,7 +196,8 @@ struct OttoShortcuts: AppShortcutsProvider {
                     shortTitle: "Save This Place", systemImageName: "mappin.and.ellipse")
         // Not "Call Otto": Siri hands that to the Phone app, and there's a contact named Otto.
         AppShortcut(intent: CallOtto(),
-                    phrases: ["Start a call with \(.applicationName)", "\(.applicationName) call", "Hang up on \(.applicationName)"],
+                    // No "hang up" phrase: said with no call live, it would place one.
+                    phrases: ["Start a call with \(.applicationName)", "\(.applicationName) call"],
                     shortTitle: "Call Otto", systemImageName: "phone")
         AppShortcut(intent: OpenWalkie(),
                     phrases: ["Walkie-talkie with \(.applicationName)", "\(.applicationName) walkie-talkie", "Start \(.applicationName) walkie-talkie"],

@@ -48,7 +48,6 @@ struct ChatView: View {
     @Environment(OttoStore.self) private var store
     @State private var showDetails = ProcessInfo.processInfo.arguments.contains("-details")
     @Namespace private var card
-    @State private var showCall = false
     /// The live browser tile, opened full screen.
     @State private var browserOpen = ProcessInfo.processInfo.arguments.contains("-browserOpen")
     /// Otto's Chrome tile, in its own thread and only while the server can be heard (a stale one would mislead).
@@ -60,8 +59,6 @@ struct ChatView: View {
     @State private var gate = GateWatch()
     @State private var showGate = false
     @State private var openCall: DashCall?
-    /// Otto's phone line (the Vapi assistant). Set in details; dialled with the phone app.
-    @AppStorage("callNumber") private var callNumber = ""
     /// When the "hold for walkie-talkie" hint last showed; it comes back every two months.
     @AppStorage("walkieHintAt") private var walkieHintAt = 0.0
     @State private var walkieHint = false
@@ -375,7 +372,7 @@ struct ChatView: View {
             MediaViewerView(store: store).presentationBackground(.clear)
         }
         .fullScreenCover(isPresented: $browserOpen) { BrowserFullScreen() }
-        .alert("Calling Otto", isPresented: $showCall) {
+        .alert("Calling Otto", isPresented: Binding(get: { CallLauncher.shared.explain }, set: { CallLauncher.shared.explain = $0 })) {
             Button("OK", role: .cancel) {}
         } message: { Text("Add Otto’s phone number in details (tap Otto’s name).") }
     }
@@ -743,13 +740,7 @@ struct ChatView: View {
                     .accessibilityLabel("Update Otto")
                 }
                 Spacer()
-                Button {
-                    // Web call (free, over the internet) when Vapi is set up; the phone line otherwise.
-                    let digits = callNumber.filter { $0.isNumber || $0 == "+" }
-                    if CallManager.configured { CallLauncher.shared.open = true }
-                    else if let url = URL(string: "tel:\(digits)"), !digits.isEmpty { openURL(url) }
-                    else { showCall = true }
-                } label: {
+                Button { CallLauncher.shared.start() } label: {
                     Image(systemName: "phone").font(.system(size: 18))
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: .circle)

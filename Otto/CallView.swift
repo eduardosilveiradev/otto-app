@@ -10,12 +10,25 @@ import VoiceGlowKit
 /// server's: `vapiPublicKey`, `vapiAssistantId`, and `ownerNumber`, which is passed
 /// as the caller's number because a web call has none and the assistant's prompt
 /// recognises its owner by `{{customer.number}}`.
-/// Opens a web call from anywhere: the header's phone button, or the "Call Otto" App Shortcut.
+/// Calls Otto from anywhere: the header's phone button, or the "Call Otto" App Shortcut.
 /// `-call` (with `-vapiPublicKey`, `-vapiAssistantId` and, in DEBUG, `-vapiHost`): open straight into one.
 @MainActor @Observable
 final class CallLauncher {
     static let shared = CallLauncher()
+    /// The web call's screen is up.
     var open = ProcessInfo.processInfo.arguments.contains("-call")
+    /// Neither a web call nor Otto's number is set up: the alert that says where.
+    var explain = false
+
+    /// A web call (free, over the internet) when Vapi is set up; Otto's phone line, dialled with the Phone
+    /// app, otherwise; and with neither, the alert pointing at details.
+    func start() {
+        // Otto's phone line (the Vapi assistant). Set in details.
+        let digits = (UserDefaults.standard.string(forKey: "callNumber") ?? "").filter { $0.isNumber || $0 == "+" }
+        if CallManager.configured { open = true }
+        else if let url = URL(string: "tel:\(digits)"), !digits.isEmpty { UIApplication.shared.open(url) }
+        else { explain = true }
+    }
 }
 
 @MainActor @Observable

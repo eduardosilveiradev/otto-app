@@ -54,13 +54,15 @@ struct OttoApp: App {
 /// walkie-talkie, a call or an approval put off with Later over it. Nothing before setup: there's no store yet.
 @MainActor enum Doors {
     static func open(_ door: String) {
+        // As OttoApp's @AppStorage reads it: unset means "paired already" if there's a server.
+        // bool(forKey:) also takes a launch argument's "YES", which arrives as a string.
         let d = UserDefaults.standard
-        guard d.object(forKey: "onboarded") as? Bool ?? (d.string(forKey: "serverURL")?.isEmpty == false) else { return }
+        guard d.object(forKey: "onboarded") == nil ? d.string(forKey: "serverURL")?.isEmpty == false : d.bool(forKey: "onboarded") else { return }
         let store = OttoStore.shared
         if store.pips.active { store.pips.open("app") }
         switch door {
         case "walkie": WalkieLauncher.shared.open = true
-        case "call": CallLauncher.shared.open = CallManager.configured
+        case "call": CallLauncher.shared.start()
         case "approval": if let w = store.waitingApproval { store.reopenApproval(w.id) }
         default: break
         }
@@ -190,6 +192,8 @@ final class OttoStore {
     var unconfirmedApprovals: [String: Bool] = [:]
     /// The last one that lapsed on the Mac before it was answered: the pill says so until dismissed.
     var lapsedApproval: ApprovalRequest?
+    /// Memories you asked Otto to forget from their page, marked on their rows until a reload drops them.
+    var askedToForget: Set<String> = []
     /// What the widget was last given, so the group's defaults are written only when it changes.
     @ObservationIgnored private var widgetAsk = WidgetData.ask
     /// The server sends "typing" frames; until one arrives (an older server), the app guesses.

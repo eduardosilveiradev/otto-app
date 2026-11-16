@@ -25,6 +25,9 @@ private struct MemoryList: View {
     @State private var cluster: Int?
     @State private var needsLook = false
     @State private var note: String?
+    /// The Mac's search is running, or didn't answer: said above the list, which shows text matches meanwhile.
+    @State private var searching = false
+    @State private var searchFailed = false
 
     private var shown: [MemoryItem] {
         let q = typed
@@ -40,7 +43,8 @@ private struct MemoryList: View {
     var body: some View {
         let items = shown
         List {
-            if query.isEmpty && cluster == nil && !needsLook && source == "all" {
+            // Not on an empty page: the summary would open on nothing.
+            if query.isEmpty && cluster == nil && !needsLook && source == "all" && !m.items.isEmpty && !m.summary.text.isEmpty {
                 Section {
                     NavigationLink {
                         ScrollView { MarkdownText(text: m.summary.text).padding() }
@@ -51,10 +55,18 @@ private struct MemoryList: View {
                 } footer: { Text(m.summary.note) }
             }
             if let note { Section { Text(note).foregroundStyle(.secondary) } }
+            if searching {
+                Section { Label { Text("Searching on your Mac…") } icon: { ProgressView() }.foregroundStyle(.secondary) }
+            } else if searchFailed {
+                Section {
+                    Text("Couldn’t reach your Mac to search, so these only match the words.").foregroundStyle(.secondary)
+                    Button("Try again") { Task { await search() } }
+                }
+            }
             if !items.isEmpty {
                 Section {
                     ForEach(items) { it in
-                        NavigationLink { MemoryDetailScreen(item: it) } label: { MemoryRow(item: it) }
+                        NavigationLink { MemoryDetailScreen(item: it) } label: { MemoryRow(item: it, asked: store.askedToForget.contains(it.id)) }
                     }
                 } header: {
                     Text(ranked != nil ? "Best matches · \(items.count)" : items.count == m.items.count ? "Everything · \(items.count)" : "\(items.count) of \(m.items.count)")
@@ -66,7 +78,7 @@ private struct MemoryList: View {
         .overlay { if items.isEmpty { empty } }
         .searchable(text: $query, prompt: "Search memory")
         .onSubmit(of: .search) { Task { await search() } }
-        .onChange(of: query) { if query.isEmpty { rankedIn = nil } }
+        .onChange(of: query) { searchFailed = false; if query.isEmpty { rankedIn = nil } }
         .refreshable { await reload() }
         .toolbar {
             Menu {
@@ -113,9 +125,13 @@ private struct MemoryList: View {
         let q = typed
         guard !q.isEmpty else { rankedIn = nil; return }
         let snapshot = m.generatedAt
-        if let r: Hits = await store.backend.dash("memory/search", query: ["q": q]) {
-            // A ranking for a query that's since been edited would be shown against the new one: drop it.
-            guard q == typed else { return }
+        searching = true; searchFailed = false
+        let r: Hits? = await store.backend.dash("memory/search", query: ["q": q])
+        // A ranking for a query that's since been edited would be shown against the new one: drop it.
+        guard q == typed else { searching = false; return }
+        searching = false
+        searchFailed = r == nil
+        if let r {
             // The positions are into the index the Mac searched; if that's newer than this list, reload
             // the list so they line up (until then they're held back, not shown against the old one).
             rankedIn = (r.generatedAt ?? snapshot, q, r.results.compactMap { $0.first.map(Int.init) })
@@ -132,6 +148,8 @@ private struct MemoryList: View {
 
 struct MemoryRow: View {
     let item: MemoryItem
+    /// Sent Otto a "forget" for it from its page: said on the row until a reload shows it gone.
+    var asked = false
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
@@ -140,7 +158,7 @@ struct MemoryRow: View {
                 if item.badge == "never" { Pill(text: "never recalled", tint: .orange) }
                 else if item.badge == "stale" { Pill(text: "stale", tint: .orange) }
             }
-            Text([item.kind, item.scope, item.status, item.due.map { "due \(day($0))" }, ago(item.updated)].compactMap { $0 }.joined(separator: " · "))
+            Text(asked ? "Asked Otto to forget" : [item.kind, item.scope, item.status, item.due.map { "due \(day($0))" }, ago(item.updated)].compactMap { $0 }.joined(separator: " · "))
                 .font(.footnote).foregroundStyle(.secondary)
         }
     }
@@ -148,6 +166,11 @@ struct MemoryRow: View {
 
 struct MemoryDetailScreen: View {
     let item: MemoryItem
+    /// The memory's name as the thread's "Forget it" chip sends it (`forget memory <name>`), kept to
+    /// letters, digits and -_. so a name the server sent can't turn into a sentence sent in your voice.
+    static func slug(_ name: String) -> String {
+        String(String(name.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) || "-_.".unicodeScalars.contains($0) ? Character($0) : "-" }).prefix(80))
+    }
     @Environment(OttoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var forgetting = false
@@ -176,7 +199,8 @@ struct MemoryDetailScreen: View {
         }
         .confirmationDialog("Ask Otto to forget “\(item.name)”?", isPresented: $forgetting, titleVisibility: .visible) {
             Button("Ask Otto to forget it", role: .destructive) {
-                store.send("Forget the memory “\(item.name)”.")
+                store.send("forget memory \(Self.slug(item.name))")
+                store.askedToForget.insert(item.id)
                 dismiss()
             }
         } message: {

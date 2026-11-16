@@ -94,12 +94,7 @@ struct ChatDoor: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
-    }
-
-    private var label: String {
-        ask.map { "Otto needs you: \($0.text), until \($0.expires.formatted(date: .omitted, time: .shortened))" } ?? "Message Otto"
+        .modifier(DoorLabel(waiting: ask != nil))
     }
 
     private var tile: some View {
@@ -109,6 +104,7 @@ struct ChatDoor: View {
             if let ask {
                 HStack(spacing: 5) {
                     Circle().fill(Color.tangerine).frame(width: 7, height: 7).widgetAccentable()
+                        .accessibilityLabel("Otto needs you")
                     Text("Until \(ask.expires, style: .time)").font(.caption).foregroundStyle(.secondary)
                 }
                 // What it asks (an amount, a payee) is hidden while the phone is locked, as in StandBy.
@@ -119,8 +115,20 @@ struct ChatDoor: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
+        .modifier(DoorLabel(waiting: ask != nil))
+    }
+}
+
+/// What VoiceOver reads. With something waiting it reads the tile's own texts (the dot says "Otto needs you"),
+/// so what it asks keeps their privacy (hidden while locked); one label written over them would read it regardless.
+struct DoorLabel: ViewModifier {
+    let waiting: Bool
+    func body(content: Content) -> some View {
+        if waiting {
+            content.accessibilityElement(children: .combine)
+        } else {
+            content.accessibilityElement(children: .ignore).accessibilityLabel("Message Otto")
+        }
     }
 }
 
