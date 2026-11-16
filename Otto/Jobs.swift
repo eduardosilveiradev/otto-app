@@ -198,7 +198,9 @@ struct JobCard: View {
 
             Divider().padding(.top, 12)
             Button { open = true } label: {
-                Text("Open job").font(size: 15, relativeTo: .subheadline).foregroundStyle(Color.actionInk)
+                // The card shows three answers at most; the rest are in the sheet, and the way in says so.
+                let more = job.needsYou ? max(0, (job.question?.answers.count ?? 0) - 3) : 0
+                Text(more > 0 ? "Open job · ^[\(more) more answer](inflect: true)" : "Open job").font(size: 15, relativeTo: .subheadline).foregroundStyle(Color.actionInk)
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(.rect)
             }
             .buttonStyle(.plain)
