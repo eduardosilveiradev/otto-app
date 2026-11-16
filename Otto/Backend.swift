@@ -289,6 +289,8 @@ protocol OttoBackend: AnyObject {
     func stopTurn() async -> Bool
     /// Why the last read of a card page failed: its HTTP status, 0 when no answer came, nil when it didn't fail.
     func dashFailure(_ path: String) -> Int?
+    /// The last answer a card page got, kept on the phone, and when it was read.
+    func dashKept(_ path: String, query: [URLQueryItem]) -> (data: Data, at: Date)?
     /// Take the page Otto has open, or hand it back (POST /app/browser/hold). True once the Mac says it is as asked.
     func holdBrowser(_ hold: Bool) async -> Bool
     /// A tap, typing or a key on the held page (POST /app/browser/input). True once the Mac says it did it.
@@ -366,6 +368,7 @@ extension OttoBackend {
     var canStop: Bool { false }
     func stopTurn() async -> Bool { false }
     func dashFailure(_ path: String) -> Int? { nil }
+    func dashKept(_ path: String, query: [URLQueryItem]) -> (data: Data, at: Date)? { nil }
     func probe() async {}
     func holdBrowser(_ hold: Bool) async -> Bool { !isLive }   // sample data: there's no page to hold, so it just plays along
     func browserInput(_ input: BrowserInput) async -> Bool { !isLive }

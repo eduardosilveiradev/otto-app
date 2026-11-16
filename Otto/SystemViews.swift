@@ -161,8 +161,18 @@ struct Triggers: Decodable { let triggers: [DashTrigger] }
 // MARK: - Status
 
 /// Every moving part on the Mac and when it last checked in.
+private func phoneRow(_ label: String, _ value: String, ok: Bool) -> some View {
+    HStack(spacing: 10) {
+        Circle().fill(ok ? Color.green : Color.secondary).frame(width: 9, height: 9)
+        LabeledContent(label, value: value)
+    }
+}
+
 struct StatusScreen: View {
     @Environment(OttoStore.self) private var store
+    @Environment(\.scenePhase) private var phase
+    /// Read when the page opens and each time the app comes back to the front (Settings is where it changes).
+    @State private var allowed: Notifier.Allowed?
     var body: some View {
         Loaded(path: "status") { (s: DashStatus, reload) in
             List {
@@ -174,7 +184,16 @@ struct StatusScreen: View {
                     if let drop = (store.backend as? LiveBackend)?.lastDrop {
                         Text("Last drop \(drop)").font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
                     }
+                    // What decides whether this phone can alert you and catch up on its own: the same three
+                    // things the Mac is told (Notifier.health), said here too.
+                    if let allowed {
+                        phoneRow("Notifications", allowed == .yes ? "Allowed" : allowed == .no ? "Not allowed" : "Not asked yet", ok: allowed == .yes)
+                    }
+                    phoneRow("Background App Refresh", UIApplication.shared.backgroundRefreshStatus == .available ? "On" : "Off",
+                             ok: UIApplication.shared.backgroundRefreshStatus == .available)
+                    phoneRow("Stay connected", Keepalive.enabled ? "On" : "Off", ok: Keepalive.enabled)
                 }
+                .task(id: phase) { allowed = await Notifier.allowed() }
                 Section {
                     ForEach(s.rows) { r in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {

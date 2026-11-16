@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// The real backend: a websocket to otto/server.ts over Tailscale.
@@ -614,7 +615,27 @@ final class LiveBackend: OttoBackend {
         // Remembered so the page can say what went wrong: no such page on this Mac, an error there, or no answer.
         lock.withLock { dashFailures[path] = code.map { (200..<300).contains($0) ? nil : $0 } ?? 0 }
         guard let answer, let code, (200..<300).contains(code) else { return nil }
+        // A page that was read is kept, so it can still be shown (as old) with the Mac out of reach: see dashKept.
+        if method == "GET", let file = keptFile(path, query) {
+            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? answer.0.write(to: file, options: .atomic)
+        }
         return answer.0
+    }
+
+    /// Where a card page's last answer is kept: the Caches folder (iOS may clear it; nothing depends on it), one
+    /// file per server, page and query, so another Mac's pages are never shown for this one.
+    /// ponytail: no pruning of its own; a page per memory or schedule opened adds a small file until iOS clears Caches.
+    private func keptFile(_ path: String, _ query: [URLQueryItem]) -> URL? {
+        let name = base.absoluteString + "|" + path + "|" + query.map { "\($0.name)=\($0.value ?? "")" }.joined(separator: "&")
+        let hash = SHA256.hash(data: Data(name.utf8)).map { String(format: "%02x", $0) }.joined()
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appending(path: "dash/\(hash).json")
+    }
+
+    func dashKept(_ path: String, query: [URLQueryItem]) -> (data: Data, at: Date)? {
+        guard let file = keptFile(path, query), let data = try? Data(contentsOf: file),
+              let at = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { return nil }
+        return (data, at)
     }
 
     func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse? {

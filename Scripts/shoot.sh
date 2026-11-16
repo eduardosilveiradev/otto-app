@@ -210,6 +210,7 @@ shot search jumped 9 "Tapped a match: thread scrolled to it, lit up" $O -actions
 shot details card 6 "Contact card: today, sections, settings, server" $O -details
 shot details snoozed 6 "Snoozed, with what's held" $O -details -snoozed
 shot details pair-link-pasted 16 "A pairing link pasted into the address: both fields filled and checked at once; the call keys it carried wait for a Mac that answers" $O -details -pasteLink 'otto://pair?server=http://127.0.0.1:9&token=demo-token&vapiKey=pk_demo&vapiAssistant=asst_demo'
+shot details notifications-off 9 "Notifications refused on this phone: the card says so beside its settings, with the way to turn them on" $O -details -notificationsOff
 shot details server-check-failed 13 "Server check under the token: can't reach" $DEAD $N -details -checkServer
 for s in Loops Schedules Calls Memory People Money Trips Passport Packages Status Devices Rules Glasses Settings; do
   l=$(echo $s | tr A-Z a-z)

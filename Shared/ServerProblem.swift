@@ -7,6 +7,12 @@ enum ServerProblem: Error, Equatable {
     case notSetUp
     case offline, unreachable, timedOut, refused
     case server(Int)
+    /// Something answered, and it wasn't Otto: a hotel's sign-in page, a proxy, another site at that address.
+    case notOtto
+
+    /// What Otto's `/app/settings` answers is a JSON object. A 200 with anything else (a captive portal's page)
+    /// is somebody else's server, and a pairing must not be saved against it.
+    static func isOtto(_ body: Data) -> Bool { (try? JSONSerialization.jsonObject(with: body)) is [String: Any] }
 
     /// Nil when it went through: no error, and no HTTP status of 400 or more.
     /// A status wins over the error it caused (a websocket refused with a 401 fails with a URLError too).
@@ -34,6 +40,7 @@ enum ServerProblem: Error, Equatable {
         case .timedOut: "Your Mac took too long to answer."
         case .refused: "Your Mac didn't accept this phone's token. Pair again in Otto."
         case .server(let code): "Otto's server hit an error (\(code)). Try again in a moment."
+        case .notOtto: "Something answered at that address, but it isn't Otto. Check the address, and that this network isn't asking you to sign in."
         }
     }
 }

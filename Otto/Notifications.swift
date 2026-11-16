@@ -44,6 +44,22 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// Whether this phone may show Otto's banners at all: what the card and the Status page say, and act on.
+    enum Allowed { case yes, no, notAsked }
+    static func allowed() async -> Allowed {
+        #if DEBUG
+        // Screenshots: `-notificationsOff` is a phone that refused them; otherwise one that allowed them (the
+        // simulator, launched with -noNotificationPrompt, has never been asked).
+        if CommandLine.arguments.contains("-notificationsOff") { return .no }
+        if CommandLine.arguments.contains("-noNotificationPrompt") { return .yes }
+        #endif
+        switch await UNUserNotificationCenter.current().notificationSettings().authorizationStatus {
+        case .denied: return .no
+        case .notDetermined: return .notAsked
+        default: return .yes
+        }
+    }
+
     /// What the server's otto_status shows about this phone (POST /app/health).
     @MainActor static func health(reason: String) async -> [String: Any] {
         let s = await UNUserNotificationCenter.current().notificationSettings()
