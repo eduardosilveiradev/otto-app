@@ -6,6 +6,7 @@ import QuickLook
 import PassKit
 import LinkPresentation
 import ThinkingOrbsKit
+import VoiceGlowKit
 
 /// What ChatView, Composer and Row need from a conversation (OttoStore).
 @MainActor protocol ChatThread: AnyObject {
@@ -929,7 +930,6 @@ struct Composer: View {
                             HStack(spacing: 8) {
                                 ThinkingOrb(state: .listening, size: .px20)
                                 Text(String(format: "%d:%02d", s / 60, s % 60)).monospacedDigit()
-                                RecordingTrace(recorder: recorder)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1015,7 +1015,8 @@ struct Composer: View {
         .onChange(of: store.demoFocus) { focused = store.demoFocus }
         #endif
         .onChange(of: attachments.count) { ui.relayout() }
-        .onChange(of: recorder.started != nil) { ui.relayout() }
+        .onChange(of: recorder.started != nil) { ui.recording = recorder.started != nil; ui.relayout() }
+        .onAppear { [recorder] in ui.level = { recorder.level() } }
         .onChange(of: thread.replyingTo) { if thread.replyingTo != nil { focused = true }; ui.relayout() }
         // Unsent words survive the app being closed or killed: kept per conversation as they're typed, gone
         // once sent or cleared. ponytail: the words only; photos waiting in the strip aren't kept.
@@ -3205,8 +3206,8 @@ final class VoiceRecorder {
         return r.url
     }
 
-    /// Linear 0–1 loudness, for the trace in the composer and the walkie's bars. Read off the recorder, not
-    /// a second mic tap: a second meter opens a mixable session, which lets music back in mid-note.
+    /// Linear 0–1 loudness for the glow. Read off the recorder, not a second mic tap: the
+    /// library's own meter opens a mixable session, which lets music back in mid-note.
     func level() -> Double {
         guard let r = recorder else { return 0 }
         #if DEBUG
@@ -3250,33 +3251,33 @@ private enum Thumbs {
     static let keyboard = Animation.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500)
     /// Asks the dock to re-measure the composer (a draft wrapped onto a new line).
     @ObservationIgnored var relayout: () -> Void = {}
+    /// A voice note is recording, and how loud it is (0–1): drives the screen glow.
+    var recording = false
+    @ObservationIgnored var level: () -> Double = { 0 }
     /// The composer's height, so a sent bubble knows how far below it the text field was.
     @ObservationIgnored var height: CGFloat = 50
     /// The thread is being searched: the composer steps aside, so there's one text field at a time.
     var searching = false
 }
 
-/// A voice note's loudness as it records, newest on the right: the sign that the phone hears you, as
-/// Messages draws one. Gain for a phone at arm's length.
-private struct RecordingTrace: View {
-    let recorder: VoiceRecorder
-    @State private var levels: [CGFloat] = Array(repeating: 0, count: 20)
+/// The voice glow rising from the bottom edge of the screen while a note records. Its own
+/// full-screen layer between thread and composer: inside the composer's host it is clipped
+/// to the box. Extra gain for a phone at arm's length, a short attack so syllables show.
+private struct ScreenGlow: View {
+    let ui: ComposerUI
+    /// Reduce Motion: the glow is lit while recording but holds its idle level instead of moving with the voice.
     @Environment(\.accessibilityReduceMotion) private var still
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(levels.indices, id: \.self) { i in
-                Capsule().fill(.secondary).frame(width: 2.5, height: 3 + levels[i] * 17)
-            }
-        }
-        .frame(height: 20)
-        .animation(still ? nil : .linear(duration: 0.08), value: levels)
-        .task {
-            while !Task.isCancelled {
-                levels.removeFirst(); levels.append(CGFloat(min(1, recorder.level() * 4)))
-                try? await Task.sleep(for: .milliseconds(80))
-            }
-        }
-        .accessibilityHidden(true)   // the timer beside it already says a note is recording
+        Color.clear
+            .voiceGlow(type: .mobile, levelProvider: { [still] in still ? 0 : ui.level() }, active: ui.recording,
+                       cornerRadius: 55, options: {   // roughly the display's own corner
+                           var o = VoiceGlowOptions()
+                           o.sensitivity = 10; o.attack = 0.12; o.release = 0.5; o.idle = 0.4
+                           o.brightness = 1.4; o.saturation = 1.5
+                           return o
+                       }())
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
     }
 }
 
@@ -3297,14 +3298,17 @@ struct ChatScreen: UIViewControllerRepresentable {
 final class KeyboardDock: UIViewController {
     private let thread: UIHostingController<AnyView>
     private let composer: UIHostingController<AnyView>
+    private let glow: UIHostingController<AnyView>
     private let ui: ComposerUI
     private var composerHeight: NSLayoutConstraint!
+    private var glowBottom: NSLayoutConstraint!
 
     init(store: OttoStore, thread chat: any ChatThread, onBack: (() -> Void)? = nil) {
         let ui = ComposerUI()
         self.ui = ui
         thread = UIHostingController(rootView: AnyView(ChatView(ui: ui, thread: chat, onBack: onBack).environment(store)))
         composer = UIHostingController(rootView: AnyView(Composer(ui: ui, thread: chat).environment(store)))
+        glow = UIHostingController(rootView: AnyView(ScreenGlow(ui: ui)))
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -3322,7 +3326,7 @@ final class KeyboardDock: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        for host in [thread, composer] {   // back to front
+        for host in [thread, glow, composer] {   // back to front
             addChild(host)
             view.addSubview(host.view)
             host.view.translatesAutoresizingMaskIntoConstraints = false
@@ -3330,9 +3334,12 @@ final class KeyboardDock: UIViewController {
             host.safeAreaRegions = .container   // the keyboard is handled here, not by SwiftUI
             host.didMove(toParent: self)
         }
+        glow.view.isUserInteractionEnabled = false   // touches go through to the thread
+        glow.safeAreaRegions = []                    // down to the real screen edge
         // Measured at the real width (intrinsic size measures unconstrained, so a long
         // draft never wrapped and the box stayed one line tall).
         composerHeight = composer.view.heightAnchor.constraint(equalToConstant: 52)
+        glowBottom = glow.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ui.relayout = { [weak self] in DispatchQueue.main.async { self?.measureComposer(animated: true) } }
         NSLayoutConstraint.activate([
             thread.view.topAnchor.constraint(equalTo: view.topAnchor),
@@ -3341,6 +3348,10 @@ final class KeyboardDock: UIViewController {
             thread.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             thread.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             thread.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            glow.view.topAnchor.constraint(equalTo: view.topAnchor),
+            glowBottom,
+            glow.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            glow.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             composer.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composer.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             composer.view.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
@@ -3362,6 +3373,11 @@ final class KeyboardDock: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         measureComposer(animated: false)
+        // This view stops above the home indicator; the glow rises from the glass edge below it.
+        if let window = view.window {
+            let gap = max(0, window.bounds.maxY - view.convert(view.bounds, to: window).maxY)
+            if abs(glowBottom.constant - gap) > 0.5 { glowBottom.constant = gap }
+        }
         let covered = max(0, view.bounds.maxY - composer.view.frame.minY - view.safeAreaInsets.bottom)
         guard abs(ui.bottomInset - covered) > 0.5 else { return }
         // Inside the keyboard's animation block this runs once, with the final frame; a
