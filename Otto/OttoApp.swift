@@ -13,6 +13,10 @@ struct OttoApp: App {
         Notifier.shared.register()   // the background task must be registered before launch ends
         Dictation.shared.setUp()     // the keyboard's mic requests arrive any time
         try? Wearables.configure()
+        // What reaches the app from its widgets and controls (WidgetData's intents run here).
+        OpenWalkieControl.run = { Doors.open("walkie") }
+        MuteOttoCall.run = { CallManager.current?.toggleMute() }
+        HangUpOttoCall.run = { CallManager.current?.hangUp() }
         // A call's Live Activity outlives an app that was killed mid-call; no call is live at launch.
         Task { for a in Activity<CallActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
         #if DEBUG
@@ -35,18 +39,30 @@ struct OttoApp: App {
             }
             .onOpenURL { url in
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
-                // The widgets: Otto's thread, or the walkie-talkie over it. Before setup there's no store to open.
-                if url.scheme == "otto", url.host == "chat" || url.host == "walkie" {
-                    guard onboarded else { return }
-                    if OttoStore.shared.pips.active { OttoStore.shared.pips.open("app") }
-                    if url.host == "walkie" { WalkieLauncher.shared.open = true }
-                    return
-                }
+                // The widgets: Otto's thread, the walkie-talkie, or an approval put off with Later.
+                if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval"].contains(door) { Doors.open(door); return }
                 // Meta AI comes back here after connecting the glasses; anything else isn't the SDK's.
                 guard url.query()?.contains("metaWearablesAction") == true else { return }
                 Task { _ = try? await Wearables.shared.handleUrl(url) }
             }
             .modifier(DictationCover())
+        }
+    }
+}
+
+/// The ways in from outside the app (widgets, controls, the Action Button): Otto's thread, with the
+/// walkie-talkie, a call or an approval put off with Later over it. Nothing before setup: there's no store yet.
+@MainActor enum Doors {
+    static func open(_ door: String) {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "onboarded") as? Bool ?? (d.string(forKey: "serverURL")?.isEmpty == false) else { return }
+        let store = OttoStore.shared
+        if store.pips.active { store.pips.open("app") }
+        switch door {
+        case "walkie": WalkieLauncher.shared.open = true
+        case "call": CallLauncher.shared.open = CallManager.configured
+        case "approval": if let w = store.waitingApproval { store.reopenApproval(w.id) }
+        default: break
         }
     }
 }

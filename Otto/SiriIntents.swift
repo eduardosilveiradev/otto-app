@@ -165,6 +165,25 @@ extension AppIntent {
     }
 }
 
+/// The Action Button's call: a web call with Otto, or, during one, its end, so one press starts it and
+/// the next hangs up (in the background, without opening the app). Without calls set up it opens the chat.
+struct CallOtto: AppIntent {
+    static let title: LocalizedStringResource = "Call Otto"
+    static let description = IntentDescription("Start a call with Otto over the internet, or hang up the one you're on.")
+    static let supportedModes: IntentModes = [.background, .foreground(.dynamic)]
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        if let call = CallManager.current, call.phase == .connecting || call.phase == .live {
+            call.hangUp()
+            return .result()
+        }
+        try await continueInForeground(nil, alwaysConfirm: false)
+        Doors.open("call")
+        return .result()
+    }
+}
+
 struct OttoShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(intent: MessageOtto(),
@@ -174,6 +193,10 @@ struct OttoShortcuts: AppShortcutsProvider {
         AppShortcut(intent: SaveThisPlace(),
                     phrases: ["Save this place in \(.applicationName)", "Pin this place in \(.applicationName)", "\(.applicationName), save this place"],
                     shortTitle: "Save This Place", systemImageName: "mappin.and.ellipse")
+        // Not "Call Otto": Siri hands that to the Phone app, and there's a contact named Otto.
+        AppShortcut(intent: CallOtto(),
+                    phrases: ["Start a call with \(.applicationName)", "\(.applicationName) call", "Hang up on \(.applicationName)"],
+                    shortTitle: "Call Otto", systemImageName: "phone")
         AppShortcut(intent: OpenWalkie(),
                     phrases: ["Walkie-talkie with \(.applicationName)", "\(.applicationName) walkie-talkie", "Start \(.applicationName) walkie-talkie"],
                     shortTitle: "Walkie-talkie", systemImageName: "waveform")

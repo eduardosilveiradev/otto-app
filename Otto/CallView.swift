@@ -10,13 +10,23 @@ import VoiceGlowKit
 /// server's: `vapiPublicKey`, `vapiAssistantId`, and `ownerNumber`, which is passed
 /// as the caller's number because a web call has none and the assistant's prompt
 /// recognises its owner by `{{customer.number}}`.
+/// Opens a web call from anywhere: the header's phone button, or the "Call Otto" App Shortcut.
+/// `-call` (with `-vapiPublicKey`, `-vapiAssistantId` and, in DEBUG, `-vapiHost`): open straight into one.
+@MainActor @Observable
+final class CallLauncher {
+    static let shared = CallLauncher()
+    var open = ProcessInfo.processInfo.arguments.contains("-call")
+}
+
 @MainActor @Observable
 final class CallManager {
+    /// The call under way, for what reaches it from outside the call screen: its Live Activity's buttons, the Action Button.
+    static weak var current: CallManager?
     enum Phase { case idle, connecting, live, ended }
     var phase = Phase.idle { didSet { Self.active = phase == .connecting || phase == .live; showOutside() } }
     /// The keepalive's silent audio must stay out of a call's audio session.
     static var active = false
-    var muted = false
+    var muted = false { didSet { updateOutside() } }
     var speaker = false
     var ottoSpeaking = false
     var startedAt: Date?
@@ -32,11 +42,18 @@ final class CallManager {
 
     private func showOutside() {
         if phase == .live, activity == nil, ActivityAuthorizationInfo().areActivitiesEnabled {
-            activity = try? Activity.request(attributes: CallActivityAttributes(), content: .init(state: .init(started: .now), staleDate: nil))
+            activity = try? Activity.request(attributes: CallActivityAttributes(), content: .init(state: .init(started: .now, muted: muted), staleDate: nil))
         } else if phase == .ended || phase == .idle, let a = activity {
             activity = nil
             Task { await a.end(nil, dismissalPolicy: .immediate) }
         }
+    }
+
+    /// Mute changed here or from the Lock Screen: the Live Activity's button follows.
+    private func updateOutside() {
+        guard let a = activity else { return }
+        let state = CallActivityAttributes.ContentState(started: startedAt ?? .now, muted: muted)
+        Task { await a.update(.init(state: state, staleDate: nil)) }
     }
 
     static var configured: Bool {
@@ -59,6 +76,7 @@ final class CallManager {
         let vapi = Vapi(publicKey: key)
         #endif
         self.vapi = vapi
+        Self.current = self
         error = nil
         phase = .connecting
         vapi.eventPublisher.receive(on: DispatchQueue.main).sink { [weak self] event in

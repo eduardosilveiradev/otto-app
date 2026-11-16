@@ -29,8 +29,12 @@ what Otto knows about your day.
   app's own token.
 - Web calls to Otto through [Vapi](https://vapi.ai), if you have it set up
 - Local notifications while the app is in the background
-- Widgets: a small one for the Home Screen that opens the chat, and a round
-  one for the Lock Screen that opens the walkie-talkie
+- Widgets: a small one for the Home Screen that opens the chat and shows an
+  approval waiting on you, and a round one for the Lock Screen that opens the
+  walkie-talkie. A web call shows on the Lock Screen and in the Dynamic Island
+  while it lasts
+- An approval put off with Later waits over the composer with the time the
+  Mac still holds it
 - Siri: "Ask Otto" answers out loud, and anything that would change something
   opens the chat on its confirm buttons. "Save this place in Otto" saves where
   you are with what you say about it. "Snap to Otto" files a photo (homework,

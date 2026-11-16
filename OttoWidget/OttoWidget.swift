@@ -9,6 +9,7 @@ struct OttoWidgets: WidgetBundle {
     var body: some Widget {
         OttoChatWidget()
         OttoWalkieWidget()
+        OttoWalkieControl()
         OttoCallActivity()
     }
 }
@@ -38,11 +39,12 @@ struct OttoChatWidget: Widget {
         StaticConfiguration(kind: "dev.otto.chat", provider: DoorProvider()) { entry in
             ChatDoor(ask: entry.ask)
                 .containerBackground(.background, for: .widget)
-                .widgetURL(URL(string: "otto://chat"))
+                // With an approval waiting, straight to its sheet; otherwise the thread.
+                .widgetURL(URL(string: entry.ask == nil ? "otto://chat" : "otto://approval"))
         }
         .configurationDisplayName("Message Otto")
-        .description("Opens your conversation with Otto.")
-        .supportedFamilies([.systemSmall])
+        .description("Opens your conversation with Otto, and shows an approval waiting on you.")
+        .supportedFamilies([.systemSmall, .accessoryRectangular])
     }
 }
 
@@ -72,7 +74,35 @@ struct WalkieProvider: TimelineProvider {
 /// waiting, what it asks and until when (tangerine marks what needs you; the rest is the text colours).
 struct ChatDoor: View {
     var ask: WidgetData.Ask?
+    @Environment(\.widgetFamily) private var family
     var body: some View {
+        if family == .accessoryRectangular { lockScreen } else { tile }
+    }
+
+    /// The Lock Screen's line: who, and what's waiting (hidden while locked, as below) or what a tap does.
+    private var lockScreen: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 5) {
+                OttoEyes(size: 18, colour: .primary).frame(width: 18, height: 18)
+                Text(ask == nil ? "Otto" : "Otto needs you").font(.headline).widgetAccentable()
+            }
+            if let ask {
+                Text(ask.text).font(.subheadline).lineLimit(1).privacySensitive()
+                Text("Until \(ask.expires, style: .time)").font(.caption)
+            } else {
+                Text("Message").font(.subheadline)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+    }
+
+    private var label: String {
+        ask.map { "Otto needs you: \($0.text), until \($0.expires.formatted(date: .omitted, time: .shortened))" } ?? "Message Otto"
+    }
+
+    private var tile: some View {
         VStack(alignment: .leading, spacing: 0) {
             OttoFace(size: ask == nil ? 48 : 40)
             Spacer(minLength: 6)
@@ -81,7 +111,8 @@ struct ChatDoor: View {
                     Circle().fill(Color.tangerine).frame(width: 7, height: 7).widgetAccentable()
                     Text("Until \(ask.expires, style: .time)").font(.caption).foregroundStyle(.secondary)
                 }
-                Text(ask.text).font(.subheadline.weight(.semibold)).lineLimit(3).padding(.top, 2)
+                // What it asks (an amount, a payee) is hidden while the phone is locked, as in StandBy.
+                Text(ask.text).font(.subheadline.weight(.semibold)).lineLimit(3).padding(.top, 2).privacySensitive()
             } else {
                 Text("Otto").font(.headline)
                 Text("Message").font(.subheadline).foregroundStyle(.secondary)
@@ -89,7 +120,20 @@ struct ChatDoor: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(ask.map { "Otto needs you: \($0.text), until \($0.expires.formatted(date: .omitted, time: .shortened))" } ?? "Message Otto")
+        .accessibilityLabel(label)
+    }
+}
+
+/// Control Center and the Lock Screen's control slots: the walkie-talkie, one press away.
+struct OttoWalkieControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "dev.otto.walkie.control") {
+            ControlWidgetButton(action: OpenWalkieControl()) {
+                Label("Otto walkie-talkie", systemImage: "waveform")
+            }
+        }
+        .displayName("Otto walkie-talkie")
+        .description("Opens the walkie-talkie.")
     }
 }
 
@@ -101,21 +145,27 @@ struct OttoCallActivity: Widget {
                 OttoFace(size: 40)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Call with Otto").font(.headline)
-                    Text("Open Otto to mute or hang up").font(.subheadline).foregroundStyle(.secondary)
+                    CallTime(started: context.state.started, alignment: .leading).font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
-                CallTime(started: context.state.started).font(.title3)
+                CallButtons(muted: context.state.muted)
             }
             .padding(16)
+            // Dark in either appearance, as the Phone app's own call is: the buttons are drawn for it.
+            .environment(\.colorScheme, .dark)
+            .activityBackgroundTint(.black)
+            .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) { OttoFace(size: 36) }
                 DynamicIslandExpandedRegion(.center) { Text("Call with Otto").font(.headline) }
                 DynamicIslandExpandedRegion(.trailing) { CallTime(started: context.state.started).font(.headline) }
+                DynamicIslandExpandedRegion(.bottom) { CallButtons(muted: context.state.muted) }
             } compactLeading: {
                 OttoFace(size: 22)
             } compactTrailing: {
-                CallTime(started: context.state.started).font(.footnote).frame(maxWidth: 44)
+                // Room for h:mm:ss after the first hour, shrinking a little rather than cutting the time off.
+                CallTime(started: context.state.started).font(.footnote).minimumScaleFactor(0.75).frame(maxWidth: 56)
             } minimal: {
                 OttoFace(size: 22)
             }
@@ -123,12 +173,40 @@ struct OttoCallActivity: Widget {
     }
 }
 
+/// Mute and hang up, as the Phone app draws them: a white disc while muted, red to end. They run in the app,
+/// which the call's audio keeps alive (WidgetData's LiveActivityIntents).
+struct CallButtons: View {
+    let muted: Bool
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(intent: MuteOttoCall()) {
+                Image(systemName: muted ? "mic.slash.fill" : "mic.fill")
+                    .font(.title3).foregroundStyle(muted ? Color.black : Color.white)
+                    .frame(width: 44, height: 44)
+                    .background(muted ? Color.white : Color.white.opacity(0.2), in: .circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(muted ? "Unmute" : "Mute")
+            Button(intent: HangUpOttoCall()) {
+                Image(systemName: "phone.down.fill")
+                    .font(.title3).foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(Color.red, in: .circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Hang up")
+        }
+    }
+}
+
 /// How long the call has run, kept current by the system (m:ss, then h:mm:ss).
 struct CallTime: View {
     let started: Date
+    /// A timer's text takes all the width it's offered, so this says which side of it the time sits on.
+    var alignment: TextAlignment = .trailing
     var body: some View {
         Text(timerInterval: started...Date.distantFuture, countsDown: false)
-            .monospacedDigit().multilineTextAlignment(.trailing)
+            .monospacedDigit().multilineTextAlignment(alignment)
     }
 }
 

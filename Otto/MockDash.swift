@@ -21,6 +21,7 @@ enum MockDash {
         "jobs": #"{"jobs":[]}"#, "capabilities": #"{"entries":[]}"#, "triggers": #"{"triggers":[]}"#,
         "calls": #"{"calls":[]}"#, "packages": #"{"packages":[]}"#,
         "trips": #"{"trips":[],"current":null,"problems":{}}"#, "people": #"{"cards":[]}"#,
+        "memory": #"{"items":[],"summary":{"text":"","note":"Rewritten nightly from what Otto keeps."},"generatedAt":"2026-11-04T03:00:00Z","graph":{"c":[],"clusters":[]}}"#,
     ]
 
     private static var calls: String {

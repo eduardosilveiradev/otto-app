@@ -54,7 +54,7 @@ struct ChatView: View {
     /// Otto's Chrome tile, in its own thread and only while the server can be heard (a stale one would mislead).
     private var browser: LiveBrowser? { thread.isOtto && thread.connected ? store.browser : nil }
     /// `-call` (with `-vapiPublicKey`, `-vapiAssistantId` and, in DEBUG, `-vapiHost`): open straight into a web call.
-    @State private var webCall = ProcessInfo.processInfo.arguments.contains("-call")
+    private var webCall: Binding<Bool> { Binding(get: { CallLauncher.shared.open }, set: { CallLauncher.shared.open = $0 }) }
     /// Calls Otto is placing for you; a live one shows as a banner under the header.
     @State private var calls = CallWatch()
     @State private var gate = GateWatch()
@@ -369,7 +369,7 @@ struct ChatView: View {
                         .ignoresSafeArea()
                 }
         }
-        .fullScreenCover(isPresented: $webCall) { CallView(context: callContext) }
+        .fullScreenCover(isPresented: webCall) { CallView(context: callContext) }
         .fullScreenCover(isPresented: Binding(get: { WalkieLauncher.shared.open }, set: { WalkieLauncher.shared.open = $0 })) { WalkieView() }
         .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
             MediaViewerView(store: store).presentationBackground(.clear)
@@ -746,7 +746,7 @@ struct ChatView: View {
                 Button {
                     // Web call (free, over the internet) when Vapi is set up; the phone line otherwise.
                     let digits = callNumber.filter { $0.isNumber || $0 == "+" }
-                    if CallManager.configured { webCall = true }
+                    if CallManager.configured { CallLauncher.shared.open = true }
                     else if let url = URL(string: "tel:\(digits)"), !digits.isEmpty { openURL(url) }
                     else { showCall = true }
                 } label: {
@@ -928,10 +928,10 @@ struct Composer: View {
                                     .foregroundStyle(.white)
                                     .frame(width: 37, height: 27)
                                     .background(Color(red: 0.525, green: 0.553, blue: 0.592), in: .capsule)
-                                    // 44×40 to tap, as tall as the field; the pill stays where Messages draws it.
-                                    .padding(.horizontal, 3.5).padding(.vertical, 6.5).contentShape(.rect)
+                                    // 44pt to tap, a little past the field; the pill stays where Messages draws it.
+                                    .padding(.horizontal, 3.5).padding(.vertical, 8.5).contentShape(.rect)
                             }
-                            .padding(.trailing, 3).padding(.bottom, -2)   // the pill centred in a one-line field (measured), like Messages
+                            .padding(.trailing, 3).padding(.bottom, -4)   // the pill centred in a one-line field (measured), like Messages
                             .accessibilityLabel("Send")
                             .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                         }

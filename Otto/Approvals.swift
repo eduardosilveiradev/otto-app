@@ -53,6 +53,8 @@ struct ApprovalPill: View {
     var lapsed = false
     let tap: () -> Void
     @Environment(\.dynamicTypeSize) private var size
+    /// The dot grows with the text, so it still reads as the ask's mark at accessibility sizes.
+    @ScaledMetric(relativeTo: .footnote) private var dot: CGFloat = 7
 
     var body: some View {
         // At accessibility sizes the time goes under the ask, which gets two lines: the amount leads it and never truncates.
@@ -61,7 +63,7 @@ struct ApprovalPill: View {
         Button(action: tap) {
             HStack(alignment: stacked ? .firstTextBaseline : .center, spacing: 8) {
                 // On the ask's first line when it stacks, not halfway down three.
-                Circle().fill(lapsed ? Color.secondary : Color.otto).frame(width: 7, height: 7)
+                Circle().fill(lapsed ? Color.secondary : Color.otto).frame(width: dot, height: dot)
                     .alignmentGuide(.firstTextBaseline) { $0[.bottom] }
                 layout {
                     Text(request.ask).foregroundStyle(lapsed ? .secondary : .primary).lineLimit(stacked ? 2 : 1)
@@ -185,7 +187,8 @@ struct ApprovalSheet: View {
                 Text(p.merchant).font(.headline)
                 if let site = p.site { Text(site).font(.subheadline).foregroundStyle(.secondary) }
                 // The card is part of what Face ID approves, so it's with the amount, never under the fade.
-                Label(p.method, systemImage: "creditcard").font(.subheadline).foregroundStyle(.secondary)
+                // In the text colour: it's read before Face ID, so it gets full contrast, not the secondary grey.
+                Label(p.method, systemImage: "creditcard").font(.subheadline)
                     .labelStyle(PlainIcon()).padding(.top, 6)
             }
             .padding(.vertical, 4)

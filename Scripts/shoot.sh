@@ -197,7 +197,7 @@ done
 for t in Unasked Changes Jobs Triggers; do
   shot activity "$(echo $t | tr A-Z a-z)" 6 "Activity, $t tab" $O -details -screen Activity -activityTab $t
 done
-for s in Loops Schedules Calls People Trips Packages; do
+for s in Loops Schedules Calls Memory People Trips Packages; do
   shot "$(echo $s | tr A-Z a-z)" empty 6 "$s with nothing in it" $O -details -screen $s -emptyDash
 done
 shot activity jobs-empty 6 "No background jobs" $O -details -screen Activity -activityTab Jobs -emptyDash
