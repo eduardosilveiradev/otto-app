@@ -2355,6 +2355,8 @@ struct Typing: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14).padding(.vertical, 12)
         .background(BubbleShape(mine: false, tail: true).fill(.incomingBubble))
+        // The bubble springs to a shorter step faster than the old letters fade: keep them inside it.
+        .clipShape(BubbleShape(mine: false, tail: true))
         .padding(.trailing, 90)
         .frame(maxWidth: .infinity, alignment: .leading)
         // Last, so the bubble behind the text is inside the animation too: it grows and
