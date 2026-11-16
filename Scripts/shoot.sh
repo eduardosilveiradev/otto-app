@@ -142,6 +142,8 @@ shot chat browser-tile-private 6 "Sign-in page: caption only, no picture" $O -de
 shot chat browser-tile-long 6 "Worst case: the server's 100-character caption, two lines kept" $O -demoThread -thinking -todos -browserTile long
 shot chat browser-tile-idle 6 "Tile still up after the reply ended (done comes 20 s later)" $O -demoThread -browserTile
 shot media browser-full 6 "Browser tile tapped: the page full screen" $O -demoThread -thinking -browserTile -browserOpen
+shot media browser-take-over 6 "A page the Mac will hand over: Take over, behind Face ID" $O -demoThread -thinking -browserTile control -browserOpen
+shot media browser-holding 6 "The page in your hands: taps go to it, with typing, keys and Hand back" $O -demoThread -thinking -browserTile control -browserOpen -browserHold
 shot chat offline 6 "Server unreachable: Otto asleep, reconnecting" $O -demoThread -offline
 shot chat offline-pending 13 "Dead server with a send waiting: Will send when back online" $DEAD $N -longThread b
 shot chat offline-empty 15 "Real dead server: empty thread, asleep" $DEAD $N -emptyThread
@@ -168,6 +170,9 @@ shot sheet approval-draft-worst 6 "Worst case: fourteen recipients, an unbreakab
 shot chat approval-waiting 6 "A payment put off with Later: waiting over the composer, with its time left" $O -demoThread -paymentDemo -approvalLater
 shot chat approval-waiting-todos 6 "A change put off with Later takes the to-dos' place until it's answered" $O -demoThread -approvalDemo -approvalLater -openTodos
 shot chat approval-waiting-worst 6 "Worst case: a long payee and a five-figure total, at an accessibility text size" $O -demoThread -approvalWorst -approvalLater -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+shot chat approval-waiting-two 6 "Two put off with Later: the pill shows the newest and says two are waiting" $O -demoThread -paymentDemo -approvalDemo -approvalLater
+shot pips approval-in-chats 7 "An approval raised while the Chats list is up: its sheet over the list" $B -pipsFixture -pipsScreen conversations -approvalDemo
+shot pips otto-needs-you 7 "Chats with an approval put off: Otto's row says it needs you" $B -pipsFixture -pipsScreen conversations -approvalDemo -approvalLater
 shot chat approval-lapsed 6 "It lapsed on the Mac before an answer: the pill says Expired until tapped away" $O -demoThread -paymentDemo -approvalLapsed
 shot sheet boarding-pass 11 "Flight-day boarding pass" $O -demoThread -mockGate -openGate
 shot sheet live-call 8 "A call Otto is placing, live transcript" $O -demoThread -mockCalls -openCall
@@ -208,6 +213,8 @@ done
 shot rules worst 6 "Worst case: the longest rule, one used once, one used 1,284 times, one with no dates" $O -details -screen Rules -rulesWorst
 shot activity jobs-empty 6 "No background jobs" $O -details -screen Activity -activityTab Jobs -emptyDash
 shot calls error 6 "Can't reach your Mac (no callbot)" $O -details -screen Calls
+shot loops stale 6 "A refresh that failed: the page keeps what it had and says how old it is" $O -details -screen Loops -staleDash
+shot settings error 13 "Settings when the Mac doesn't answer" $DEAD $N -details -screen Settings
 shot loops error 12 "Can't reach your Mac (dead server)" $DEAD $N -details -screen Loops
 
 # --- Pips and groups ---------------------------------------------------------------------

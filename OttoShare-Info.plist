@@ -18,6 +18,8 @@
 				<true/>
 				<key>NSExtensionActivationSupportsImageWithMaxCount</key>
 				<integer>5</integer>
+				<key>NSExtensionActivationSupportsFileWithMaxCount</key>
+				<integer>5</integer>
 			</dict>
 		</dict>
 	</dict>

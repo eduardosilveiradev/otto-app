@@ -27,6 +27,8 @@ struct ApprovalRequest: Decodable, Identifiable, Hashable {
     /// Something Otto wants to send in your name: where it goes, everyone it reaches, and every word of it.
     struct Draft: Decodable, Hashable {
         let channel: String; let to: [String]; var cc: [String]? = nil; var subject: String? = nil; let body: String
+        /// The names of the files that go with it.
+        var attachments: [String]? = nil
         /// "Email", "iMessage"; any other channel by its own name.
         var channelName: String { ["email": "Email", "imessage": "iMessage", "sms": "Text message", "whatsapp": "WhatsApp"][channel.lowercased()] ?? channel.capitalized }
     }
@@ -43,6 +45,9 @@ struct ApprovalRequest: Decodable, Identifiable, Hashable {
     var scopes: [String]? = nil
     var rule: String? = nil
     var draft: Draft? = nil
+    /// What to know before saying yes to a change or a send ("Can't be undone", "Goes to people outside your
+    /// contacts"), as a payment has its own. From a server that sends them.
+    var notes: [String]? = nil
 }
 
 /// How long an approval lasts: this once, until the task Otto is on is done, or from now on.
@@ -102,6 +107,26 @@ enum ApprovalCheck {
         }
         assert(ids(["x", "y"], ["y", "z"]) == ["y", "z"] && ids(["x"], []) == [] && ids([], ["z"]) == ["z"], "reconcile")
         assert(ids(["x"], [], keep: ["x"]) == ["x"] && ids([], ["x"], decided: ["x"]) == [], "a receipt stays; an answered one doesn't come back")
+        // The walkie's answer: the reply that names the note, else the first thing Otto said that wasn't news it was sending anyway.
+        func said(_ text: String, src: String? = nil, replyTo: String? = nil, at: TimeInterval) -> Message {
+            var m = Message(from: .otto, text: text, date: now.addingTimeInterval(at)); m.src = src; m.replyTo = replyTo; return m
+        }
+        let thread = [said("old", at: -5), said("reminder", src: "reminders", at: 1), said("answer", at: 2), said("named", replyTo: "n1", at: 3)]
+        assert(WalkieView.answer(in: thread, to: nil, since: now)?.text == "answer" && WalkieView.answer(in: thread, to: "n1", since: now)?.text == "named", "walkie answer")
+        assert(WalkieView.answer(in: Array(thread.prefix(2)), to: "n1", since: now) == nil, "news isn't an answer")
+        // Work on the Lock Screen: only once it has lasted, and only started from the front.
+        assert(!WorkActivity.starts(after: 19, foreground: true) && WorkActivity.starts(after: 20, foreground: true) && !WorkActivity.starts(after: 300, foreground: false), "work activity start")
+        assert(WorkLine(.init(status: "Reading mail", started: now), stale: true).detail != "Reading mail" && WorkLine(.init(status: "x", started: now, needsYou: true), stale: false).url?.host() == "approval", "work line")
+        // A PDF as pictures: every page up to the cap, none wider or taller than 1400 px whatever the screen's scale.
+        let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 595, height: 842)).pdfData { ctx in for _ in 0..<3 { ctx.beginPage() } }
+        let two = PDFPages.images(pdf, limit: 2)
+        assert(two.total == 3 && two.pages.count == 2 && two.pages.allSatisfy { max($0.size.width * $0.scale, $0.size.height * $0.scale) <= 1400 && $0.size.height > $0.size.width }, "pdf pages")
+        assert(PDFPages.images(Data("not a pdf".utf8)).pages.isEmpty && PDFPages.caption("a.pdf", shown: 2, total: 3) == "a.pdf, the first 2 of 3 pages" && PDFPages.caption("a.pdf", shown: 1, total: 1) == "a.pdf, 1 page", "pdf words")
+        // A pairing link: only otto://pair with an http(s) server and a token; call keys ride along when present.
+        let link = PairingLink("otto://pair?server=https://mac.example.ts.net&token=abc&vapiKey=k&vapiAssistant=a")
+        assert(link?.host == "mac.example.ts.net" && link?.token == "abc" && link?.callKey == "k" && link?.callAssistant == "a", "pairing link")
+        assert(PairingLink("otto://pair?server=javascript:alert(1)&token=abc") == nil && PairingLink("otto://pair?server=https://x.example") == nil
+               && PairingLink("https://evil.example/pair?server=https://x&token=t") == nil && PairingLink("otto://chat") == nil, "not a pairing link")
         print("approval check ok")
     }
 }
@@ -112,6 +137,8 @@ enum ApprovalCheck {
 /// unanswered, the same line says so until it's tapped away.
 struct ApprovalPill: View {
     let request: ApprovalRequest
+    /// How many are waiting in all. The pill shows the newest; with more, it says how many there are.
+    var waiting = 1
     var lapsed = false
     let tap: () -> Void
     @Environment(\.dynamicTypeSize) private var size
@@ -135,7 +162,9 @@ struct ApprovalPill: View {
                             Text("Expired")
                         } else {
                             TimelineView(.periodic(from: .now, by: 15)) { tl in
-                                if let m = request.minutesLeft(at: tl.date) { Text("\(m) min left").monospacedDigit() }
+                                let left = request.minutesLeft(at: tl.date).map { "\($0) min left" }
+                                let more = waiting > 1 ? "\(waiting) waiting" : nil
+                                Text([more, left].compactMap { $0 }.joined(separator: " · ")).monospacedDigit()
                             }
                         }
                     }
@@ -155,7 +184,7 @@ struct ApprovalPill: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 12)
         .glassEffect(.regular, in: .rect(cornerRadius: 17, style: .continuous))
-        .accessibilityLabel(lapsed ? "Expired before you answered: \(request.ask)" : "Waiting on you: \(request.ask)")
+        .accessibilityLabel(lapsed ? "Expired before you answered: \(request.ask)" : waiting > 1 ? "\(waiting) waiting on you. The newest: \(request.ask)" : "Waiting on you: \(request.ask)")
         .accessibilityValue(lapsed ? "" : request.minutesLeft(at: .now).map { "\($0) minutes left" } ?? "")
         .accessibilityHint(lapsed ? "Dismisses it" : "Opens it to approve or decline")
     }
@@ -193,7 +222,11 @@ struct ApprovalSheet: View {
                     Section { Text(request.title).font(.headline) }
                 }
                 if paid, let p = request.payment {
-                    Section { PrintedReceipt(payment: p).listRowBackground(Color.clear).listRowInsets(EdgeInsets()) }
+                    Section { PrintedReceipt(payment: p).listRowBackground(Color.clear).listRowInsets(EdgeInsets()) } footer: {
+                        // What the slip is: your yes, on its way. The payment is Otto's to make and to report.
+                        Text(p.test == true ? "A test: nothing is charged." : "Your Mac has your yes. Otto pays it now and tells you in the chat when it’s done.")
+                            .frame(maxWidth: .infinity).multilineTextAlignment(.center)
+                    }
                 } else if let p = request.payment { paymentRows(p) } else if let d = request.draft { draftRows(d) } else { changeRows }
                 if !paid, size.isAccessibilitySize, let lasting, !request.widerScopes.isEmpty, unconfirmed == nil {
                     Section { Text(lasting).foregroundStyle(.secondary) }
@@ -348,11 +381,23 @@ struct ApprovalSheet: View {
 
     /// A message Otto wants to send: who gets it comes first and whole. Who it reaches is what Face ID
     /// approves, so every recipient has a line of its own and none is folded into "and 3 more".
+    /// The caveats, first: read before the rest and never left under the bar's fade, as on a payment.
+    @ViewBuilder private var caveats: some View {
+        if let notes = request.notes, !notes.isEmpty {
+            Section {
+                ForEach(notes, id: \.self) { Label($0, systemImage: "exclamationmark.circle").font(.subheadline) }
+            } header: { Text(request.draft != nil ? "Before you send" : "Before you approve") }
+            .labelStyle(PlainIcon())
+        }
+    }
+
     @ViewBuilder private func draftRows(_ d: ApprovalRequest.Draft) -> some View {
+        caveats
         Section {
             field("To", d.to)
             if let cc = d.cc, !cc.isEmpty { field("Cc", cc) }
             if let subject = d.subject, !subject.isEmpty { field("Subject", [subject]) }
+            if let files = d.attachments, !files.isEmpty { field(files.count == 1 ? "Attachment" : "Attachments", files) }
         } header: { Text(d.channelName) }
         Section("Message") { Text(d.body).textSelection(.enabled) }
         if !request.summary.isEmpty { Section("Why Otto is sending it") { Text(request.summary) } }
@@ -378,6 +423,7 @@ struct ApprovalSheet: View {
     }
 
     @ViewBuilder private var changeRows: some View {
+        caveats
         Section {
             Text(request.summary)
                 .font(.body)
@@ -457,7 +503,10 @@ struct ApprovalSheet: View {
         }
         // A paid payment goes to the Mac now, then the sheet stays for the receipt until Done.
         let keep = approve && request.payment != nil   // the receipt stays up until Done
-        switch await store.decide(request.id, approve: approve, scope: scope, keep: keep) {
+        let outcome = await store.decide(request.id, approve: approve, scope: scope, keep: keep)
+        // Felt as well as seen. A payment's slip gives its own tick and thump as it prints.
+        if !(keep && outcome == .done) { UINotificationFeedbackGenerator().notificationOccurred(outcome == .done ? .success : .warning) }
+        switch outcome {
         case .done: if keep { withAnimation(.snappy) { paid = true } }
         case .gone: failed = "This had expired before your answer reached your Mac, so nothing was done. Ask Otto again."
         // The decision may have landed and only its answer been lost: trying again is safe (same decision),
@@ -501,8 +550,9 @@ private struct DiffPreview: View {
 }
 
 /// Kitchen's Receipt Printer (dqnamo.com/experiments/receipt-printer), rebuilt: a dark printer
-/// whose screen says what it's doing (processing, printing, complete), and a receipt that feeds
-/// out of its slot in ten short pushes, bigger in the middle, over 1.75s.
+/// whose screen says what it's doing (sending, printing, sent), and a slip that feeds out of its slot
+/// in ten short pushes, bigger in the middle, over 1.75s. It prints what you approved, in the words of
+/// an approval: nothing on it says the money has moved, because that hasn't happened yet.
 struct PrintedReceipt: View {
     let payment: ApprovalRequest.Payment
     enum Stage { case processing, printing, complete }
@@ -528,7 +578,7 @@ struct PrintedReceipt: View {
         // under its label (see row). VoiceOver walks the paper row by row, as it's printed.
         .task { await run() }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Receipt")
+        .accessibilityLabel("Approval slip")
     }
 
     private func run() async {
@@ -612,8 +662,8 @@ struct PrintedReceipt: View {
 
     private var label: String {
         switch stage {
-        case .processing: "Processing your payment"
-        case .printing: "Printing your receipt"
+        case .processing: "Sending your approval"
+        case .printing: "Printing your slip"
         case .complete: payment.test == true ? "Test complete" : "Sent to Otto"
         }
     }
@@ -650,14 +700,14 @@ struct PrintedReceipt: View {
             dashed
             VStack(alignment: .leading, spacing: 3) {
                 row("Merchant", payment.site ?? payment.merchant)
-                row("Paid with", payment.method)
-                row("Date", Date.now.formatted(.dateTime.day().month(.abbreviated).year().hour().minute()).uppercased())
+                row("Pay with", payment.method)
+                row("Approved", Date.now.formatted(.dateTime.day().month(.abbreviated).year().hour().minute()).uppercased())
             }
             .foregroundStyle(Color(white: 0.35))
             .padding(.vertical, 6)
             Barcode(seed: payment.merchant + payment.money(payment.total)).frame(height: 34).padding(.top, 10).padding(.horizontal, 30)
                 .accessibilityHidden(true)
-            Text(payment.test == true ? "TEST · NOTHING CHARGED" : "THANK YOU").font(size: 9, design: .monospaced, relativeTo: .caption2)
+            Text(payment.test == true ? "TEST · NOTHING CHARGED" : "APPROVED · NOT PAID YET").font(size: 9, design: .monospaced, relativeTo: .caption2)
                 .foregroundStyle(Color(white: 0.5)).frame(maxWidth: .infinity).padding(.top, 4)
         }
         .font(size: 11, weight: .medium, design: .monospaced, relativeTo: .caption2)

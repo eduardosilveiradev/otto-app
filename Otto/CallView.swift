@@ -105,8 +105,9 @@ final class CallManager {
             // Ended before it started: a room that can't be joined says "left" before its error.
             case .callDidEnd: if phase == .connecting { fail("Couldn’t connect.") } else { phase = .ended }
             case .speechUpdate(let s): if s.role == .assistant { ottoSpeaking = s.status == .started }
-            // The app's own words, not the system's ("Could not connect to the server.").
-            case .error: fail("Can’t reach your Mac.")
+            // The app's own words, not the system's ("Could not connect to the server."). A web call goes over
+            // the internet to the call service, not to the Mac, so the Mac isn't what it blames.
+            case .error: fail("Couldn’t start the call. Check your connection and try again.")
             default: break
             }
         }.store(in: &bag)
@@ -149,6 +150,8 @@ struct CallView: View {
     @State private var call = CallManager()
     /// The group or pip the call was placed from; nil from Otto's own thread.
     var context: String? = nil
+    /// Reduce Motion: the face keeps its size and the glow its idle level; the caption and the timer say the call is live.
+    @Environment(\.accessibilityReduceMotion) private var still
 
     var body: some View {
         ZStack {
@@ -156,7 +159,7 @@ struct CallView: View {
 
             // The same glow as a recording voice note, rising from the screen's edge with either voice.
             Color.clear
-                .voiceGlow(type: .mobile, levelProvider: { [call] in Double(min(1, call.anyLevel * 4)) },
+                .voiceGlow(type: .mobile, levelProvider: { [call, still] in still ? 0 : Double(min(1, call.anyLevel * 4)) },
                            active: call.phase == .live, theme: .dark, cornerRadius: 55, options: {
                                var o = VoiceGlowOptions()
                                o.sensitivity = 10; o.attack = 0.12; o.release = 0.5; o.idle = 0.4
@@ -170,7 +173,7 @@ struct CallView: View {
                 Spacer()
                 TimelineView(.animation) { _ in
                     OttoAvatar(size: 180, thinking: call.phase == .connecting)
-                        .scaleEffect(1 + CGFloat(min(1, call.level * 4)) * 0.08)   // remote levels are quiet; boost
+                        .scaleEffect(still ? 1 : 1 + CGFloat(min(1, call.level * 4)) * 0.08)   // remote levels are quiet; boost
                         .animation(.easeOut(duration: 0.12), value: call.level)
                 }
                 .frame(height: 340)

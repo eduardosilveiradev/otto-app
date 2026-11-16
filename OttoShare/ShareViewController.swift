@@ -34,8 +34,10 @@ final class ShareModel {
     enum State: Equatable { case editing, sending, sent, queued, failed(ServerProblem) }
     /// True until every attachment has been read: Send waits, so a photo still loading isn't left out.
     var loading = true
-    /// Photos that couldn't be read, said under the preview rather than dropped without a word.
+    /// What couldn't be read (a photo, a locked PDF) and what Otto has no way to take (any other kind of
+    /// file), said under the preview rather than dropped without a word.
     var unreadable = 0
+    var unsupported = 0
 
     /// At most 1600 px on the long side, decoded straight to that size: a full-size 24 MP photo
     /// decodes to ~96 MB, and two of them get the extension killed for memory mid-share. The app
@@ -59,8 +61,19 @@ final class ShareModel {
             if p.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
                 if let data = try? await p.loadData(UTType.image), let img = Self.downsampled(data) { images.append(img) }
                 else { unreadable += 1 }
+            } else if p.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
+                // Before the URL branch: a PDF from Files is also a file URL. It goes as its pages, drawn.
+                let read = (try? await p.loadData(UTType.pdf)).flatMap { $0 }.map { PDFPages.images($0) }
+                if let read, !read.pages.isEmpty {
+                    images += read.pages
+                    parts.append(PDFPages.caption(p.suggestedName.map { $0.hasSuffix(".pdf") ? $0 : $0 + ".pdf" } ?? "PDF", shown: read.pages.count, total: read.total))
+                } else { unreadable += 1 }
             } else if p.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
-                if let url = try? await p.loadItem(forTypeIdentifier: UTType.url.identifier) as? URL { parts.append(url.absoluteString) }
+                // A file that is neither a picture nor a PDF arrives as a file URL: its path on this phone means
+                // nothing to the Mac, so it isn't sent as if it were a link.
+                if let url = try? await p.loadItem(forTypeIdentifier: UTType.url.identifier) as? URL {
+                    if url.isFileURL { unsupported += 1 } else { parts.append(url.absoluteString) }
+                }
             } else if p.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
                 if let s = try? await p.loadItem(forTypeIdentifier: UTType.plainText.identifier) as? String { parts.append(s) }
             }
@@ -145,14 +158,18 @@ struct ShareView: View {
                                 ForEach(model.images.indices, id: \.self) { i in
                                     Image(uiImage: model.images[i]).resizable().scaledToFill()
                                         .frame(width: 90, height: 90).clipShape(.rect(cornerRadius: 10, style: .continuous))
-                                        .accessibilityLabel("Photo \(i + 1) of \(model.images.count)")
+                                        .accessibilityLabel("Picture \(i + 1) of \(model.images.count)")
                                 }
                             }
                         }
                         .scrollIndicators(.hidden)
                     }
                     if model.unreadable > 0 {
-                        Text(model.unreadable == 1 ? "One photo couldn’t be read and won’t be sent." : "\(model.unreadable) photos couldn’t be read and won’t be sent.")
+                        Text(model.unreadable == 1 ? "One item couldn’t be read and won’t be sent." : "\(model.unreadable) items couldn’t be read and won’t be sent.")
+                            .font(.footnote).foregroundStyle(.red)
+                    }
+                    if model.unsupported > 0 {
+                        Text("Otto takes photos, PDFs, links and text. \(model.unsupported == 1 ? "One file of another kind" : "\(model.unsupported) files of another kind") won’t be sent.")
                             .font(.footnote).foregroundStyle(.red)
                     }
                     if !model.text.isEmpty {

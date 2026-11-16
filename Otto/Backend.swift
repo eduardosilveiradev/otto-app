@@ -21,6 +21,23 @@ struct BrowserTile: Equatable {
     let url: String
     /// Epoch ms.
     let ts: Double
+    /// The Mac will hand this page over to you (a sign-in, a CAPTCHA) and take taps and typing from the app.
+    var control = false
+    /// It's in your hands now: Otto is waiting.
+    var held = false
+}
+
+/// What you do to the page while you hold it. Fractions for a tap, so it lands wherever the picture is drawn.
+enum BrowserInput: Equatable {
+    case tap(x: Double, y: Double), text(String), key(String), scroll(Double)
+    var body: [String: Any] {
+        switch self {
+        case .tap(let x, let y): ["tap": ["x": x, "y": y]]
+        case .text(let s): ["text": s]
+        case .key(let k): ["key": k]
+        case .scroll(let pages): ["scroll": pages]
+        }
+    }
 }
 
 /// A "browser" frame: the whole tile to show now, or `done` when it goes away.
@@ -30,13 +47,14 @@ enum BrowserFrame: Equatable {
 
     /// Nil when the data isn't a browser frame. A picture that won't decode leaves the caption alone.
     init?(json data: Data) {
-        struct F: Decodable { let type: String; let done: Bool?; let image: String?; let caption: String?; let url: String?; let ts: Double? }
+        struct F: Decodable { let type: String; let done: Bool?; let image: String?; let caption: String?; let url: String?; let ts: Double?; let control: Bool?; let held: Bool? }
         guard let f = try? JSONDecoder().decode(F.self, from: data), f.type == "browser" else { return nil }
         if f.done == true { self = .done; return }
         guard let caption = f.caption else { return nil }
         // "data:image/jpeg;base64,<data>"
         let b64 = f.image.flatMap { $0.hasPrefix("data:image/") ? $0.split(separator: ",", maxSplits: 1).dropFirst().first : nil }
-        self = .show(BrowserTile(image: b64.flatMap { Data(base64Encoded: String($0)) }, caption: caption, url: f.url ?? "", ts: f.ts ?? 0))
+        self = .show(BrowserTile(image: b64.flatMap { Data(base64Encoded: String($0)) }, caption: caption, url: f.url ?? "", ts: f.ts ?? 0,
+                                 control: f.control == true, held: f.held == true))
     }
 
     var tile: BrowserTile? { if case .show(let t) = self { t } else { nil } }
@@ -226,6 +244,14 @@ protocol OttoBackend: AnyObject {
     /// GET /app/approvals: every approval the Mac still holds. Nil when it couldn't be asked or has no
     /// such route, which is not "none": the caller then leaves what it has alone.
     func pendingApprovals(background: Bool) async -> [ApprovalRequest]?
+    /// The Mac leaves the alert for an approval to the app while it's connected (its hello says so).
+    var alertsApprovals: Bool { get }
+    /// Back in front: find out now whether the connection is still there.
+    func probe() async
+    /// Take the page Otto has open, or hand it back (POST /app/browser/hold). False when the Mac didn't take it.
+    func holdBrowser(_ hold: Bool) async -> Bool
+    /// A tap, typing or a key on the held page (POST /app/browser/input). False when the Mac didn't take it.
+    func browserInput(_ input: BrowserInput) async -> Bool
     /// The newest `limit` messages of the thread on the server, or with `since`, every one after it.
     /// Nil when the server couldn't be reached or answered with an error.
     func history(background: Bool, limit: Int, since: Date?) async -> [Message]?
@@ -293,6 +319,10 @@ extension OttoBackend {
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
     func decide(approval id: String, approve: Bool, scope: ApprovalScope) async -> ApprovalOutcome { .done }
     func pendingApprovals(background: Bool) async -> [ApprovalRequest]? { nil }
+    var alertsApprovals: Bool { false }
+    func probe() async {}
+    func holdBrowser(_ hold: Bool) async -> Bool { !isLive }   // sample data: there's no page to hold, so it just plays along
+    func browserInput(_ input: BrowserInput) async -> Bool { !isLive }
     func wallet(_ fields: [String: String], id: String) async -> Bool { true }
     var conversationEvents: AsyncStream<ConversationEvent> { AsyncStream { _ in } }
     var jobLists: AsyncStream<[CodeJob]> { AsyncStream { _ in } }

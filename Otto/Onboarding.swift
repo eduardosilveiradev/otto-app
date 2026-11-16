@@ -5,6 +5,40 @@ import VisionKit
 
 /// First launch: meet Otto, pair with the Mac, then the few switches that make it useful.
 /// Runs before OttoStore exists, so the store starts on the server it just paired with.
+/// An otto://pair link: what the Mac's `apptokens.ts new` prints as a QR code. It may also carry what a call
+/// inside the app needs. Anything that isn't one, or names a server that isn't http(s), is nil.
+struct PairingLink: Equatable {
+    let server: String, token: String
+    var callKey: String? = nil, callAssistant: String? = nil
+    var host: String { URL(string: server)?.host() ?? server }
+
+    init?(_ text: String) {
+        guard let c = URLComponents(string: text.trimmingCharacters(in: .whitespacesAndNewlines)), c.scheme == "otto", c.host == "pair" else { return nil }
+        func item(_ name: String) -> String? { c.queryItems?.first { $0.name == name }?.value.flatMap { $0.isEmpty ? nil : $0 } }
+        guard let s = item("server"), let t = item("token"),
+              let u = URL(string: s), ["http", "https"].contains(u.scheme), u.host() != nil else { return nil }
+        server = s; token = t; callKey = item("vapiKey"); callAssistant = item("vapiAssistant")
+    }
+
+    /// Saved as the app reads them at launch (LiveBackend.fromDefaults, CallManager).
+    func save() {
+        let d = UserDefaults.standard
+        d.set(server, forKey: "serverURL"); d.set(token, forKey: "serverToken")
+        saveCallKeys()
+    }
+    func saveCallKeys() {
+        if let callKey { UserDefaults.standard.set(callKey, forKey: "vapiPublicKey") }
+        if let callAssistant { UserDefaults.standard.set(callAssistant, forKey: "vapiAssistantId") }
+    }
+}
+
+/// A pairing link opened from outside the app (the Camera's QR banner, AirDrop, a message) before the app
+/// knew what to do with it: onboarding's pairing step takes it, or the main screen asks first.
+@MainActor @Observable final class PairInbox {
+    static let shared = PairInbox()
+    var link: PairingLink?
+}
+
 struct OnboardingFlow: View {
     let finish: () -> Void
     @State private var step = Step.hello
@@ -28,6 +62,10 @@ struct OnboardingFlow: View {
         }
         .padding(.horizontal, 24)
         .background(Color(.systemBackground))
+        // A pairing link tapped outside the app goes straight to the pairing step, which takes it.
+        .onChange(of: PairInbox.shared.link, initial: true) { _, link in
+            if link != nil, step != .connect { forward = true; withAnimation { step = .connect } }
+        }
         #if DEBUG
         .onAppear {
             // `-onboardingStep 3` opens on that page, for screenshots.
@@ -207,7 +245,7 @@ private struct ConnectPage: View {
     var body: some View {
         Page(title: "Connect to your Mac",
              line: manual ? "The server address and the app token from your Mac."
-                          : "Run this on your Mac, then scan the code it opens.") {
+                          : "In your Otto folder on your Mac, run this, then scan the code it opens.") {
             if !manual { Glyph(name: "qrcode.viewfinder") }
         } content: {
             VStack(spacing: 12) {
@@ -276,6 +314,12 @@ private struct ConnectPage: View {
             if CommandLine.arguments.contains("-connectProblem") { problem = "Can’t reach the Mac. Is Tailscale on?" }
         }
         #endif
+        // One opened from outside the app (PairInbox): taken as if it had been scanned here.
+        .task(id: PairInbox.shared.link) {
+            guard let link = PairInbox.shared.link else { return }
+            PairInbox.shared.link = nil
+            await take(link)
+        }
         .sheet(isPresented: $scanning) {
             QRScanner { code in
                 scanning = false
@@ -292,13 +336,14 @@ private struct ConnectPage: View {
 
     /// An otto://pair link from the scanner or the clipboard.
     private func take(_ text: String) async {
-        guard let c = URLComponents(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
-              c.scheme == "otto", c.host == "pair",
-              let s = c.queryItems?.first(where: { $0.name == "server" })?.value,
-              let t = c.queryItems?.first(where: { $0.name == "token" })?.value
-        else { problem = "That isn’t an Otto pairing code."; return }
-        server = s; token = t
-        await connect(s, t)
+        guard let link = PairingLink(text) else { problem = "That isn’t an Otto pairing code."; return }
+        await take(link)
+    }
+
+    private func take(_ link: PairingLink) async {
+        server = link.server; token = link.token
+        link.saveCallKeys()
+        await connect(link.server, link.token)
     }
 
     private func connect(_ s: String, _ t: String) async {
@@ -323,7 +368,7 @@ private struct ConnectPage: View {
     }
 }
 
-private struct QRScanner: UIViewControllerRepresentable {
+struct QRScanner: UIViewControllerRepresentable {
     let found: (String) -> Void
 
     func makeUIViewController(context: Context) -> DataScannerViewController {
@@ -421,7 +466,7 @@ private struct AwakePage: View {
     @AppStorage("stayAwake") private var stayAwake = true
     var body: some View {
         Page(title: "Stay connected",
-             line: "Keeps the line to your Mac open in the background, so messages arrive the moment I send them. Costs a little battery.") {
+             line: "Keeps the line to your Mac open in the background, so messages arrive the moment I send them. Costs a little battery. Without it, iOS lets me check in now and then, and anything urgent comes through Bark if your Mac has it set up.") {
             Glyph(name: "bolt.horizontal.fill")
         } footer: {
             // Asked like notifications are: a yes and a not now, no switch to read first.

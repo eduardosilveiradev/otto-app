@@ -134,10 +134,30 @@ struct Loaded<T: Decodable, Content: View>: View {
     @Environment(OttoStore.self) private var store
     @State private var value: T?
     @State private var failed = false
+    /// When what's on screen was read, and whether a later read failed: it's then old, and the page says how old.
+    @State private var loadedAt = Date.now
+    @State private var stale = false
 
     var body: some View {
         Group {
-            if let value { content(value, load) }
+            if let value {
+                content(value, load)
+                    .safeAreaInset(edge: .bottom) {
+                        if stale {
+                            HStack(spacing: 8) {
+                                Text("Couldn’t reach your Mac. This is from \(loadedAt.formatted(date: .omitted, time: .shortened)).")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Button("Try again") { Task { await load() } }.font(.footnote.weight(.semibold))
+                            }
+                            .padding(.horizontal, 14).padding(.vertical, 10)
+                            .glassEffect(.regular, in: .rect(cornerRadius: 17, style: .continuous))
+                            .padding(.horizontal, 16).padding(.bottom, 8)
+                            .transition(.opacity)
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.2), value: stale)
+            }
             else if failed {
                 ContentUnavailableView {
                     Label("Can’t reach your Mac", systemImage: "wifi.slash")
@@ -157,7 +177,12 @@ struct Loaded<T: Decodable, Content: View>: View {
     }
 
     private func load() async {
-        if let v: T = await store.backend.dash(path, query: query) { value = v; failed = false } else if value == nil { failed = true }
+        if let v: T = await store.backend.dash(path, query: query) { value = v; failed = false; stale = false; loadedAt = .now }
+        else if value == nil { failed = true } else { stale = true }
+        #if DEBUG
+        // `-staleDash`: as if a later read had failed, for screenshots of the line that says so.
+        if value != nil, CommandLine.arguments.contains("-staleDash") { stale = true }
+        #endif
     }
 }
 
