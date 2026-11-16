@@ -27,7 +27,21 @@ struct PairingLink: Equatable {
         server = s; token = t; callKey = item("vapiKey"); callAssistant = item("vapiAssistant")
     }
 
-    /// Saved as the app reads them at launch (LiveBackend.fromDefaults, CallManager). Only ever after a yes.
+    /// Whether that Mac takes this token: the request onboarding and the card make before they keep a pair.
+    /// Nil is yes. A yes from the owner isn't enough on its own: a link naming their own Mac with a made-up
+    /// token and someone else's call keys would read as theirs, and must change nothing.
+    func problem() async -> ServerProblem? {
+        guard let url = URL(string: server) else { return .unreachable }
+        var req = URLRequest(url: url.appending(path: "app/settings"), timeoutInterval: 10)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let code = (try await URLSession.shared.data(for: req).1 as? HTTPURLResponse)?.statusCode ?? 0
+            return (200..<300).contains(code) ? nil : ServerProblem(status: code, error: nil) ?? .server(code)
+        } catch { return ServerProblem(status: nil, error: error) ?? .unreachable }
+    }
+
+    /// Saved as the app reads them at launch (LiveBackend.fromDefaults, CallManager). Only ever after a yes,
+    /// and after `problem()` has come back nil.
     func save() {
         let d = UserDefaults.standard
         d.set(server, forKey: "serverURL"); d.set(token, forKey: "serverToken")

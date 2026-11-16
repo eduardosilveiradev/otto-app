@@ -2182,6 +2182,11 @@ private struct VoiceRow: View {
     private(set) var rate: Float = { let r = UserDefaults.standard.float(forKey: "otto.voiceRate"); return r > 0 ? r : 1 }()
     @ObservationIgnored private var player: AVAudioPlayer?
 
+    #if DEBUG
+    /// `-voicePaused`: the demo reply's clip held part-way, for a screenshot of the speed button.
+    override init() { super.init(); if CommandLine.arguments.contains("-voicePaused") { paused = "demo-voice" } }
+    #endif
+
     func nextRate() {
         rate = rate == 1 ? 1.5 : rate == 1.5 ? 2 : 1
         UserDefaults.standard.set(rate, forKey: "otto.voiceRate")
