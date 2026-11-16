@@ -99,6 +99,7 @@ search-jumped-dark.png	search	jumped	dark	Tapped a match: thread scrolled to it,
 details-card-dark.png	details	card	dark	Contact card: today, sections, settings, server
 details-snoozed-dark.png	details	snoozed	dark	Snoozed, with what's held
 details-pair-link-pasted-dark.png	details	pair-link-pasted	dark	A pairing link pasted into the address: both fields filled and checked at once; the call keys it carried wait for a Mac that answers
+details-notifications-off-dark.png	details	notifications-off	dark	Notifications refused on this phone: the card says so beside its settings, with the way to turn them on
 details-server-check-failed-dark.png	details	server-check-failed	dark	Server check under the token: can't reach
 loops-list-dark.png	loops	list	dark	Loops screen
 schedules-list-dark.png	schedules	list	dark	Schedules screen
