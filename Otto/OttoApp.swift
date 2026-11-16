@@ -83,7 +83,8 @@ private struct MainRoot: View {
     /// Offline at launch: stop waiting on the connection and open the chat. 12s, not less: a phone
     /// reaching the Mac through the tunnel can take several seconds, and that is still loading.
     @State private var gaveUp = false
-    /// Up only until there is something to show: the saved thread is there at once, as Messages opens on it.
+    /// Up until the Mac answers (or `gaveUp`). The saved thread is read from disk at once and laid out
+    /// underneath, so it's all there when the splash fades.
     @State private var splashing = true
 
     private var ready: Bool { store.connected || !store.backend.isLive || gaveUp }

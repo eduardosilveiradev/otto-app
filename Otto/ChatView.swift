@@ -676,31 +676,21 @@ struct ChatView: View {
             Button { store.pips.sheet = .group(row.id) } label: {
                 HeaderTitle(name: row.name, status: offline) { GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 68) }
             }
-            .padding(.top, -7)
+            .liftedTitle()
         } else if let row, row.kind == "pip", let pip = row.pips.first {
             Button { store.pips.sheet = .pip(pip.id) } label: {
                 HeaderTitle(name: row.name, status: offline) { FaceView(look: pip.look, size: 68, live: true).frame(width: 68, height: 68) }
             }
-            .padding(.top, -7)
+            .liftedTitle()
         } else if pipsOn {
             Button { showDetails = true } label: {
                 HeaderTitle(name: "Otto", status: offline) { FaceView(look: ottoLook, size: 68, live: true).frame(width: 68, height: 68) }
             }
-            .padding(.top, -7)
+            .liftedTitle()
             .matchedTransitionSource(id: "card", in: card)
         } else {
             Button { showDetails = true } label: {
-                VStack(spacing: -6) {
-                    OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep)
-                    HStack(spacing: 4) {
-                        Text("Otto").font(size: 15, weight: .semibold, relativeTo: .subheadline)
-                        Image(systemName: "chevron.right").font(size: 11, weight: .semibold, relativeTo: .caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                    if let offline { HeaderStatus(text: offline) }
-                }
+                HeaderTitle(name: "Otto", status: offline) { OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep) }
             }
             .matchedTransitionSource(id: "card", in: card)
         }
@@ -717,7 +707,7 @@ struct ChatView: View {
     }
 
     private var header: some View {
-        ZStack {
+        ZStack(alignment: Alignment(horizontal: .center, vertical: .headerRow)) {
             HStack {
                 if let onBack {
                     Button(action: onBack) {
@@ -2325,6 +2315,7 @@ struct Typing: View {
 
     /// The mark's kind, held through to-do bookkeeping steps so ticking one off doesn't flicker it.
     @State private var kind = OttoThinkingSpinner.Kind(step: nil) ?? .think
+    @Environment(\.accessibilityReduceMotion) private var still
 
     #if DEBUG
     /// `-spinnerKind <kind>`: hold one kind, for screenshots of idle and done.
@@ -2360,10 +2351,11 @@ struct Typing: View {
         .padding(.trailing, 90)
         .frame(maxWidth: .infinity, alignment: .leading)
         // Last, so the bubble behind the text is inside the animation too: it grows and
-        // shrinks with a longer or shorter step instead of jumping to the new size.
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: status)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: todos)
-        .animation(.snappy(duration: 0.25), value: connected)
+        // shrinks with a longer or shorter step instead of jumping to the new size. Under Reduce Motion
+        // the step and the bubble change at once; these would otherwise override the thread's nil.
+        .animation(still ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: status)
+        .animation(still ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: todos)
+        .animation(still ? nil : .snappy(duration: 0.25), value: connected)
         .onChange(of: status, initial: true) { _, s in if let k = OttoThinkingSpinner.Kind(step: s) { kind = k } }
     }
 }

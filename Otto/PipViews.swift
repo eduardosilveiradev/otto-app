@@ -238,18 +238,36 @@ struct HeaderTitle<Face: View>: View {
 
     var body: some View {
         VStack(spacing: -6) {
-            face()
-            HStack(spacing: 4) {
-                Text(name).font(size: 15, weight: .semibold, relativeTo: .subheadline).lineLimit(1)
-                Image(systemName: "chevron.right").font(size: 11, weight: .semibold, relativeTo: .caption2).foregroundStyle(.secondary)
+            VStack(spacing: -6) {
+                face()
+                HStack(spacing: 4) {
+                    Text(name).font(size: 15, weight: .semibold, relativeTo: .subheadline).lineLimit(1)
+                    Image(systemName: "chevron.right").font(size: 11, weight: .semibold, relativeTo: .caption2).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .glassEffect(.regular.interactive(), in: .capsule)
+                .frame(maxWidth: 240)
             }
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .glassEffect(.regular.interactive(), in: .capsule)
-            .frame(maxWidth: 240)
+            // The bar's buttons line up with the face and name, so a status line doesn't drag them down.
+            .alignmentGuide(.headerRow) { $0[VerticalAlignment.center] }
             if let status { HeaderStatus(text: status) }
         }
         // Bar text, so it grows only so far (see ChatView's header).
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+}
+
+extension VerticalAlignment {
+    private enum HeaderRow: AlignmentID { static func defaultValue(in d: ViewDimensions) -> CGFloat { d[VerticalAlignment.center] } }
+    /// A conversation header's face-and-name row, which the bar's buttons center on.
+    static let headerRow = VerticalAlignment(HeaderRow.self)
+}
+
+extension View {
+    /// A conversation title pulled 7pt up the bar. The buttons stay at the middle of what's left, where
+    /// they've always been, with or without a status line under the name.
+    func liftedTitle() -> some View {
+        padding(.top, -7).alignmentGuide(.headerRow) { $0[.headerRow] + 3.5 }
     }
 }
 
