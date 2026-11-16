@@ -25,6 +25,13 @@ Rival scores come from the notes in `rivals/` (official docs, App Store listings
 reviews). None of the rivals' screens could be seen first-hand, so a `~` marks a score resting on
 thin evidence: "nothing found" scores 5 or lower, never higher.
 
+Added 17 Nov 2026, after the second run: each rival's App Store listing images can be fetched
+through Apple's lookup API (`https://itunes.apple.com/lookup?id=<id>&country=us`, field
+`screenshotUrls`), which the App Store web page did not give up. Ids: Grok Bot 6794501026,
+ChatGPT 6448311069 (its listing shows no dot), Muse from Meta 6760173601, Claude Duet 6803276000,
+OpenBot.run 6807024266. Neither run's reviewers saw them, so a next run should put them in the
+review folder. They are marketing images: none shows an error, an empty page or a notification.
+
 ## Axes that only partly fit Otto
 
 The four cloud agents run on a computer of their own, so "keeps working with every device off"

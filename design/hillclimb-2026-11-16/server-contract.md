@@ -21,8 +21,9 @@ The approval frame (`{"type":"approval", …}`, also the rows of item 3) gains t
 - `scopes`: the wider grants the server will take for this approval besides "this once". Any subset
   of `"task"` (until the turn or job that raised it ends) and `"always"` (until taken back, item 2).
   Absent or `[]` means once only, as today.
-- `rule`: what an `always` would cover, as a lowercase phrase that completes "Always for …" and
-  "Otto won't ask again for …". At most 80 characters. Required whenever `scopes` has `"always"`.
+- `rule`: what a wider yes would cover, as a lowercase phrase that completes "Always for …" and
+  "Otto won't ask again for …". At most 80 characters. Required whenever `scopes` is not empty:
+  the app offers neither scope without it.
 
 The app's answer gains one optional field:
 
@@ -38,18 +39,20 @@ The app's answer gains one optional field:
   stops listing the approval or an hour has passed (twice the 30 minutes the server holds an
   approval), so it holds across a relaunch too, including one that kills the app while the ack is
   awaited. It never resends on its own, only when the owner taps the same answer again.
-- On `task`, the server answers later approvals with the same `rule` (or, with no `rule`, the same
-  `title`) from that turn or job itself, without raising them. On `always` it stores a rule (item 2)
+- On `task`, the server answers later approvals with the same `rule` from that turn or job itself,
+  without raising them. On `always` it stores a rule (item 2)
   and does the same from then on. Either way the action is still journaled as today.
 - The server must refuse a scope it didn't offer: treat it as once.
 - A `task` answer that arrives after its turn or job has ended (the approval was put off with Later)
   counts as once.
-- Never offer a scope on a payment (`payment` present) or on a change with a `guarded` file.
+- Never offer a scope on a payment (`payment` present), on a change with a `guarded` file, or on a
+  draft (item 4). Each of those is approved one at a time: a lasting yes on "Send email" would
+  cover the next email as well, to anyone, saying anything.
 
 App side (`Otto/Approvals.swift`): a menu beside "Expires in N min" on the sheet, "Just this once"
 picked every time it opens; the yes button reads "Always allow" when that is picked, and a line
 under the menu says what it means; Face ID as now. The app drops what it shouldn't show whatever the
-frame says: every scope on a payment or a guarded change, and `always` without a `rule`.
+frame says: every scope on a payment, a guarded change or a draft, and either scope without a `rule`.
 
 Without it: no `scopes`, so no menu. The sheet is today's.
 
@@ -107,7 +110,8 @@ For something Otto wants to send in the owner's name, the approval frame gains:
   it (`["Quote.pdf"]`).
 - `title` stays the sheet's title ("Send email"); `summary`, when not empty, is shown as why Otto is
   sending it. `files` is `[]`.
-- On approve, the server sends exactly that draft. Item 1's scopes apply as to any approval.
+- On approve, the server sends exactly that draft. No scopes on a draft: each send is approved on
+  its own (item 1).
 - Use it for every send in the owner's name that Otto starts on its own. The draft card in the
   thread (a message whose text starts "draft to <name>:", with Send and Discard buttons) stays for
   what the owner just asked for; it should always name who it goes to and by which channel:
@@ -160,6 +164,11 @@ The hello frame gains an optional list, and the app gains one frame:
 {"type":"approval_alerted","id":"a1"}                       app -> otto
 ```
 
+The Bark push for an approval keeps the level it has today. If that level breaks through a Focus
+and the app's own banner can't (a free signing team has no time-sensitive notifications), the
+server may leave `"approval"` out of `alerts` and keep sending its own push: the app then alerts
+for nothing, as against today's server.
+
 `approval_alerted` carries no `op`: the server doesn't ack it, and the app sends it once and
 never again (late, it would mean nothing).
 
@@ -175,8 +184,9 @@ App side (`OttoStore`'s approval updates in `Otto/OttoApp.swift`, `Notifier.post
   is sent, and the Bark push follows after the 5 seconds.
 - In the background (keep-awake holds the socket) it posts Otto's own notification, "Otto needs
   your OK" with what it asks, and sends `approval_alerted` only once iOS has taken the notification.
-  With notifications switched off or never allowed it posts nothing and sends nothing, so the Bark
-  push follows. A tap opens the approval; the notification is removed when the approval is settled
+  With notifications switched off or never allowed, or with banners and the Lock Screen both
+  turned off for Otto (delivered quietly), it posts nothing and sends nothing, so the Bark push
+  follows. A tap opens the approval; the notification is removed when the approval is settled
   (`approval_done`, or item 3's list no longer having it).
 
 Without it: no `alerts`, so the app posts nothing, sends nothing, and the forced Bark push is the

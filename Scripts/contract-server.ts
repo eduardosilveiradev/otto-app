@@ -35,7 +35,7 @@ const PAGE = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP/////////
 let held = false, browsing = false
 const browserFrame = () => JSON.stringify({ type: 'browser', image: PAGE, caption: 'accounts.example.com · stuck at the sign-in check', url: 'https://accounts.example.com/', ts: Date.now(), control: true, held })
 const demo = (kind: string): Approval => kind === 'draft'
-  ? { id: 'a-draft', title: 'Send email', summary: 'You asked me to tell the parents once the hall was booked.', files: [], expires: expires(), scopes: old ? undefined : ['task'],
+  ? { id: 'a-draft', title: 'Send email', summary: 'You asked me to tell the parents once the hall was booked.', files: [], expires: expires(),
       notes: old ? undefined : ['parents-3b@scuola.example is a list: everyone on it gets this.'],
       draft: old ? undefined : { channel: 'email', to: ['Marta Bianchi <marta@example.com>', 'parents-3b@scuola.example'], subject: 'Hall booked', body: 'Hi all,\n\nThe hall is booked.\n\nSam', attachments: ['Hall booking.pdf'] } }
   : { id: 'a-cal', title: 'Add 3 events to your calendar', summary: 'Adds the three parent meetings to your Home calendar.', files: [], expires: expires(),

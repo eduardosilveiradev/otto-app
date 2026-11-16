@@ -267,7 +267,7 @@ struct JobSheet: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(job.title.isEmpty ? String(localized: "Coding job") : job.title)
                         .font(.title3.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                    HStack(spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {   // the pill starts the line when the text beside it wraps
                         if job.needsYou { NeedsMark() } else { Pill(text: job.stateLabel, tint: job.state == "failed" ? .red : .secondary) }
                         TimelineView(.periodic(from: .now, by: 30)) { tl in
                             Text([job.project, job.meta(now: tl.date)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))

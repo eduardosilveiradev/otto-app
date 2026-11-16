@@ -613,7 +613,7 @@ final class OttoStore {
         }
         if UserDefaults.standard.string(forKey: "approvalDemo") == "draft" {
             approvals = [ApprovalRequest(id: "demo-draft", title: "Send email", summary: "You asked me this morning to tell the parents once the hall was booked.",
-                files: [], branch: nil, stat: nil, expires: demoExpiry, scopes: ["task"],
+                files: [], branch: nil, stat: nil, expires: demoExpiry,
                 draft: .init(channel: "email", to: ["Marta Bianchi <marta@studiobianchi.example>", "Luca Ferri <luca.ferri@example.com>", "parents-3b@scuola.example"],
                              cc: ["segreteria@scuola.example"], subject: "Parent meetings: hall booked, three dates",
                              body: "Hi all,\n\nThe hall is booked for the three parent meetings: 18 Nov, 25 Nov and 2 Dec, each at 16:00. Marta has the keys.\n\nSee you there,\nSam",

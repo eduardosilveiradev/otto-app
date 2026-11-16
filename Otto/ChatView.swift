@@ -1393,6 +1393,8 @@ private struct Row: View {
     var highlighted = false
     /// Reduce Motion: the highlight brightens without growing.
     var still = false
+    /// The send button of a draft that names nobody, tapped: asked about before it goes.
+    @State private var blindSend: ActionButton?
     var onQuote: () -> Void = {}
     var onSwiping: (Bool) -> Void = { _ in }
     let onTap: (ActionButton) -> Void
@@ -1476,12 +1478,15 @@ private struct Row: View {
                     .padding(.top, 10)
                 if !message.buttons.isEmpty {
                     // Side by side while they fit; a third button or a long label stacks them.
+                    // With nobody named, the button that sends isn't the blue one and asks first: the card says to ask
+                    // who it goes to, and a filled Send one tap away said the opposite.
+                    let unnamed = Self.draftTitle(d.head) == nil
                     let buttons = ForEach(Array(message.buttons.enumerated()), id: \.element.id) { i, b in
                         // 44pt to tap, laid out as drawn: the slop goes up and down only, so neighbours don't overlap.
-                        let button = Button(Self.buttonTitle(b.label)) { press(b) }
+                        let button = Button(Self.buttonTitle(b.label)) { if unnamed && i == 0 { blindSend = b } else { press(b) } }
                             .font(size: 15, weight: .semibold, relativeTo: .subheadline).buttonBorderShape(.capsule)
                             .padding(.vertical, 6).contentShape(.rect).padding(.vertical, -6)
-                        if i == 0 { button.buttonStyle(.borderedProminent).tint(.blue) } else { button.quietButton() }
+                        if i == 0 && !unnamed { button.buttonStyle(.borderedProminent).tint(.blue) } else { button.quietButton() }
                     }
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 8) { buttons }
@@ -1491,6 +1496,11 @@ private struct Row: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .confirmationDialog("Send without knowing who gets it?", isPresented: Binding(get: { blindSend != nil }, set: { if !$0 { blindSend = nil } }),
+                                titleVisibility: .visible, presenting: blindSend) { b in
+                Button("Send Anyway") { press(b) }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in Text("Otto didn’t say who this draft goes to. Ask Otto first, or send it as it is.") }
         } else if message.isVoice || message.audio != nil {
             VStack(alignment: .leading, spacing: 6) {
                 VoiceRow(message: message, mine: mine)
@@ -2653,6 +2663,8 @@ struct BrowserFullScreen: View {
     /// The inputs still on their way, as a chain (see `send`), and whether typing is among them.
     @State private var queue: Task<Void, Never>?
     @State private var typingOut = false
+    /// Goes up each time the Mac doesn't confirm an input: anything queued before that is dropped (see `send`).
+    @State private var unsure = 0
     /// Pinched in to read or hit something small, and dragged around while in. Held across frames.
     @State private var zoom: CGFloat = 1
     @State private var zoomBase: CGFloat = 1
@@ -2830,10 +2842,15 @@ struct BrowserFullScreen: View {
     /// typing it follows. A failure says so; for typing, it says to look first, since the text may have landed.
     private func send(_ input: BrowserInput, then done: @escaping (Bool) -> Void = { _ in }) {
         guard holding, !busy else { done(false); return }   // handing back, or the Mac took it: nothing more goes
+        let asked = unsure   // inputs made before one the Mac didn't confirm are dropped, not sent after it
         queue = Task { [queue] in
             await queue?.value
             guard holding else { done(false); return }   // the page went back while this waited its turn
+            // An Enter queued behind typing that may not have landed mustn't submit the half-filled form: what was
+            // waiting is let go, and the next thing you do (having looked at the page) starts fresh.
+            guard asked == unsure else { done(false); return }
             let ok = await store.backend.browserInput(input)
+            if !ok { unsure += 1 }
             if case .text = input, !ok { problem = "Your Mac didn’t confirm the typing. Look at the page before you type it again." }
             else { problem = ok ? nil : "Your Mac didn’t take that. Try again." }
             if !ok { UINotificationFeedbackGenerator().notificationOccurred(.error) }
