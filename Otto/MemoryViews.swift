@@ -131,6 +131,8 @@ private struct MemoryList: View {
         guard q == typed else { searching = false; return }
         searching = false
         searchFailed = r == nil
+        // A failed search says the list only matches the words, so it can't keep an older ranking.
+        if r == nil { rankedIn = nil }
         if let r {
             // The positions are into the index the Mac searched; if that's newer than this list, reload
             // the list so they line up (until then they're held back, not shown against the old one).
@@ -148,7 +150,8 @@ private struct MemoryList: View {
 
 struct MemoryRow: View {
     let item: MemoryItem
-    /// Sent Otto a "forget" for it from its page: said on the row until a reload shows it gone.
+    /// Sent Otto a "forget" for it from its page: said on its row while it's still listed (the index drops a
+    /// forgotten one when it's next rebuilt), and true either way: you did ask.
     var asked = false
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -166,7 +169,7 @@ struct MemoryRow: View {
 
 struct MemoryDetailScreen: View {
     let item: MemoryItem
-    /// The memory's name as the thread's "Forget it" chip sends it (`forget memory <name>`), kept to
+    /// The memory's name (its handle, as memviewer lists it) as the thread's "Forget it" chip sends it (`forget memory <name>`), kept to
     /// letters, digits and -_. so a name the server sent can't turn into a sentence sent in your voice.
     static func slug(_ name: String) -> String {
         String(String(name.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) || "-_.".unicodeScalars.contains($0) ? Character($0) : "-" }).prefix(80))
@@ -194,17 +197,18 @@ struct MemoryDetailScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         // Forgetting goes through Otto, as the thread's "Forget it" does: a message in the chat, so it's
         // on the record and Otto says when it's done. ponytail: no direct route; one would need the server.
+        // Memories only: a note's name is its first line, not a handle "forget memory" can find.
         .toolbar {
-            Button("Forget", systemImage: "trash") { forgetting = true }
+            if item.store != "notes" { Button("Forget", systemImage: "trash") { forgetting = true } }
         }
-        .confirmationDialog("Ask Otto to forget “\(item.name)”?", isPresented: $forgetting, titleVisibility: .visible) {
+        .confirmationDialog("Ask Otto to forget this?", isPresented: $forgetting, titleVisibility: .visible) {
             Button("Ask Otto to forget it", role: .destructive) {
                 store.send("forget memory \(Self.slug(item.name))")
                 store.askedToForget.insert(item.id)
                 dismiss()
             }
         } message: {
-            Text("It goes to Otto as a message in your chat, and Otto confirms there when it’s gone.")
+            Text("“\(item.description)” goes to Otto as a message in your chat, and Otto confirms there when it’s gone.")
         }
     }
 }

@@ -192,7 +192,7 @@ final class OttoStore {
     var unconfirmedApprovals: [String: Bool] = [:]
     /// The last one that lapsed on the Mac before it was answered: the pill says so until dismissed.
     var lapsedApproval: ApprovalRequest?
-    /// Memories you asked Otto to forget from their page, marked on their rows until a reload drops them.
+    /// Memories you asked Otto to forget from their page, marked on their rows while they're still listed.
     var askedToForget: Set<String> = []
     /// What the widget was last given, so the group's defaults are written only when it changes.
     @ObservationIgnored private var widgetAsk = WidgetData.ask
@@ -660,6 +660,8 @@ final class OttoStore {
         #if DEBUG
         // `-spinnerCheck`: the thinking mark's step table and pose maths.
         if ProcessInfo.processInfo.arguments.contains("-spinnerCheck") { OttoThinkingSpinnerCheck.run() }
+        // `-approvalCheck`: the approval clock's rounding, and the forget message's name filter.
+        if ProcessInfo.processInfo.arguments.contains("-approvalCheck") { ApprovalCheck.run() }
         #endif
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
         if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift"

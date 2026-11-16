@@ -50,11 +50,11 @@ enum MockDash {
         """,
         "memory": """
         {"items":[
-          {"id":"m1","store":"facts","kind":"preference","scope":"me","name":"Coffee order","description":"Flat white, oat milk. No sugar.","updated":"2026-11-01T08:00:00Z","hits":14,"lastHitDays":1},
-          {"id":"m2","store":"facts","kind":"person","scope":"me","name":"Marta","description":"Design lead. Prefers Slack to email, mornings.","updated":"2026-10-30T12:00:00Z","hits":9,"lastHitDays":2},
-          {"id":"m3","store":"facts","kind":"place","scope":"me","name":"Dentist","description":"Studio Bianchi, Via Roma 12. Tuesdays after 16:00.","updated":"2026-10-21T12:00:00Z","hits":3,"lastHitDays":6},
-          {"id":"m4","store":"facts","kind":"routine","scope":"me","name":"Boiler service","description":"Every November. Landlord books, you let them in.","updated":"2026-10-12T12:00:00Z","hits":2,"lastHitDays":20},
-          {"id":"m5","store":"facts","kind":"fact","scope":"me","name":"Wi-Fi at the office","description":"Network: Studio-5G. Password in 1Password.","updated":"2026-09-02T12:00:00Z","hits":0,"badge":"never recalled"}],
+          {"id":"m1","store":"facts","kind":"preference","scope":"me","name":"coffee-order","description":"Flat white, oat milk. No sugar.","updated":"2026-11-01T08:00:00Z","hits":14,"lastHitDays":1},
+          {"id":"m2","store":"facts","kind":"person","scope":"me","name":"marta","description":"Design lead. Prefers Slack to email, mornings.","updated":"2026-10-30T12:00:00Z","hits":9,"lastHitDays":2},
+          {"id":"m3","store":"facts","kind":"place","scope":"me","name":"dentist","description":"Studio Bianchi, Via Roma 12. Tuesdays after 16:00.","updated":"2026-10-21T12:00:00Z","hits":3,"lastHitDays":6},
+          {"id":"m4","store":"facts","kind":"routine","scope":"me","name":"boiler-service","description":"Every November. Landlord books, you let them in.","updated":"2026-10-12T12:00:00Z","hits":2,"lastHitDays":20},
+          {"id":"m5","store":"facts","kind":"fact","scope":"me","name":"office-wifi","description":"Network: Studio-5G. Password in 1Password.","updated":"2026-09-02T12:00:00Z","hits":0,"badge":"never recalled"}],
          "summary":{"text":"You work in design, live in Milan, and keep mornings for deep work. Bills and home admin are where things slip.","note":"Rewritten nightly from what Otto keeps."},
          "generatedAt":"2026-11-04T03:00:00Z",
          "graph":{"c":[0,1,0,2,1],"clusters":[{"id":0,"size":2,"label":"Routines","terms":["morning","coffee"]},{"id":1,"size":2,"label":"Work","terms":["design","marta"]},{"id":2,"size":1,"label":"Home","terms":["boiler"]}]}}
