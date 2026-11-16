@@ -21,6 +21,23 @@ struct BrowserTile: Equatable {
     let url: String
     /// Epoch ms.
     let ts: Double
+    /// The Mac will hand this page over to you (a sign-in, a CAPTCHA) and take taps and typing from the app.
+    var control = false
+    /// It's in your hands now: Otto is waiting.
+    var held = false
+}
+
+/// What you do to the page while you hold it. Fractions for a tap, so it lands wherever the picture is drawn.
+enum BrowserInput: Equatable {
+    case tap(x: Double, y: Double), text(String), key(String), scroll(Double)
+    var body: [String: Any] {
+        switch self {
+        case .tap(let x, let y): ["tap": ["x": x, "y": y]]
+        case .text(let s): ["text": s]
+        case .key(let k): ["key": k]
+        case .scroll(let pages): ["scroll": pages]
+        }
+    }
 }
 
 /// A "browser" frame: the whole tile to show now, or `done` when it goes away.
@@ -30,13 +47,14 @@ enum BrowserFrame: Equatable {
 
     /// Nil when the data isn't a browser frame. A picture that won't decode leaves the caption alone.
     init?(json data: Data) {
-        struct F: Decodable { let type: String; let done: Bool?; let image: String?; let caption: String?; let url: String?; let ts: Double? }
+        struct F: Decodable { let type: String; let done: Bool?; let image: String?; let caption: String?; let url: String?; let ts: Double?; let control: Bool?; let held: Bool? }
         guard let f = try? JSONDecoder().decode(F.self, from: data), f.type == "browser" else { return nil }
         if f.done == true { self = .done; return }
         guard let caption = f.caption else { return nil }
         // "data:image/jpeg;base64,<data>"
         let b64 = f.image.flatMap { $0.hasPrefix("data:image/") ? $0.split(separator: ",", maxSplits: 1).dropFirst().first : nil }
-        self = .show(BrowserTile(image: b64.flatMap { Data(base64Encoded: String($0)) }, caption: caption, url: f.url ?? "", ts: f.ts ?? 0))
+        self = .show(BrowserTile(image: b64.flatMap { Data(base64Encoded: String($0)) }, caption: caption, url: f.url ?? "", ts: f.ts ?? 0,
+                                 control: f.control == true, held: f.held == true))
     }
 
     var tile: BrowserTile? { if case .show(let t) = self { t } else { nil } }
@@ -100,6 +118,8 @@ struct Message: Identifiable, Codable {
     var card: Card? = nil
     /// Coding jobs this message started, by id: each draws as a card under the bubble (Jobs.swift).
     var jobs: [String]? = nil
+    /// A call with Otto that ended here: this message is its line in the thread (CallView.swift).
+    var call: CallRecord? = nil
     /// A verification code to show in the drawer (OTP.swift). Cleared when the server edits the message after it expires.
     var otp: OTPCode? = nil
     /// A desktop was focused when it went out (server's desktop-focus quiet): in the thread, but no banner.
@@ -199,9 +219,22 @@ struct Brief {
     var triggers: [Trigger]
 }
 
+/// A call with Otto inside the app, once it's over: how long it ran and what was said. Kept with its line in
+/// the thread on this phone; the Mac's history has no such row, so other devices don't show it.
+struct CallRecord: Codable, Hashable {
+    struct Line: Codable, Hashable { let otto: Bool; let text: String }
+    var seconds: Int
+    var lines: [Line] = []
+    /// It ended on an error once live, not on a hang-up. Optional: lines saved before this had none.
+    var dropped: Bool? = nil
+    /// "3:12", or "1:02:07" past the hour.
+    var length: String { Duration.seconds(seconds).formatted(.time(pattern: seconds >= 3600 ? .hourMinuteSecond : .minuteSecond)) }
+}
+
 /// What became of an approval decision: the Mac has it; there was nothing left to decide (it
-/// expired, or a restart dropped it), so nothing was done; or no answer came, so either may be true.
-enum ApprovalOutcome { case done, gone, unknown }
+/// expired, or a restart dropped it), so nothing was done; it went out and no answer came, so either may be
+/// true; or it never left the phone (no connection), so nothing was decided and either answer is still open.
+enum ApprovalOutcome { case done, gone, unknown, notSent }
 
 // MARK: - The backend seam
 
@@ -240,7 +273,30 @@ protocol OttoBackend: AnyObject {
     var deletes: AsyncStream<String> { get }
     /// The one banner for what a focused desktop held, once it lets go: (newest held id, text). No bubble.
     var notifies: AsyncStream<(String, String)> { get }
-    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome
+    /// `scope` rides along only when it's wider than once: a server that never offered one never sees the field.
+    func decide(approval id: String, approve: Bool, scope: ApprovalScope) async -> ApprovalOutcome
+    /// GET /app/approvals: every approval the Mac still holds. Nil when it couldn't be asked or has no
+    /// such route, which is not "none": the caller then leaves what it has alone.
+    func pendingApprovals(background: Bool) async -> [ApprovalRequest]?
+    /// The Mac leaves the alert for an approval to the app while it's connected (its hello says so), as long
+    /// as the app tells it each time that it did alert (`alerted`). Untold, the Mac sends its own push.
+    var alertsApprovals: Bool { get }
+    func alerted(approval id: String) async
+    /// Back in front: find out now whether the connection is still there.
+    func probe() async
+    /// The Mac can end the turn Otto is on when asked (its hello says so), and the asking.
+    var canStop: Bool { get }
+    func stopTurn() async -> Bool
+    /// Why the last read of a card page failed: its HTTP status, 0 when no answer came, nil when it didn't fail.
+    func dashFailure(_ path: String) -> Int?
+    /// The last answer a card page got, kept on the phone, and when it was read.
+    func dashKept(_ path: String, query: [URLQueryItem]) -> (data: Data, at: Date)?
+    /// Drop every kept page (a forget, however it's asked for).
+    func dropKept()
+    /// Take the page Otto has open, or hand it back (POST /app/browser/hold). True once the Mac says it is as asked.
+    func holdBrowser(_ hold: Bool) async -> Bool
+    /// A tap, typing or a key on the held page (POST /app/browser/input). True once the Mac says it did it.
+    func browserInput(_ input: BrowserInput) async -> Bool
     /// The newest `limit` messages of the thread on the server, or with `since`, every one after it.
     /// Nil when the server couldn't be reached or answered with an error.
     func history(background: Bool, limit: Int, since: Date?) async -> [Message]?
@@ -307,7 +363,18 @@ extension OttoBackend {
     func stamps() async -> StampsReply? { nil }
     var typing: AsyncStream<Bool> { AsyncStream { _ in } }
     var approvalUpdates: AsyncStream<ApprovalUpdate> { AsyncStream { _ in } }
-    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome { .done }
+    func decide(approval id: String, approve: Bool, scope: ApprovalScope) async -> ApprovalOutcome { .done }
+    func pendingApprovals(background: Bool) async -> [ApprovalRequest]? { nil }
+    var alertsApprovals: Bool { false }
+    func alerted(approval id: String) async {}
+    var canStop: Bool { false }
+    func stopTurn() async -> Bool { false }
+    func dashFailure(_ path: String) -> Int? { nil }
+    func dashKept(_ path: String, query: [URLQueryItem]) -> (data: Data, at: Date)? { nil }
+    func dropKept() {}
+    func probe() async {}
+    func holdBrowser(_ hold: Bool) async -> Bool { !isLive }   // sample data: there's no page to hold, so it just plays along
+    func browserInput(_ input: BrowserInput) async -> Bool { !isLive }
     func wallet(_ fields: [String: String], id: String) async -> Bool { true }
     var conversationEvents: AsyncStream<ConversationEvent> { AsyncStream { _ in } }
     var jobLists: AsyncStream<[CodeJob]> { AsyncStream { _ in } }

@@ -11,6 +11,7 @@ struct OttoWidgets: WidgetBundle {
         OttoWalkieWidget()
         OttoWalkieControl()
         OttoCallActivity()
+        OttoWorkActivity()
     }
 }
 
@@ -177,6 +178,51 @@ struct OttoCallActivity: Widget {
             } minimal: {
                 OttoFace(size: 22)
             }
+        }
+    }
+}
+
+/// Otto working on something that takes a while: the face, the step it's on and how long it's been at it. A tap
+/// opens the chat, or the approval when one is waiting.
+struct OttoWorkActivity: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: WorkActivityAttributes.self) { context in
+            let line = WorkLine(context.state, stale: context.isStale)
+            HStack(spacing: 12) {
+                OttoFace(size: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        if line.needsYou { Circle().fill(Color.tangerine).frame(width: 7, height: 7).accessibilityHidden(true) }
+                        Text(line.title).font(.headline)
+                    }
+                    // The step can name what Otto is reading or searching for: hidden while the phone is locked.
+                    Text(line.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(2).privacySensitive()
+                }
+                Spacer(minLength: 8)
+                if line.running { CallTime(started: context.state.started).font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: 64) }
+            }
+            .padding(16)
+            .widgetURL(line.url)
+        } dynamicIsland: { context in
+            let line = WorkLine(context.state, stale: context.isStale)
+            return DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) { OttoFace(size: 36) }
+                DynamicIslandExpandedRegion(.center) { Text(line.title).font(.headline) }
+                DynamicIslandExpandedRegion(.trailing) { if line.running { CallTime(started: context.state.started).font(.headline) } }
+                DynamicIslandExpandedRegion(.bottom) {
+                    Text(line.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading).privacySensitive()
+                }
+            } compactLeading: {
+                OttoFace(size: 22)
+            } compactTrailing: {
+                if line.needsYou { Circle().fill(Color.tangerine).frame(width: 8, height: 8).accessibilityLabel("Otto needs you") }
+                else if line.running { CallTime(started: context.state.started).font(.footnote).minimumScaleFactor(0.75).frame(maxWidth: 56) }
+                else { Image(systemName: context.state.done ? "checkmark" : "ellipsis").accessibilityLabel(line.title) }
+            } minimal: {
+                OttoFace(size: 22)
+            }
+            .widgetURL(line.url)
         }
     }
 }

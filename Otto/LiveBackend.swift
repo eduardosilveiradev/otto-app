@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// The real backend: a websocket to otto/server.ts over Tailscale.
@@ -7,10 +8,14 @@ import Foundation
 ///     app -> otto  {"type":"message","id":"<uuid>","text":"...","reply_to":"<id>"?}
 ///                  {"type":"tap","id":"<source wire ID>","op":"<uuid>","data":"<button data>","label":"..."}
 ///                  {"type":"react","op":"<uuid>","id":"<id>","emoji":"❤️"}
-///                  {"type":"approval","op":"<uuid>","id":"<id>","decision":"approve"|"decline"}
+///                  {"type":"stop","op":"<uuid>"}   end the turn Otto is on; only to a server whose hello says "stop":true
+///                  {"type":"approval","op":"<uuid>","id":"<id>","decision":"approve"|"decline","scope":"task"|"always"?}
+///                   `scope` only when the approval frame offered it ("scopes") and you picked it; absent means this once
 ///                  Each op is kept until {"type":"ack","id":"<op or message id>"} comes back and resent on the
 ///                  next connect until it does; the server handles a repeat once. A server that says
 ///                  {"type":"hello","acks":true} on connect acks; with an older one the write is all we get.
+///                  Its hello may add "alerts":["approval"]: the app then alerts for an approval itself and says so with
+///                  {"type":"approval_alerted","id":"<id>"}; unacked within 5 s, the server pushes as before (server-contract.md, item 7).
 ///     otto -> app  {"type":"message","id":"...","text":"...","ts":"<ISO>","buttons":[{"label","data"} or {"label","url"}],
 ///                   "files":[{"id","name","kind"}]?,"voice":{"id","name","kind"}?,"reply_to":"<id>"?,
 ///                   "src"?,"why"?  (only on messages Otto sent unprompted)}
@@ -19,13 +24,18 @@ import Foundation
 ///                  {"type":"delete","id":"<id>"}   Otto deleted a message it sent (history names it in X-Otto-Deleted)
 ///                  a "message" may carry "otp":{"code","sender"?}: a verification code, shown in a drawer (OTP.swift)
 ///                  {"type":"status","text":"Reading ChatView.swift"}   while a reply is in the works
+///                  {"type":"approval","id","title","summary","files","expires",…}   something that needs your yes (Approvals.swift);
+///                   {"type":"approval_done","id"} once it's settled. It may carry "payment", and, from a server that has them,
+///                   "scopes":["task","always"] with "rule":"…" (a yes that lasts) and "draft":{"channel","to","cc"?,"subject"?,"body"}
 ///                  {"type":"read","ids":["<uuid>"]}   your messages Otto has taken in
 ///                  {"type":"terminal","text":"first six words…","ts":"<ISO>"}   a prompt typed in Otto's terminal
 ///                  {"type":"echo","id","text","ts","shared"?}   yours, from the share sheet or the dashboard
 ///                  {"type":"todos","items":[{"text","status":"pending"|"in_progress"|"completed"}]}   Otto's to-do list while it works; [] when done
 ///                  {"type":"open_todos","items":[{"text","status":"pending"|"in_progress"}]}   its open to-dos, idle too; on connect and on change
 ///                  {"type":"browser","image":"data:image/jpeg;base64,…"|null,"caption":"example.com · clicks Generate","url","ts":<epoch ms>}
-///                   what Otto is doing in Chrome, whole each time (≤ 1/s; on connect only while live); {"type":"browser","done":true} ends it
+///                   what Otto is doing in Chrome, whole each time (≤ 1/s; on connect only while live); {"type":"browser","done":true} ends it.
+///                   From a server that can hand the page over it may carry "control":true, and "held":true while you have it:
+///                   POST /app/browser/hold {"hold":bool} and POST /app/browser/input (server-contract.md, item 8)
 ///                  a "message" (and its history row) may carry "quiet":true: a desktop was focused, so no banner
 ///                  {"type":"notify","id":"<newest held id>","text":"...","count":N}   focus ended: one banner for what was held, no bubble
 ///                  {"type":"reminders","items":[{"id","at":"<ISO>","text"}]}   every upcoming reminder, on connect and on change:
@@ -37,6 +47,8 @@ import Foundation
 ///                   POST /app/jobs/<answer|steer|stop|merge|resolve> {"id","text"?} acts on one and answers with it.
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
 ///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
+///   GET  <server>/app/approvals  [approval frame without "type"], the ones still pending ([] when none); not on every
+///                   server yet, and a 404 means "can't say", never "none" (design/hillclimb-2026-11-16/server-contract.md)
 ///   GET  <server>/app/brief    brief JSON
 ///   GET  <server>/app/history?limit=  [{"dir":"in"|"out","text","ts","id"?,"kind":"terminal"?,"read"?, and on Otto's: "files","voice","reply_to","buttons"?,"src"?,"why"?}]   (X-Otto-Background: 1 from the background refresh)
 ///   GET  <server>/app/file/<id>  a file or voice clip from a message
@@ -104,6 +116,15 @@ final class LiveBackend: OttoBackend {
     }
     /// Whether this connection's server acks (its hello); nil until it has said, or 3s have passed.
     private var acksOn: Bool?
+    /// What this connection's server leaves to the app to alert for (its hello's "alerts"): with "approval"
+    /// there, it holds its own push for five seconds and drops it if the app says it alerted (server-contract.md, item 7).
+    private var appAlerts: Set<String> = []
+    var alertsApprovals: Bool { lock.withLock { live && appAlerts.contains("approval") } }
+    /// Its hello's "stop": it takes {"type":"stop"} and ends the turn Otto is on.
+    private var canStopTurn = false
+    /// The last failure of each card page, by path (see `dashFailure`).
+    private var dashFailures: [String: Int] = [:]
+    func dashFailure(_ path: String) -> Int? { lock.withLock { dashFailures[path] } }
     /// Op ids the server has acked and nobody has collected yet, and those it acked as gone.
     private var acked: Set<String> = []
     private var gone: Set<String> = []
@@ -117,6 +138,7 @@ final class LiveBackend: OttoBackend {
         base = c.url!
         self.token = token
         desktopSync = DesktopSync(key: "otto.desktopSync.\(base.absoluteString)")
+        defer { sweepKept() }
         (incoming, out) = AsyncStream.makeStream()
         (reactions, reacted) = AsyncStream.makeStream()
         (statuses, status) = AsyncStream.makeStream()
@@ -182,6 +204,7 @@ final class LiveBackend: OttoBackend {
     /// Straight onto the open socket, no outbox: the store keeps unsent messages
     /// (saved with the thread) and retries them, so they survive a restart.
     func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool {
+        if text.lowercased().hasPrefix("forget ") { dropKept() }   // a forget asked for in words: nothing kept outlives the asking
         var frame: [String: Any] = ["type": "message", "text": text, "id": id]
         if let replyTo { frame["reply_to"] = replyTo }
         if shared { frame["shared"] = true }
@@ -190,7 +213,8 @@ final class LiveBackend: OttoBackend {
 
     /// A tap is kept in the thread like a message (its bubble is the label), under its own id.
     func tap(_ button: ActionButton, id: String, source: String?) async -> Bool {
-        await handOver(DesktopSync.tapFrame(button, op: id, source: source), op: id)
+        if (button.data ?? "").lowercased().hasPrefix("forget ") { dropKept() }   // the thread's "Forget it" chip
+        return await handOver(DesktopSync.tapFrame(button, op: id, source: source), op: id)
     }
 
     /// A Wallet payment that couldn't go up over HTTP when it happened, kept in the thread until acked.
@@ -200,10 +224,56 @@ final class LiveBackend: OttoBackend {
 
     /// Straight to the socket and waited on, not the outbox: see OttoStore.decide. One op per
     /// approval, so "Try again" after a lost ack is recognised as the same decision.
-    func decide(approval id: String, approve: Bool) async -> ApprovalOutcome {
+    func decide(approval id: String, approve: Bool, scope: ApprovalScope) async -> ApprovalOutcome {
         let op = "approval-\(id)"
-        guard await handOver(["type": "approval", "op": op, "id": id, "decision": approve ? "approve" : "decline"], op: op) else { return .unknown }
-        return lock.withLock { gone.remove(op) != nil } ? .gone : .done
+        var frame = ["type": "approval", "op": op, "id": id, "decision": approve ? "approve" : "decline"]
+        if approve && scope != .once { frame["scope"] = scope.rawValue }
+        switch await hand(frame, op: op) {
+        case .notSent: return .notSent   // no socket, or the write failed: nothing reached the Mac
+        case .unconfirmed: return .unknown
+        case .confirmed: return lock.withLock { gone.remove(op) != nil } ? .gone : .done
+        }
+    }
+
+    /// Ends the turn Otto is on. True once the Mac has the ask; it says in the thread that it stopped.
+    func stopTurn() async -> Bool {
+        let op = UUID().uuidString
+        return await handOver(["type": "stop", "op": op], op: op)
+    }
+    var canStop: Bool { lock.withLock { live && canStopTurn } }
+
+    func pendingApprovals(background: Bool) async -> [ApprovalRequest]? { await get("app/approvals", background: background) }
+
+    /// Straight onto the socket, once, with no op. It only means anything inside the Mac's five seconds, so it
+    /// is never queued or sent again; and the outbox waits for an ack per frame, which this one never gets:
+    /// queued there, the first alert held up every frame behind it (the next approval's alert among them).
+    func alerted(approval id: String) async {
+        guard let task = lock.withLock({ socket }),
+              let json = try? JSONSerialization.data(withJSONObject: ["type": "approval_alerted", "id": id]),
+              let s = String(data: json, encoding: .utf8) else { return }
+        try? await task.send(.string(s))
+    }
+
+    /// The Mac's own word for it, not just a 2xx: `held` as asked, `ok` true.
+    func holdBrowser(_ hold: Bool) async -> Bool {
+        struct Held: Decodable { let held: Bool }
+        return (await postJSON("app/browser/hold", ["hold": hold]).flatMap { try? JSONDecoder().decode(Held.self, from: $0) })?.held == hold
+    }
+    func browserInput(_ input: BrowserInput) async -> Bool {
+        struct Done: Decodable { let ok: Bool }
+        return (await postJSON("app/browser/input", input.body).flatMap { try? JSONDecoder().decode(Done.self, from: $0) })?.ok == true
+    }
+
+    /// A small JSON POST: the body of a 2xx, or nil. Ten seconds: these answer a tap.
+    private func postJSON(_ path: String, _ body: [String: Any]) async -> Data? {
+        var req = URLRequest(url: base.appending(path: path), timeoutInterval: 10)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, resp) = try? await session.data(for: req), let code = (resp as? HTTPURLResponse)?.statusCode,
+              (200..<300).contains(code) else { return nil }
+        return data
     }
 
     func react(to id: String, emoji: String) async {
@@ -212,12 +282,16 @@ final class LiveBackend: OttoBackend {
 
     /// True once the server has it: a write into a socket iOS froze also "succeeds", so a
     /// server that acks is waited on, and one that doesn't answer in time is a failure to retry.
-    private func handOver(_ frame: [String: Any], op: String) async -> Bool {
+    private func handOver(_ frame: [String: Any], op: String) async -> Bool { await hand(frame, op: op) == .confirmed }
+
+    /// How far a frame got: never out of the phone, out with no ack, or acked.
+    private enum Handed { case notSent, unconfirmed, confirmed }
+    private func hand(_ frame: [String: Any], op: String) async -> Handed {
         guard let task = lock.withLock({ socket }),
               let json = try? JSONSerialization.data(withJSONObject: frame),
-              let s = String(data: json, encoding: .utf8) else { return false }
-        do { try await task.send(.string(s)) } catch { return false }
-        return await confirmed(op, on: task)
+              let s = String(data: json, encoding: .utf8) else { return .notSent }
+        do { try await task.send(.string(s)) } catch { return .notSent }
+        return await confirmed(op, on: task) ? .confirmed : .unconfirmed
     }
 
     /// The server's ack for `op`, or true at once for a server too old to send one.
@@ -336,7 +410,7 @@ final class LiveBackend: OttoBackend {
             }
             do {
                 try await ping(task)                    // handshake done, token accepted
-                lock.withLock { socket = task; live = true; connects += 1; acksOn = nil; acked = [] }
+                lock.withLock { socket = task; live = true; connects += 1; acksOn = nil; acked = []; appAlerts = []; canStopTurn = false }
                 // A live tile comes again right after connect; a `done` missed while away must not leave one up.
                 browserOut.yield(nil)
                 delay = 1
@@ -374,6 +448,13 @@ final class LiveBackend: OttoBackend {
     /// Bounded: a handshake caught in a network switch (wifi to cellular) can leave the pong
     /// handler never called, and an unbounded wait here parks the reconnect loop for good,
     /// asleep while HTTP (voice, history) still works.
+    /// Back in front: a socket iOS froze, or one whose network changed under it, still reads as live until the
+    /// 20 s keep-alive finds out. One quick ping settles it now; a dead one is dropped and the loop reconnects.
+    func probe() async {
+        guard let task = lock.withLock({ socket }) else { return }
+        do { try await ping(task, timeout: 2) } catch { task.cancel(with: .goingAway, reason: nil) }
+    }
+
     private func ping(_ task: URLSessionWebSocketTask, timeout: Double = 10) async throws {
         try await withCheckedThrowingContinuation { (k: CheckedContinuation<Void, Error>) in
             let done = NSLock()
@@ -404,7 +485,12 @@ final class LiveBackend: OttoBackend {
             if k.type == "browser" { if let f = BrowserFrame(json: data) { browserOut.yield(f.tile) }; return }
             // The coding jobs, whole: on connect when the Mac has them, and whenever one changes.
             if k.type == "jobs" { if let w = try? JSONDecoder().decode(CodeJobs.self, from: data) { jobsOut.yield(w.jobs) }; return }
-            if k.type == "hello" { lock.withLock { acksOn = true }; return }
+            if k.type == "hello" {
+                struct Hello: Decodable { let alerts: [String]?; let stop: Bool? }
+                let hello = try? JSONDecoder().decode(Hello.self, from: data)
+                lock.withLock { acksOn = true; appAlerts = Set(hello?.alerts ?? []); canStopTurn = hello?.stop == true }
+                return
+            }
             if k.type == "reminders" {
                 struct Frame: Decodable { let items: [ReminderItem] }
                 guard let set = try? JSONDecoder().decode(Frame.self, from: data), let task = lock.withLock({ socket }) else { return }
@@ -531,13 +617,65 @@ final class LiveBackend: OttoBackend {
     func dashData(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> Data? {
         var c = URLComponents(url: base.appending(path: "app/dash/\(path)"), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { c.queryItems = query }
-        var req = URLRequest(url: c.url!)
+        var req = URLRequest(url: c.url!, timeoutInterval: 15)   // a page somebody is looking at: a stalled Mac isn't waited on for the default minute
         req.httpMethod = method
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body { req.httpBody = body; req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
-        guard let (data, resp) = try? await session.data(for: req),
-              let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else { return nil }
-        return data
+        let answer = try? await session.data(for: req)
+        let code = (answer?.1 as? HTTPURLResponse)?.statusCode
+        // Remembered so the page can say what went wrong: no such page on this Mac, an error there, or no answer.
+        lock.withLock { dashFailures[path] = code.map { (200..<300).contains($0) ? nil : $0 } ?? 0 }
+        // The Mac says it's gone: so is the copy kept here.
+        if method == "GET", code == 404 || code == 410, let file = keptFile(path, query) { try? FileManager.default.removeItem(at: file) }
+        guard let answer, let code, (200..<300).contains(code) else { return nil }
+        // A page that was read is kept, so it can still be shown (as old) with the Mac out of reach: see dashKept.
+        // Readable only while the phone is unlocked: these are your memories, people and money. A change made
+        // through these routes (a forget, a rule taken back) drops everything kept, so nothing shown later as
+        // "from 9:40" is something you have since removed.
+        if method == "GET", let file = keptFile(path, query) {
+            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? answer.0.write(to: file, options: [.atomic, .completeFileProtection])
+        } else if method != "GET", let folder = keptFile("", [])?.deletingLastPathComponent() {
+            try? FileManager.default.removeItem(at: folder)
+        }
+        return answer.0
+    }
+
+    /// Where a card page's last answer is kept: the Caches folder (iOS may clear it; nothing depends on it), one
+    /// file per server, page and query, so another Mac's pages are never shown for this one.
+    /// ponytail: no pruning of its own; a page per memory or schedule opened adds a small file until iOS clears Caches.
+    private func keptFile(_ path: String, _ query: [URLQueryItem]) -> URL? {
+        let name = base.absoluteString + "|" + path + "|" + query.map { "\($0.name)=\($0.value ?? "")" }.joined(separator: "&")
+        let hash = SHA256.hash(data: Data(name.utf8)).map { String(format: "%02x", $0) }.joined()
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appending(path: "dash/\(hash).json")
+    }
+
+    /// A kept page is good for a day. Past that it isn't shown: something forgotten from another device, or
+    /// through the chat, is gone from the Mac's own pages by its overnight tidy-up, and mustn't outlive that here.
+    private static let keptFor: TimeInterval = 24 * 3600
+
+    func dashKept(_ path: String, query: [URLQueryItem]) -> (data: Data, at: Date)? {
+        guard let file = keptFile(path, query),
+              let at = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { return nil }
+        guard Date.now.timeIntervalSince(at) < Self.keptFor else { try? FileManager.default.removeItem(at: file); return nil }
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return (data, at)
+    }
+
+    /// Everything kept, dropped: asked for when the owner forgets something, whichever way the forgetting goes.
+    func dropKept() {
+        if let folder = keptFile("", [])?.deletingLastPathComponent() { try? FileManager.default.removeItem(at: folder) }
+    }
+
+    /// At launch: kept pages past their day are deleted, whether or not anyone opens them again.
+    private func sweepKept() {
+        guard let folder = keptFile("", [])?.deletingLastPathComponent() else { return }
+        Task.detached(priority: .utility) {
+            let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            for f in files where (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate.map({ Date.now.timeIntervalSince($0) >= Self.keptFor }) ?? true {
+                try? FileManager.default.removeItem(at: f)
+            }
+        }
     }
 
     func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse? {
@@ -590,7 +728,7 @@ final class LiveBackend: OttoBackend {
     private func fetch(_ path: String, background: Bool = false, query: [URLQueryItem] = []) async -> (Data, HTTPURLResponse)? {
         var c = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { c.queryItems = query }
-        var req = URLRequest(url: c.url!)
+        var req = URLRequest(url: c.url!, timeoutInterval: 15)   // history and the brief at launch wait on this: not the default minute
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if background { req.setValue("1", forHTTPHeaderField: "X-Otto-Background") }
         guard let (data, resp) = try? await session.data(for: req),

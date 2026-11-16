@@ -341,6 +341,9 @@ private struct ConversationCell: View {
     @ViewBuilder private var preview: some View {
         if let match {
             Text(match.text).foregroundStyle(.secondary)
+        } else if row.kind == "otto", let ask = (store.shownApproval ?? store.waitingApproval)?.ask {
+            // An approval is Otto's to raise and yours to answer: its row says so until you have.
+            HStack(spacing: 6) { NeedsMark(); Text(ask).foregroundStyle(.primary) }
         } else if let doing = row.activity.first(where: { $0.activity?.isEmpty == false })?.activity {
             Text(doing).foregroundStyle(.secondary)
         } else if row.kind == "pip", row.pips.first?.state == .asleep, let wake = row.nextWakeAt {

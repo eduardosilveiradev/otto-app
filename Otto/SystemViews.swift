@@ -161,8 +161,18 @@ struct Triggers: Decodable { let triggers: [DashTrigger] }
 // MARK: - Status
 
 /// Every moving part on the Mac and when it last checked in.
+private func phoneRow(_ label: String, _ value: String, ok: Bool) -> some View {
+    HStack(spacing: 10) {
+        Circle().fill(ok ? Color.green : Color.secondary).frame(width: 9, height: 9)
+        LabeledContent(label, value: value)
+    }
+}
+
 struct StatusScreen: View {
     @Environment(OttoStore.self) private var store
+    @Environment(\.scenePhase) private var phase
+    /// Read when the page opens and each time the app comes back to the front (Settings is where it changes).
+    @State private var allowed: Notifier.Allowed?
     var body: some View {
         Loaded(path: "status") { (s: DashStatus, reload) in
             List {
@@ -174,7 +184,16 @@ struct StatusScreen: View {
                     if let drop = (store.backend as? LiveBackend)?.lastDrop {
                         Text("Last drop \(drop)").font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
                     }
+                    // What decides whether this phone can alert you and catch up on its own: the same three
+                    // things the Mac is told (Notifier.health), said here too.
+                    if let allowed {
+                        phoneRow("Notifications", allowed == .yes ? "Allowed" : allowed == .no ? "Not allowed" : "Not asked yet", ok: allowed == .yes)
+                    }
+                    phoneRow("Background App Refresh", UIApplication.shared.backgroundRefreshStatus == .available ? "On" : "Off",
+                             ok: UIApplication.shared.backgroundRefreshStatus == .available)
+                    phoneRow("Stay connected", Keepalive.enabled ? "On" : "Off", ok: Keepalive.enabled)
                 }
+                .task(id: phase) { allowed = await Notifier.allowed() }
                 Section {
                     ForEach(s.rows) { r in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -212,11 +231,74 @@ struct StatusScreen: View {
 // MARK: - Devices
 
 /// Paired apps and dashboards. A dashboard can be signed out from here; an app token only from the Mac.
+/// What Otto does without asking: each "Always" you gave on an approval, and the way to take it back.
+/// The Mac keeps the list (/app/dash/rules); the card only links here when it has one to show.
+struct RulesScreen: View {
+    struct Rules: Decodable { let rules: [Rule] }
+    struct Rule: Decodable, Identifiable {
+        let id: String; let label: String; let created: String; let uses: Int?; let lastUsed: String?
+    }
+    @Environment(OttoStore.self) private var store
+    /// A take-back the Mac didn't confirm: Otto may still be allowed, so it's said, not swallowed.
+    @State private var failed = false
+
+    var body: some View {
+        Loaded(path: "rules") { (r: Rules, reload) in
+            List {
+                Section {
+                    ForEach(r.rules) { rule in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(rule.label.prefix(1).uppercased() + rule.label.dropFirst())
+                            Text(detail(rule)).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        .swipeActions {
+                            Button("Ask Again", role: .destructive) {
+                                Task {
+                                    struct Revoked: Decodable { let revoked: Bool }
+                                    // `revoked` false is the Mac saying it has no such rule: gone either way. Only no answer is a failure.
+                                    let done: Revoked? = await store.backend.dash("rules/\(rule.id)", method: "DELETE")
+                                    if done == nil { failed = true }
+                                    await reload()
+                                }
+                            }
+                        }
+                    }
+                } footer: {
+                    if !r.rules.isEmpty { Text("Otto does these without asking. Swipe one to be asked again.") }
+                }
+            }
+            .emptyState(r.rules.isEmpty, "Otto asks every time", systemImage: "hand.raised",
+                        "Choose Always on an approval and it’s listed here, where you can take it back.")
+            .refreshable { await reload() }
+        }
+        .navigationTitle("Allowed without asking").navigationBarTitleDisplayMode(.inline)
+        .alert("Still allowed", isPresented: $failed) { Button("OK") {} } message: {
+            Text("Your Mac didn’t confirm, so Otto may still do this without asking. Try again.")
+        }
+    }
+
+    private func detail(_ r: Rule) -> String {
+        // With its year once that isn't this one: "3 Jan" alone would read as this January.
+        let given = dashDate(r.created).map { d in
+            let day = Date.FormatStyle.dateTime.day().month(.abbreviated)
+            return "Allowed \(d.formatted(Calendar.current.isDate(d, equalTo: .now, toGranularity: .year) ? day : day.year()))"
+        }
+        let used = switch r.uses ?? 0 {
+        case 0: "never used"
+        case 1: "used once" + (r.lastUsed.map { ", \(ago($0))" } ?? "")
+        case let n: "used \(n.formatted()) times" + (r.lastUsed.map { ", last \(ago($0))" } ?? "")
+        }
+        return [given, used].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
 struct DevicesScreen: View {
     struct Devices: Decodable { let devices: [Device] }
     struct Me: Decodable { let id: String }
     @Environment(OttoStore.self) private var store
     @State private var me: String?
+    /// A sign-out the Mac didn't confirm: that dashboard may still be signed in, so it's said.
+    @State private var failed = false
 
     var body: some View {
         Loaded(path: "devices") { (d: Devices, reload) in
@@ -238,7 +320,8 @@ struct DevicesScreen: View {
                                 Button("Sign Out", role: .destructive) {
                                     Task {
                                         struct Revoked: Decodable { let revoked: Bool }
-                                        let _: Revoked? = await store.backend.dash("devices/\(dev.id)", method: "DELETE")
+                                        let done: Revoked? = await store.backend.dash("devices/\(dev.id)", method: "DELETE")
+                                        if done == nil { failed = true }
                                         await reload()
                                     }
                                 }
@@ -250,6 +333,9 @@ struct DevicesScreen: View {
             .refreshable { await reload() }
         }
         .navigationTitle("Devices").navigationBarTitleDisplayMode(.inline)
+        .alert("Still signed in", isPresented: $failed) { Button("OK") {} } message: {
+            Text("Your Mac didn’t confirm, so that dashboard may still be signed in. Try again.")
+        }
         .task { me = (await store.backend.dash("me") as Me?)?.id }
     }
 

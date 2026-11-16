@@ -25,6 +25,8 @@ struct DashMemory: Decodable {
     struct Graph: Decodable { let c: [Int]?; let clusters: [Cluster]? }
     struct Summary: Decodable { let text: String; let note: String }
     let items: [MemoryItem]
+    /// The Mac forgets a memory itself when asked (POST memory/forget); absent on a server that can't.
+    var canForget: Bool? = nil
     let summary: Summary
     let generatedAt: String
     let graph: Graph
@@ -122,6 +124,13 @@ extension OttoBackend {
             return nil
         }
     }
+
+    /// What this page showed the last time it could be read, and when: for a Mac that's out of reach now.
+    func dashKept<T: Decodable>(_ path: String, query: [String: String] = [:]) -> (value: T, at: Date)? {
+        guard let kept = dashKept(path, query: query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }),
+              let value = try? JSONDecoder().decode(T.self, from: kept.data) else { return nil }
+        return (value, kept.at)
+    }
 }
 
 /// Fetches one dashboard endpoint and hands it to `content` with a reload, or says the Mac is out of reach.
@@ -132,17 +141,40 @@ struct Loaded<T: Decodable, Content: View>: View {
     @Environment(OttoStore.self) private var store
     @State private var value: T?
     @State private var failed = false
+    /// When what's on screen was read, and whether a later read failed: it's then old, and the page says how old.
+    @State private var loadedAt = Date.now
+    @State private var stale = false
 
     var body: some View {
         Group {
-            if let value { content(value, load) }
+            if let value {
+                content(value, load)
+                    .safeAreaInset(edge: .bottom) {
+                        if stale {
+                            HStack(spacing: 8) {
+                                Text("\(why.stale) This is from \(loadedAt.formatted(date: Calendar.current.isDateInToday(loadedAt) ? .omitted : .abbreviated, time: .shortened)).")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Button("Try again") { Task { await load() } }.font(.footnote.weight(.semibold))
+                            }
+                            .padding(.horizontal, 14).padding(.vertical, 10)
+                            // Solid, not glass: rows scrolled under it would read through its words.
+                            .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 17, style: .continuous))
+                            .overlay { RoundedRectangle(cornerRadius: 17, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5) }
+                            .padding(.horizontal, 16).padding(.bottom, 8)
+                            .transition(.opacity)
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.2), value: stale)
+            }
             else if failed {
                 ContentUnavailableView {
-                    Label("Can’t reach your Mac", systemImage: "wifi.slash")
+                    Label(why.title, systemImage: why.symbol)
                 } description: {
-                    Text(store.backend.isLive ? "Otto didn’t answer." : "This needs the Otto server.")
+                    Text(why.detail)
                 } actions: {
-                    Button("Try again") { failed = false; Task { await load() } }
+                    // Sample data has no Mac to try again: the line above says what the page needs.
+                    if !(store.backend is MockBackend) { Button("Try again") { failed = false; Task { await load() } } }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(.systemGroupedBackground))
@@ -154,8 +186,46 @@ struct Loaded<T: Decodable, Content: View>: View {
         .task(id: query) { await load() }
     }
 
+    /// What went wrong, told apart by the Mac's answer (otto/dash.ts): the thing asked for is gone (a 404 for
+    /// one item), the Mac has nothing for the page (a 404 for a page: no index yet, or an older Otto), it isn't
+    /// set up there (501: calls without a callbot), the token was refused, an error; or no answer at all, with
+    /// this phone offline or the Mac out of reach.
+    private var why: (title: String, symbol: String, detail: String, stale: String) {
+        switch store.backend.dashFailure(path) {
+        case 404? where !query.isEmpty: ("No longer on your Mac", "questionmark.folder", "It may have been removed since.", "Your Mac no longer has this.")
+        case 404?: ("Nothing here yet", "tray", "Your Mac has nothing for this page. If its Otto is older than this app, update it there.", "Your Mac has nothing for this page now.")
+        case 501?: ("Not set up on your Mac", "wrench.and.screwdriver", "Otto on your Mac isn’t set up for this yet.", "This isn’t set up on your Mac any more.")
+        case 401?, 403?: ("Your Mac didn’t accept this phone", "lock", "Its token doesn’t open this page. Pair again from the contact card.", "Your Mac didn’t accept this phone.")
+        case let code? where code >= 400: ("Otto hit an error", "exclamationmark.triangle", "Your Mac answered with an error (\(code)). Try again in a moment.", "Otto hit an error (\(code)).")
+        default:
+            if store.noNetwork { ("You’re offline", "wifi.slash", "Connect to Wi-Fi or mobile data.", "You’re offline.") }
+            else {
+                ("Can’t reach your Mac", "wifi.slash",
+                 store.backend is MockBackend ? "This page needs your Mac. You’re looking at sample data."
+                 : store.backend.isLive ? "Otto didn’t answer. Try again in a moment." : "Check it’s awake and on Tailscale.",
+                 "Couldn’t reach your Mac.")
+            }
+        }
+    }
+
     private func load() async {
-        if let v: T = await store.backend.dash(path, query: query) { value = v; failed = false } else if value == nil { failed = true }
+        if let v: T = await store.backend.dash(path, query: query) { value = v; failed = false; stale = false; loadedAt = .now }
+        // No answer at all (not a refusal or a missing page): what this page showed last time, said to be old.
+        else if value == nil, store.backend.dashFailure(path) == 0, let kept: (value: T, at: Date) = store.backend.dashKept(path, query: query) {
+            value = kept.value; failed = false; stale = true; loadedAt = kept.at
+        }
+        else if value == nil { failed = true } else { stale = true }
+        #if DEBUG
+        // `-staleDash`: as if a later read had failed, for screenshots of the line that says so.
+        if value != nil, CommandLine.arguments.contains("-staleDash") { stale = true }
+        #endif
+    }
+}
+
+extension View {
+    /// A search field only where there's something to search: an empty page doesn't offer one.
+    @ViewBuilder func searchable(if on: Bool, text: Binding<String>, prompt: LocalizedStringKey) -> some View {
+        if on { searchable(text: text, prompt: prompt) } else { self }
     }
 }
 

@@ -80,7 +80,9 @@ shot() {
     xcrun simctl terminate "$DEV" $ID >/dev/null 2>&1
     sleep 0.5
     clean
-    xcrun simctl launch "$DEV" $ID "$@" >/dev/null
+    # -wipeDefaults: the app's own saved settings live in its container, where `defaults delete` above doesn't
+    # reach; without it a draft or a pasted pairing link from one state shows up in the next.
+    xcrun simctl launch "$DEV" $ID -wipeDefaults "$@" >/dev/null
     sleep "$wait"
     [[ " $* " == *" -pipsFixture "* ]] && sleep 1.5   # the list, then Otto's thread pushed over it
     local f="$screen-$state-$theme.png"
@@ -143,11 +145,18 @@ shot chat browser-tile-private 6 "Sign-in page: caption only, no picture" $O -de
 shot chat browser-tile-long 6 "Worst case: the server's 100-character caption, two lines kept" $O -demoThread -thinking -todos -browserTile long
 shot chat browser-tile-idle 6 "Tile still up after the reply ended (done comes 20 s later)" $O -demoThread -browserTile
 shot media browser-full 6 "Browser tile tapped: the page full screen" $O -demoThread -thinking -browserTile -browserOpen
+shot media browser-take-over 6 "A page the Mac will hand over: Take over, behind Face ID" $O -demoThread -thinking -browserTile control -browserOpen
+shot media browser-holding 6 "The page in your hands: taps go to it, with typing, keys and Hand back" $O -demoThread -thinking -browserTile control -browserOpen -browserHold
+shot chat voice-speed 6 "A voice reply paused part-way: the speed button (1x, 1.5x, 2x) beside its length" $O -demoThread -voicePaused
+shot chat draft-unnamed 6 "A draft the Mac sent without saying who it goes to: the card says so above Send" $O -demoThread -draftBare
 shot chat offline 6 "Server unreachable: Otto asleep, reconnecting" $O -demoThread -offline
-shot chat offline-pending 6 "Dead server with a send waiting: Will send when back online" $DEAD $N -longThread b
+shot chat no-network 6 "This phone has no network at all: the header says so, not that the Mac is out of reach" $O -demoThread -offline -noNetwork
+shot chat offline-pending 13 "Dead server with a send waiting: Will send when back online" $DEAD $N -longThread b
 shot chat offline-empty 15 "Real dead server: empty thread, asleep" $DEAD $N -emptyThread
 shot chat update-available 6 "Update button in the header" $O -demoThread -fakeUpdate
 shot chat walkie-hint 7 "Hold-for-walkie-talkie hint" $O -demoThread -walkieHint
+shot chat call-row 6 "A call with Otto that just ended: its line in the thread, with how long it ran" $O -demoThread -callRow
+shot sheet call-transcript 7 "The call's line tapped: what was said" $O -demoThread -callRow -callTranscript
 shot chat flight-banner 6 "Flight-day card under the header" $O -demoThread -mockGate
 shot chat call-banner 7 "Live call banner under the header" $O -demoThread -mockCalls
 shot composer focused 6 "Composer focused with text" $O -demoThread -kbdDemo "running 10 min late, start without me"
@@ -161,9 +170,20 @@ shot sheet payment 6 "Payment approval" $O -demoThread -paymentDemo
 shot sheet payment-receipt 6 "Payment approved: printed receipt" $O -demoThread -paymentDemo -receiptDemo
 shot sheet change-approval 6 "Approve a change to Otto's core" $O -demoThread -approvalDemo
 shot sheet change-approval-detail 6 "A change whose detail is its lines, not a git stat (the memory clean-up)" $O -demoThread -approvalDemo diet
+shot sheet approval-scopes 6 "An ask the Mac will take a wider yes for: just this once is picked" $O -demoThread -approvalDemo scopes
+shot sheet approval-out-of-reach 6 "An ask while the Mac is out of reach: the buttons are off and a line says nothing can be sent yet" $O -demoThread -approvalDemo scopes -offline
+shot sheet schedule 7 "A schedule's page from its chip: when it runs, what Otto will do, and Change or Stop (asked for in the chat)" $O -scheduleThread -scheduleOpen
+shot sheet approval-over-card 8 "An approval raised while the contact card is up: its sheet shows over the card, not behind it" $O -details -approvalDemo scopes
+shot sheet approval-scopes-always 6 "Always picked: what it means in words, before Face ID" $O -demoThread -approvalDemo scopes -approvalScope always
+shot sheet approval-scopes-worst 6 "Worst case: the longest rule a server might name, at an accessibility text size" $O -demoThread -approvalDemo scopes-worst -approvalScope always -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+shot sheet approval-draft 6 "An email Otto wants to send in your name: every recipient and every word" $O -demoThread -approvalDemo draft
+shot sheet approval-draft-worst 6 "Worst case: fourteen recipients, an unbreakable address, no subject, a channel this build can't name" $O -demoThread -approvalDemo draft-worst
 shot chat approval-waiting 6 "A payment put off with Later: waiting over the composer, with its time left" $O -demoThread -paymentDemo -approvalLater
 shot chat approval-waiting-todos 6 "A change put off with Later takes the to-dos' place until it's answered" $O -demoThread -approvalDemo -approvalLater -openTodos
 shot chat approval-waiting-worst 6 "Worst case: a long payee and a five-figure total, at an accessibility text size" $O -demoThread -approvalWorst -approvalLater -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+shot chat approval-waiting-two 6 "Two put off with Later: the pill shows the newest and says two are waiting" $O -demoThread -paymentDemo -approvalDemo -approvalLater
+shot pips approval-in-chats 7 "An approval raised while the Chats list is up: its sheet over the list" $B -pipsFixture -pipsScreen conversations -approvalDemo
+shot pips otto-needs-you 7 "Chats with an approval put off: Otto's row says it needs you" $B -pipsFixture -pipsScreen conversations -approvalDemo -approvalLater
 shot chat approval-lapsed 6 "It lapsed on the Mac before an answer: the pill says Expired until tapped away" $O -demoThread -paymentDemo -approvalLapsed
 shot sheet boarding-pass 11 "Flight-day boarding pass" $O -demoThread -mockGate -openGate
 shot sheet live-call 8 "A call Otto is placing, live transcript" $O -demoThread -mockCalls -openCall
@@ -189,8 +209,10 @@ shot search jumped 9 "Tapped a match: thread scrolled to it, lit up" $O -actions
 # --- Contact card (details) -------------------------------------------------------------
 shot details card 6 "Contact card: today, sections, settings, server" $O -details
 shot details snoozed 6 "Snoozed, with what's held" $O -details -snoozed
-shot details server-check-failed 10 "Server check under the token: can't reach" $DEAD $N -details -checkServer
-for s in Loops Schedules Calls Memory People Money Trips Passport Packages Status Devices Glasses Settings; do
+shot details pair-link-pasted 16 "A pairing link pasted into the address: both fields filled and checked at once; the call keys it carried wait for a Mac that answers" $O -details -pasteLink 'otto://pair?server=http://127.0.0.1:9&token=demo-token&vapiKey=pk_demo&vapiAssistant=asst_demo'
+shot details notifications-off 9 "Notifications refused on this phone: the card says so beside its settings, with the way to turn them on" $O -details -notificationsOff
+shot details server-check-failed 13 "Server check under the token: can't reach" $DEAD $N -details -checkServer
+for s in Loops Schedules Calls Memory People Money Trips Passport Packages Status Devices Rules Glasses Settings; do
   l=$(echo $s | tr A-Z a-z)
   extra=""; [ $s = Calls ] && extra=-mockCalls
   shot "$l" list 6 "$s screen" $O -details -screen $s $extra
@@ -198,11 +220,14 @@ done
 for t in Unasked Changes Jobs Triggers; do
   shot activity "$(echo $t | tr A-Z a-z)" 6 "Activity, $t tab" $O -details -screen Activity -activityTab $t
 done
-for s in Loops Schedules Calls Memory People Trips Packages; do
+for s in Loops Schedules Calls Memory People Trips Packages Rules; do
   shot "$(echo $s | tr A-Z a-z)" empty 6 "$s with nothing in it" $O -details -screen $s -emptyDash
 done
+shot rules worst 6 "Worst case: the longest rule, one used once, one used 1,284 times, one with no dates" $O -details -screen Rules -rulesWorst
 shot activity jobs-empty 6 "No background jobs" $O -details -screen Activity -activityTab Jobs -emptyDash
 shot calls error 6 "Can't reach your Mac (no callbot)" $O -details -screen Calls
+shot loops stale 6 "A refresh that failed: the page keeps what it had and says how old it is" $O -details -screen Loops -staleDash
+shot settings error 13 "Settings when the Mac doesn't answer" $DEAD $N -details -screen Settings
 shot loops error 12 "Can't reach your Mac (dead server)" $DEAD $N -details -screen Loops
 
 # --- Pips and groups ---------------------------------------------------------------------
@@ -241,7 +266,7 @@ elif [[ "permissions-notifications" =~ $FILTER ]]; then
     xcrun simctl launch "$DEV" $ID -onboarded YES -demoThread -pipsFixture -pipsScreen otto >/dev/null
     sleep 14
     f=permissions-notifications-$theme.png
-    xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1 && printf '%s\t%s\t%s\t%s\t%s\n' "$f" permissions notifications $theme "System notification permission alert on first launch" >> "$TSV.new"
+    xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1 && printf '%s\t%s\t%s\t%s\t%s\n' "$f" permissions notifications $theme "A fresh install opened straight into the thread: no system alert here, notifications are asked for in onboarding" >> "$TSV.new"
     echo $f
   done
 fi

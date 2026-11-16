@@ -5,6 +5,65 @@ import VisionKit
 
 /// First launch: meet Otto, pair with the Mac, then the few switches that make it useful.
 /// Runs before OttoStore exists, so the store starts on the server it just paired with.
+/// An otto://pair link: what the Mac's `apptokens.ts new` prints as a QR code. It may also carry what a call
+/// inside the app needs. Anything that isn't one, or names a server that isn't http(s), is nil.
+struct PairingLink: Equatable {
+    let server: String, token: String
+    var callKey: String? = nil, callAssistant: String? = nil
+    var host: String { URL(string: server)?.host() ?? server }
+    /// A link can come from anyone (a message, a web page, another app), so nothing it carries is used before
+    /// the owner has read this and said yes: which Mac, and whether calls change too.
+    var question: String { "Connect Otto to \(host)?" }
+    var consequence: String {
+        callKey != nil && callAssistant != nil ? "Otto will talk to this Mac, and calls inside the app will use the call service this link names. Only connect to a link you made on your own Mac."
+            : "Otto will talk to this Mac. Only connect to a link you made on your own Mac."
+    }
+
+    init?(_ text: String) {
+        guard let c = URLComponents(string: text.trimmingCharacters(in: .whitespacesAndNewlines)), c.scheme == "otto", c.host == "pair" else { return nil }
+        func item(_ name: String) -> String? { c.queryItems?.first { $0.name == name }?.value.flatMap { $0.isEmpty ? nil : $0 } }
+        guard let s = item("server"), let t = item("token"),
+              let u = URL(string: s), ["http", "https"].contains(u.scheme), u.host() != nil else { return nil }
+        server = s; token = t; callKey = item("vapiKey"); callAssistant = item("vapiAssistant")
+    }
+
+    /// Whether that Mac takes this token: the request onboarding and the card make before they keep a pair.
+    /// Nil is yes. A yes from the owner isn't enough on its own: a link naming their own Mac with a made-up
+    /// token and someone else's call keys would read as theirs, and must change nothing.
+    func problem() async -> ServerProblem? {
+        guard let url = URL(string: server) else { return .unreachable }
+        var req = URLRequest(url: url.appending(path: "app/settings"), timeoutInterval: 10)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (body, answer) = try await URLSession.shared.data(for: req)
+            let code = (answer as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(code) else { return ServerProblem(status: code, error: nil) ?? .server(code) }
+            return ServerProblem.isOtto(body) ? nil : .notOtto
+        } catch { return ServerProblem(status: nil, error: error) ?? .unreachable }
+    }
+
+    /// Saved as the app reads them at launch (LiveBackend.fromDefaults, CallManager). Only ever after a yes,
+    /// and after `problem()` has come back nil.
+    func save() {
+        let d = UserDefaults.standard
+        d.set(server, forKey: "serverURL"); d.set(token, forKey: "serverToken")
+        saveCallKeys()
+    }
+    /// Both or neither: half a pair would leave a new key calling an old assistant.
+    func saveCallKeys() {
+        guard let callKey, let callAssistant else { return }
+        UserDefaults.standard.set(callKey, forKey: "vapiPublicKey")
+        UserDefaults.standard.set(callAssistant, forKey: "vapiAssistantId")
+    }
+}
+
+/// A pairing link opened from outside the app (the Camera's QR banner, AirDrop, a message) before the app
+/// knew what to do with it: onboarding's pairing step takes it, or the main screen asks first.
+@MainActor @Observable final class PairInbox {
+    static let shared = PairInbox()
+    var link: PairingLink?
+}
+
 struct OnboardingFlow: View {
     let finish: () -> Void
     @State private var step = Step.hello
@@ -28,6 +87,10 @@ struct OnboardingFlow: View {
         }
         .padding(.horizontal, 24)
         .background(Color(.systemBackground))
+        // A pairing link tapped outside the app goes straight to the pairing step, which asks about it by name.
+        .onChange(of: PairInbox.shared.link, initial: true) { _, link in
+            if link != nil, step != .connect { forward = true; withAnimation { step = .connect } }
+        }
         #if DEBUG
         .onAppear {
             // `-onboardingStep 3` opens on that page, for screenshots.
@@ -195,6 +258,7 @@ private struct ConnectPage: View {
     @State private var canPaste = UIPasteboard.general.hasStrings
 
     private var canScan: Bool { DataScannerViewController.isSupported }
+    private static let noScanner = "The scanner isn’t available right now. Paste the link, or type it in."
 
     /// Right under what it's about (the fields, or the command and Paste), not under a link or down by the
     /// buttons. Its line is always held, so the page doesn't re-centre and jump when an error arrives.
@@ -207,7 +271,7 @@ private struct ConnectPage: View {
     var body: some View {
         Page(title: "Connect to your Mac",
              line: manual ? "The server address and the app token from your Mac."
-                          : "Run this on your Mac, then scan the code it opens.") {
+                          : "In your Otto folder on your Mac, run this, then scan the code it opens.") {
             if !manual { Glyph(name: "qrcode.viewfinder") }
         } content: {
             VStack(spacing: 12) {
@@ -236,6 +300,9 @@ private struct ConnectPage: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).padding(.vertical, 10)
                         .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
+                    Text("Put your Mac’s own address in place of the last line: Tailscale’s menu on the Mac shows it. Tailscale has to be on, on the Mac and on this phone.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     // The same pairing link, pasted: with the command it pairs, not down among the buttons.
                     if canPaste {
                         PasteButton(payloadType: String.self) { strings in
@@ -276,10 +343,20 @@ private struct ConnectPage: View {
             if CommandLine.arguments.contains("-connectProblem") { problem = "Can’t reach the Mac. Is Tailscale on?" }
         }
         #endif
+        // One opened from outside the app (PairInbox) is asked about first, by name: scanning or pasting here is
+        // the owner's own act, a link that opened the app is not.
+        .alert(PairInbox.shared.link?.question ?? "", isPresented: Binding(get: { PairInbox.shared.link != nil }, set: { if !$0 { PairInbox.shared.link = nil } }),
+               presenting: PairInbox.shared.link) { link in
+            Button("Connect") { Task { await take(link) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { link in Text(link.consequence) }
         .sheet(isPresented: $scanning) {
             QRScanner { code in
                 scanning = false
                 Task { await take(code) }
+            } failed: {
+                scanning = false
+                problem = Self.noScanner
             }
             .ignoresSafeArea()
             .overlay(alignment: .topTrailing) {
@@ -292,54 +369,69 @@ private struct ConnectPage: View {
 
     /// An otto://pair link from the scanner or the clipboard.
     private func take(_ text: String) async {
-        guard let c = URLComponents(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
-              c.scheme == "otto", c.host == "pair",
-              let s = c.queryItems?.first(where: { $0.name == "server" })?.value,
-              let t = c.queryItems?.first(where: { $0.name == "token" })?.value
-        else { problem = "That isn’t an Otto pairing code."; return }
-        server = s; token = t
-        await connect(s, t)
+        guard let link = PairingLink(text) else { problem = "That isn’t an Otto pairing code."; return }
+        await take(link)
     }
 
-    private func connect(_ s: String, _ t: String) async {
+    /// The call keys are kept only once the Mac has answered: a link whose server never did changes nothing.
+    private func take(_ link: PairingLink) async {
+        server = link.server; token = link.token
+        if await connect(link.server, link.token) { link.saveCallKeys() }
+    }
+
+    /// True once the Mac has taken the token and the pair is saved.
+    @discardableResult private func connect(_ s: String, _ t: String) async -> Bool {
         let s = s.trimmingCharacters(in: .whitespaces), t = t.trimmingCharacters(in: .whitespaces)
-        guard let url = URL(string: s), url.host != nil, !t.isEmpty else { problem = "Fill in both."; return }
+        guard let url = URL(string: s), url.host != nil, !t.isEmpty else { problem = "Fill in both."; return false }
         checking = true; problem = nil
         defer { checking = false }
         var req = URLRequest(url: url.appending(path: "app/settings"), timeoutInterval: 10)
         req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
         do {
-            let (_, res) = try await URLSession.shared.data(for: req)
+            let (body, res) = try await URLSession.shared.data(for: req)
             switch (res as? HTTPURLResponse)?.statusCode ?? 0 {
-            case 200..<300:
+            case 200..<300 where ServerProblem.isOtto(body):
                 savedServer = s; savedToken = t
                 next()
-            case 401: problem = "The Mac didn’t accept that token."
+                return true
+            case 401, 403: problem = "The Mac didn’t accept that token."
+            case let code where code >= 500: problem = ServerProblem.server(code).message
             default: problem = "Reached something, but it isn’t Otto."
             }
         } catch {
-            problem = "Can’t reach the Mac. Is Tailscale on?"
+            // Which of the three it is: no network on the phone, a Mac that's slow, or one that isn't there.
+            switch ServerProblem(status: nil, error: error) {
+            case .offline?: problem = ServerProblem.offline.message
+            case .timedOut?: problem = "The Mac took too long to answer. Is it awake?"
+            default: problem = "Can’t reach the Mac. Is Tailscale on?"
+            }
         }
+        return false
     }
 }
 
-private struct QRScanner: UIViewControllerRepresentable {
+struct QRScanner: UIViewControllerRepresentable {
     let found: (String) -> Void
+    /// The camera couldn't be started, or stopped being available (another app took it, a restriction): the
+    /// sheet would otherwise sit there black with no word why.
+    var failed: () -> Void = {}
 
     func makeUIViewController(context: Context) -> DataScannerViewController {
         let vc = DataScannerViewController(recognizedDataTypes: [.barcode(symbologies: [.qr])],
                                            isHighlightingEnabled: true)
         vc.delegate = context.coordinator
-        try? vc.startScanning()
+        do { try vc.startScanning() } catch { let failed = failed; DispatchQueue.main.async { failed() } }
         return vc
     }
     func updateUIViewController(_ vc: DataScannerViewController, context: Context) {}
-    func makeCoordinator() -> Coordinator { Coordinator(found: found) }
+    func makeCoordinator() -> Coordinator { Coordinator(found: found, failed: failed) }
 
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
         let found: (String) -> Void
+        let failed: () -> Void
         private var done = false
-        init(found: @escaping (String) -> Void) { self.found = found }
+        init(found: @escaping (String) -> Void, failed: @escaping () -> Void) { self.found = found; self.failed = failed }
+        func dataScanner(_ scanner: DataScannerViewController, becameUnavailableWithError error: DataScannerViewController.ScanningUnavailable) { failed() }
         func dataScanner(_ scanner: DataScannerViewController, didAdd items: [RecognizedItem], allItems: [RecognizedItem]) {
             for case .barcode(let b) in items {
                 guard !done, let s = b.payloadStringValue else { continue }
@@ -421,7 +513,7 @@ private struct AwakePage: View {
     @AppStorage("stayAwake") private var stayAwake = true
     var body: some View {
         Page(title: "Stay connected",
-             line: "Keeps the line to your Mac open in the background, so messages arrive the moment I send them. Costs a little battery.") {
+             line: "Keeps the line to your Mac open in the background, so messages arrive the moment I send them. Costs a little battery. Without it, iOS lets me check in now and then, and anything urgent comes through Bark if your Mac has it set up.") {
             Glyph(name: "bolt.horizontal.fill")
         } footer: {
             // Asked like notifications are: a yes and a not now, no switch to read first.

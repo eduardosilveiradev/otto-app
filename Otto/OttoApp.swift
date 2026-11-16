@@ -1,5 +1,7 @@
 import ActivityKit
+import AudioToolbox
 import MWDATCore
+import Network
 import SwiftUI
 import ThinkingOrbsKit
 import WidgetKit
@@ -10,6 +12,11 @@ struct OttoApp: App {
     @AppStorage("onboarded") private var onboarded = UserDefaults.standard.string(forKey: "serverURL")?.isEmpty == false
 
     init() {
+        #if DEBUG
+        // `-wipeDefaults` (Scripts/shoot.sh, on every launch): start from no saved settings, so what one
+        // screenshot's state left behind (a draft in the composer, a pasted pairing link) can't show in the next.
+        if CommandLine.arguments.contains("-wipeDefaults"), let id = Bundle.main.bundleIdentifier { UserDefaults.standard.removePersistentDomain(forName: id) }
+        #endif
         Notifier.shared.register()   // the background task must be registered before launch ends
         Dictation.shared.setUp()     // the keyboard's mic requests arrive any time
         try? Wearables.configure()
@@ -19,9 +26,17 @@ struct OttoApp: App {
         HangUpOttoCall.run = { CallManager.current?.hangUp() }
         // A call's Live Activity outlives an app that was killed mid-call; no call is live at launch.
         Task { for a in Activity<CallActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
+        Task { await WorkActivity.endLeftovers() }
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
         // `-callActivity`: a call's Live Activity 83 seconds in, for screenshots of the Lock Screen and the Dynamic Island.
+        // `-workActivity`: Otto at work, three minutes in, for screenshots of the Lock Screen and the Dynamic Island.
+        if CommandLine.arguments.contains("-workActivity") {
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                _ = try? Activity.request(attributes: WorkActivityAttributes(), content: .init(state: .init(status: "Reading the three boiler quotes", started: .now.addingTimeInterval(-187)), staleDate: nil))
+            }
+        }
         if CommandLine.arguments.contains("-callActivity") {
             Task {
                 try? await Task.sleep(for: .seconds(1))   // after the clean-up above
@@ -41,6 +56,11 @@ struct OttoApp: App {
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
                 // The widgets: Otto's thread, the walkie-talkie, or an approval put off with Later.
                 if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval"].contains(door) { Doors.open(door); return }
+                // A pairing link from the Camera's QR banner, AirDrop or a message. Anyone can make one, so it is
+                // only held here: onboarding and the main screen each ask, naming the Mac, before any of it is used.
+                if let link = PairingLink(url.absoluteString) { PairInbox.shared.link = link; return }
+                // A bare otto:// (what the Mac's Bark alerts open): Otto's own thread, where a waiting approval shows.
+                if url.scheme == "otto", (url.host ?? "").isEmpty, url.query() == nil { Doors.open("chat"); return }
                 // Meta AI comes back here after connecting the glasses; anything else isn't the SDK's.
                 guard url.query()?.contains("metaWearablesAction") == true else { return }
                 Task { _ = try? await Wearables.shared.handleUrl(url) }
@@ -63,7 +83,8 @@ struct OttoApp: App {
         switch door {
         case "walkie": WalkieLauncher.shared.open = true
         case "call": CallLauncher.shared.start()
-        case "approval": if let w = store.waitingApproval { store.reopenApproval(w.id) }
+        // One put off with Later comes back; one not yet answered is already up, over whatever is on screen.
+        case "approval": if store.shownApproval == nil, let w = store.waitingApproval { store.reopenApproval(w.id) }
         default: break
         }
     }
@@ -80,33 +101,29 @@ private enum PipRootSwitch {
 private struct MainRoot: View {
     @State private var store = OttoStore.shared
     @Environment(\.scenePhase) private var phase
-    /// Offline at launch: stop waiting on the connection and open the chat. 12s, not less: a phone
-    /// reaching the Mac through the tunnel can take several seconds, and that is still loading.
-    @State private var gaveUp = false
-    /// Up until the Mac answers (or `gaveUp`). The saved thread is read from disk at once and laid out
-    /// underneath, so it's all there when the splash fades.
+    /// Up for one fade at launch. The thread is laid out underneath from the first frame: the saved one is read
+    /// from disk at once, and an empty one says it's still loading and takes a message meanwhile (EmptyChat).
+    /// Nothing here waits for the Mac.
     @State private var splashing = true
-
-    private var ready: Bool { store.connected || !store.backend.isLive || gaveUp }
+    /// The app has been in the background since it was last in front (not merely inactive).
+    @State private var wasBackground = false
+    /// How a pairing link's Connect went, said once the Mac has answered (or hasn't).
+    @State private var paired: (title: String, message: String)?
 
     var body: some View {
         // A ZStack, not a Group: a Group hands its modifiers to whichever child is showing, so the
         // splash timer, the overlay and store.start() were all restarted when the content swapped in.
         ZStack {
-            if !ready {
-                Color(.systemBackground).task { try? await Task.sleep(for: .seconds(12)); gaveUp = true }
+            // Up under the status bar: the header's scroll-edge blur then fades the thread out at the
+            // screen's edge. Stopped at the safe area, the blurred bubbles were cut off there in a band.
+            if PipRootSwitch.faces {
+                #if DEBUG
+                FaceGrid()
+                #endif
+            } else if store.pips.active {
+                PipRoot(store: store)
             } else {
-                // Up under the status bar: the header's scroll-edge blur then fades the thread out at the
-                // screen's edge. Stopped at the safe area, the blurred bubbles were cut off there in a band.
-                if PipRootSwitch.faces {
-                    #if DEBUG
-                    FaceGrid()
-                    #endif
-                } else if store.pips.active {
-                    PipRoot(store: store)
-                } else {
-                    ChatScreen(store: store).ignoresSafeArea(.keyboard).ignoresSafeArea(.container, edges: .top)
-                }
+                ChatScreen(store: store).ignoresSafeArea(.keyboard).ignoresSafeArea(.container, edges: .top)
             }
         }
             // Over the content, so it is already laid out underneath when the splash fades.
@@ -115,18 +132,41 @@ private struct MainRoot: View {
                 #if DEBUG
                 if CommandLine.arguments.contains("-holdSplash") { return }   // screenshots: the splash stays up
                 #endif
-                do { while !ready { try await Task.sleep(for: .milliseconds(100)) } }
-                catch { return }   // cancelled: leave the splash to whoever runs next
                 withAnimation(.easeOut(duration: 0.25)) { splashing = false }
             }
+            // (An approval's sheet goes up from ApprovalPresenter, over whatever is on top.)
+            // A pairing link opened once the app is set up: named and confirmed before it replaces the Mac. After an
+            // approval's sheet, never at the same time: two presentations from one place and neither shows.
+            .alert(PairInbox.shared.link?.question ?? "", isPresented: Binding(get: { PairInbox.shared.link != nil && store.shownApproval == nil }, set: { if !$0 { PairInbox.shared.link = nil } }),
+                   presenting: PairInbox.shared.link) { link in
+                // Nothing the link carries is kept until that Mac has taken its token.
+                Button("Connect") {
+                    Task {
+                        switch await link.problem() {
+                        case nil: link.save(); paired = ("Connected to \(link.host)", "Quit and reopen Otto to switch to it.")
+                        case .refused?: paired = ("Not connected", "\(link.host) didn’t accept this link’s token, so nothing was changed. Make a new link on your Mac.")
+                        case let problem?: paired = ("Not connected", "Nothing was changed. \(problem == .unreachable ? "Can’t reach \(link.host). Check it’s awake and on Tailscale." : problem.message)")   // .notOtto among them: a page that answered 200 isn't a Mac to pair with
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { link in
+                Text("\(link.consequence) It replaces the Mac you’re paired with, from the next time you quit and reopen the app.")
+            }
+            .alert(paired?.title ?? "", isPresented: Binding(get: { paired != nil }, set: { if !$0 { paired = nil } })) {
+                Button("OK") {}
+            } message: { Text(paired?.message ?? "") }
             .environment(store)
             // Notifications are asked for once, in onboarding, where "Not now" stays not now.
             .task { await store.start() }
             .onChange(of: phase, initial: true) { _, p in
                 if store.foreground && p != .active { store.pips.leftApp() }
                 store.foreground = p == .active
-                if p == .active { store.sendShared(); Notifier.clearAll(); store.resync() }
-                if p == .background { store.flush(); Notifier.scheduleRefresh() }
+                // The socket is only pinged after a real stay in the background, where iOS may have frozen it. A
+                // Face ID prompt also takes the app out of .active and back: a 2 s ping there shared the socket with
+                // the approval's own ack, and on a slow link could cut a healthy connection mid-answer.
+                if p == .active { store.sendShared(); Notifier.clearAll(); store.resync(probe: wasBackground); wasBackground = false; ApprovalPresenter.shared.sync(store) }
+                if p == .background { wasBackground = true; store.flush(); Notifier.scheduleRefresh() }
                 Grace.update(background: p == .background)
                 Keepalive.update(background: p == .background)
             }
@@ -182,19 +222,56 @@ final class OttoStore {
     /// it comes from; the picture is decoded once here, not on every pass of the thread.
     var browser: LiveBrowser?
     /// Approval screens waiting on you, newest last; `Later` moves one into the pill over the composer.
-    var approvals: [ApprovalRequest] = []
-    var hiddenApprovals: Set<String> = []
+    var approvals: [ApprovalRequest] = [] { didSet { ApprovalPresenter.shared.sync(self) } }
+    var hiddenApprovals: Set<String> = [] { didSet { ApprovalPresenter.shared.sync(self) } }
     /// A code that just came in, open in its drawer (OTP.swift); the chip in its bubble reopens it.
     var otpDrawer: Message? = nil
     var shownApproval: ApprovalRequest? { approvals.last { !hiddenApprovals.contains($0.id) } }
     /// The newest one put off with Later, still live on the Mac: the pill that brings it back.
     var waitingApproval: ApprovalRequest? { approvals.last { hiddenApprovals.contains($0.id) } }
-    /// Decisions sent without an answer, by approval: only the same one may be sent again.
-    var unconfirmedApprovals: [String: Bool] = [:]
+    /// Decisions sent without an answer, by approval: only the same one may be sent again. Kept across a
+    /// relaunch: the app killed after a lost ack must not come back offering the other answer for a decision
+    /// that may already have landed. Never resent on its own; dropped once the Mac no longer lists the approval.
+    var unconfirmedApprovals: [String: ApprovalDecision] = OttoStore.restoreUnconfirmed() {
+        didSet {
+            UserDefaults.standard.set(try? JSONEncoder().encode(unconfirmedApprovals), forKey: "otto.unconfirmedApprovals")
+            UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: "otto.unconfirmedApprovalsAt")
+        }
+    }
+    /// What was saved, unless it's over an hour old: the Mac holds an approval for half an hour, so by then
+    /// every one of them is gone and nothing here can still bind (a server without the pending list never prunes).
+    /// At launch: what was saved, with a decision that was still being sent folded in under the same hour's
+    /// limit (its own record is then dropped, so it can't be restored launch after launch).
+    private static func restoreUnconfirmed() -> [String: ApprovalDecision] {
+        let d = UserDefaults.standard
+        let all = savedUnconfirmed()
+        if d.object(forKey: "otto.sendingApproval") != nil {
+            d.set(try? JSONEncoder().encode(all), forKey: "otto.unconfirmedApprovals")
+            d.set(Date.now.timeIntervalSince1970, forKey: "otto.unconfirmedApprovalsAt")
+            d.removeObject(forKey: "otto.sendingApproval")
+        }
+        return all
+    }
+
+    nonisolated static func savedUnconfirmed(now: Date = .now) -> [String: ApprovalDecision] {
+        let d = UserDefaults.standard
+        func read(_ key: String) -> [String: ApprovalDecision] { d.data(forKey: key).flatMap { try? JSONDecoder().decode([String: ApprovalDecision].self, from: $0) } ?? [:] }
+        // One still marked as being sent means the app died waiting for its ack: unconfirmed, as if no answer had come.
+        let sending = read("otto.sendingApproval")
+        guard now.timeIntervalSince1970 - d.double(forKey: "otto.unconfirmedApprovalsAt") < 3600 else { return sending }
+        return read("otto.unconfirmedApprovals").merging(sending) { kept, _ in kept }
+    }
     /// The last one that lapsed on the Mac before it was answered: the pill says so until dismissed.
     var lapsedApproval: ApprovalRequest?
+    /// Words for Otto's composer from elsewhere in the app, taken by it once (ChatView).
+    var prefill: String?
     /// Memories you asked Otto to forget from their page, marked on their rows while they're still listed.
     var askedToForget: Set<String> = []
+    /// Memories the Mac forgot at your word from their page: off the list at once, ahead of its next index.
+    /// Kept across launches, or a relaunch before the index is rebuilt would list one again as if it were still known.
+    var forgotten = Set(UserDefaults.standard.stringArray(forKey: "otto.forgotten") ?? []) {
+        didSet { UserDefaults.standard.set(Array(forgotten), forKey: "otto.forgotten") }
+    }
     /// What the widget was last given, so the group's defaults are written only when it changes.
     @ObservationIgnored private var widgetAsk = WidgetData.ask
     /// The server sends "typing" frames; until one arrives (an older server), the app guesses.
@@ -214,6 +291,9 @@ final class OttoStore {
     var animated = false
     /// Otto sleeps while the server is unreachable.
     var asleep = false
+    /// This phone has no network at all: then that's what's wrong, not the Mac.
+    var noNetwork = false
+    @ObservationIgnored private let network: NWPathMonitor = { let m = NWPathMonitor(); m.start(queue: .global(qos: .utility)); return m }()
     var connected = false
     /// The message a swipe picked to answer; the composer shows it until you send or cancel.
     var replyingTo: Message.ID?
@@ -235,10 +315,13 @@ final class OttoStore {
     func jobAction(_ verb: JobVerb, id: String, text: String?) async -> String? {
         switch await backend.jobAction(verb, id: id, text: text) {
         case .done(let job):
+            UINotificationFeedbackGenerator().notificationOccurred(.success)   // felt as well as seen: the Mac took it
             if let job { jobs.put(job) }
             await refreshJobs()
             return nil
-        case .failed(let why): return why
+        case .failed(let why):
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            return why
         }
     }
 
@@ -341,11 +424,12 @@ final class OttoStore {
     private func tick() async {
         var seen = backend.connections
         var n = 0
+        var launchGrace = 5   // ticks, so seconds
         while !Task.isCancelled {
             n += 1
             var live = backend is MockBackend || backend.isLive
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-offline") { live = false }   // the disconnected UI, in the simulator
+            if ProcessInfo.processInfo.arguments.contains("-offline") { live = false; launchGrace = 0 }   // the disconnected UI, in the simulator
             #endif
             // A reconnect is when replies sent into a socket iOS had frozen go missing; catch up.
             // Counted, not sampled: the drop usually lasts under a second and a 1s tick misses it.
@@ -353,11 +437,13 @@ final class OttoStore {
                 seen = backend.connections
                 if animated { Task { await catchUp(notify: !foreground) } }
                 Task { await resendPending() }
+                Task { await syncApprovals() }   // the connect brings the pending ones; this also drops the ones settled meanwhile
                 Task { await reportHealth("connect") }
                 Task { await pips.reconnected() }
             }
             expireVoiceWaits()
             markUndelivered()
+            ApprovalPresenter.shared.sync(self)   // again each second: a sheet that couldn't go up mid-transition goes up now
             // An approval past its time is gone on the Mac too: off the screen, unless it's showing its receipt.
             let lapsed = { (a: ApprovalRequest) in !self.keptApprovals.contains(a.id) && (LiveBackend.date(a.expires).map { $0 < .now } ?? false) }
             if let gone = approvals.last(where: lapsed) {
@@ -366,19 +452,64 @@ final class OttoStore {
                 if unconfirmedApprovals[gone.id] == nil { lapsedApproval = gone }
                 approvals.removeAll(where: lapsed)
             }
-            // The Home Screen widget's line: the approval waiting on you, until the Mac would drop it.
-            let ask = (shownApproval ?? waitingApproval).flatMap { a in LiveBackend.date(a.expires).map { WidgetData.Ask(text: a.ask, expires: $0) } }
-            if ask != widgetAsk {
-                widgetAsk = ask
-                WidgetData.ask = ask
-                WidgetCenter.shared.reloadTimelines(ofKind: "dev.otto.chat")
-            }
+            syncWidget()
+            // Work that takes a while goes on the Lock Screen (WorkActivity): a reply in the making, or a coding job.
+            let job = jobs.byID.values.filter(\.working).max { ($0.startedAt ?? "") < ($1.startedAt ?? "") }
+            let typing = ottoStatus.flatMap { $0.isEmpty ? nil : $0 } ?? "Thinking"
+            WorkActivity.sync(status: ottoTyping ? typing : job.map { "Coding: \($0.title.isEmpty ? "a job" : $0.title)" },
+                              needsYou: !approvals.isEmpty || jobs.byID.values.contains(where: \.needsYou),
+                              foreground: foreground, alive: foreground || Keepalive.enabled)
             // An ack that never came on a socket that still looks fine: try again every 15s.
             if live && n % 15 == 0 { Task { await resendPending() } }
             if live != connected { connected = live }
-            if !live != asleep { asleep = !live }
+            // Asleep means out of reach. At launch the socket is still on its way, so Otto gets a few seconds
+            // to answer before the face sleeps and the header says so; once it has been up, a drop shows at once.
+            let out = !live && (seen > 0 || n > launchGrace)
+            if out != asleep { asleep = out }
+            var cut = network.currentPath.status == .unsatisfied
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-noNetwork") { cut = true }   // the line that says so, in the simulator
+            #endif
+            if cut != noNetwork { noNetwork = cut }
             try? await Task.sleep(for: .seconds(1))
         }
+    }
+
+    /// The Home Screen widget's line: the approval waiting on you, until the Mac would drop it.
+    private func syncWidget() {
+        let ask = (shownApproval ?? waitingApproval).flatMap { a in LiveBackend.date(a.expires).map { WidgetData.Ask(text: a.ask, expires: $0) } }
+        guard ask != widgetAsk else { return }
+        widgetAsk = ask
+        WidgetData.ask = ask
+        WidgetCenter.shared.reloadTimelines(ofKind: "dev.otto.chat")
+    }
+
+    /// The Mac's own list of what's pending, for a phone whose socket was frozen or closed when an approval
+    /// was raised, answered on the Mac or dropped: the sheet, the pill and the widget then say what's true
+    /// without waiting out the half hour. No answer (out of reach, or a server without the route) changes nothing.
+    func syncApprovals(background: Bool = false) async {
+        let asked = Set(approvals.map(\.id))
+        guard let pending = await backend.pendingApprovals(background: background) else { return }
+        // Only what was here when the Mac was asked can be called gone: one that came in over the socket
+        // while the answer was on its way is newer than the list.
+        let since = Set(approvals.map(\.id)).subtracting(asked)
+        approvals = Self.reconciled(approvals, with: pending, keeping: keptApprovals.union(since), decided: decidedApprovals)
+        unconfirmedApprovals = unconfirmedApprovals.filter { id, _ in approvals.contains { $0.id == id } }
+        // One the Mac no longer lists takes its banner with it, as an approval_done does.
+        let gone = alertedApprovals.filter { id in !approvals.contains { $0.id == id } }
+        alertedApprovals.subtract(gone); Notifier.clear(gone.map(Notifier.approvalID))
+        if !pending.isEmpty { lapsedApproval = nil }
+        syncWidget()   // here too: a background refresh may run with no scene, so no tick
+    }
+
+    /// What the phone holds once the Mac has said what's pending: those, in the order the phone had them and
+    /// then the new ones, plus any kept on screen (a receipt). One this phone has answered never comes back
+    /// from a list that was read before the answer landed.
+    nonisolated static func reconciled(_ held: [ApprovalRequest], with pending: [ApprovalRequest], keeping kept: Set<String>, decided: Set<String>) -> [ApprovalRequest] {
+        let live = Set(pending.map(\.id)), had = Set(held.map(\.id))
+        // One the Mac still lists is taken as the Mac lists it now (its copy is the newer); one kept for its receipt stays as it is.
+        let fresh = Dictionary(pending.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return held.compactMap { kept.contains($0.id) ? $0 : fresh[$0.id] } + pending.filter { !had.contains($0.id) && !decided.contains($0.id) }
     }
 
     func start() async {
@@ -441,8 +572,9 @@ final class OttoStore {
                                notes: ["No refunds on cinema tickets", "Seats held until 16:14"], test: nil))]
         }
         // `-approvalDemo`: a change to Otto's core waiting on Approve.
+        // With `-paymentDemo` too, both wait: the pill then says how many.
         if ProcessInfo.processInfo.arguments.contains("-approvalDemo") {
-            approvals = [ApprovalRequest(id: "demo-change", title: "Change Otto’s core",
+            approvals = (ProcessInfo.processInfo.arguments.contains("-paymentDemo") ? approvals : []) + [ApprovalRequest(id: "demo-change", title: "Change Otto’s core",
                 summary: "Adds a Sunday digest of the links you saved that week, one message, normal priority.",
                 files: [.init(path: "otto/digest.ts", tier: "guarded", why: "the new digest",
                               lines: ["+export async function sundayDigest() {", "+  const links = await savedThisWeek()", "+  if (links.length) await send(digest(links))"]),
@@ -459,6 +591,34 @@ final class OttoStore {
                             .init(path: "~/.otto/memory/home/boiler-2025.md", tier: "free", why: "deleted, boiler-2026 replaces it")],
                     branch: nil, stat: "--- home/MEMORY.md\n- [Boiler service 2025](boiler-2025.md): the yearly check, the landlord books it\n- [Gym hours](gym-hours.md): closed since March\n--- home/boiler-2025.md (deleted; boiler-2026 replaces it)\n- The boiler is serviced every November.\n- The landlord books the engineer through the building office, which only takes requests by email and wants the flat number, the serial number from the sticker inside the boiler door, two mornings that work, and a phone number the engineer can ring from the street, because the entry phone on this stair has been broken since the spring before last.", expires: demoExpiry)]
             }
+        }
+        // `-approvalDemo scopes`: an everyday ask the Mac will take a wider yes for (`-approvalScope always` opens on it).
+        // `scopes-worst`: the longest rule a server might name, for the picker's line.
+        if let demo = UserDefaults.standard.string(forKey: "approvalDemo"), demo.hasPrefix("scopes") {
+            approvals = [ApprovalRequest(id: "demo-scopes", title: "Add 3 events to your calendar",
+                summary: "Adds the three parent meetings from Marta’s email to your Home calendar: 18 Nov, 25 Nov and 2 Dec, each at 16:00.",
+                files: [], branch: nil, stat: nil, expires: demoExpiry, scopes: ["task", "always"],
+                rule: demo == "scopes-worst" ? "adding, moving and deleting events on every calendar you own, shared ones too" : "adding events to your calendar")]
+        }
+        // `-approvalDemo draft`: an email Otto wants to send in your name, every recipient on the sheet.
+        // `-approvalDemo draft-worst`: fourteen recipients (a one-word name, an unbreakable address), no subject,
+        // a channel this build has no name for, and a body with a long link.
+        if UserDefaults.standard.string(forKey: "approvalDemo") == "draft-worst" {
+            approvals = [ApprovalRequest(id: "demo-draft-worst", title: "Send to the whole street group", summary: "",
+                files: [], branch: nil, stat: nil, expires: demoExpiry, scopes: ["task", "always"], rule: "messages to the street group",
+                draft: .init(channel: "signal",
+                             to: ["Jo", "Aleksandra Wiśniewska-Kowalczyk <aleksandra.wisniewska-kowalczyk@uniwersytet.example.pl>",
+                                  "bartholomew.fitzgerald@northwind-industries-holdings.example.com"] + (4...14).map { "Neighbour \($0) <n\($0)@via-roma.example>" },
+                             body: "The water is off on Thursday from 9 to 13. The notice is at https://comune.example.it/avvisi/2026/11/interruzione-idrica-via-roma-dal-civico-1-al-civico-48?lang=it and I’ll put a copy in every letterbox tonight.\n\nSam"))]
+        }
+        if UserDefaults.standard.string(forKey: "approvalDemo") == "draft" {
+            approvals = [ApprovalRequest(id: "demo-draft", title: "Send email", summary: "You asked me this morning to tell the parents once the hall was booked.",
+                files: [], branch: nil, stat: nil, expires: demoExpiry,
+                draft: .init(channel: "email", to: ["Marta Bianchi <marta@studiobianchi.example>", "Luca Ferri <luca.ferri@example.com>", "parents-3b@scuola.example"],
+                             cc: ["segreteria@scuola.example"], subject: "Parent meetings: hall booked, three dates",
+                             body: "Hi all,\n\nThe hall is booked for the three parent meetings: 18 Nov, 25 Nov and 2 Dec, each at 16:00. Marta has the keys.\n\nSee you there,\nSam",
+                             attachments: ["Hall booking.pdf"]),
+                notes: ["parents-3b@scuola.example is a list: everyone on it gets this."])]
         }
         // `-approvalWorst`: a payment with a long payee and a five-figure total, for the pill's worst case.
         if ProcessInfo.processInfo.arguments.contains("-approvalWorst") {
@@ -545,7 +705,8 @@ final class OttoStore {
             messages = [
                 Message(from: .otto, text: "morning. design review at 14:00, then you’re free until 16:30. enel bill, €112, due friday. and it’s thursday, so: the boiler"),
                 Message(from: .me, text: "can you tell the landlord tuesday morning works for the boiler guy", read: true),
-                Message(from: .otto, text: "draft:\n\"Hi, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks!\"",
+                // Named, as the Mac should always send it; `-draftBare` is one that isn't, for the line that says so.
+                Message(from: .otto, text: "\(ProcessInfo.processInfo.arguments.contains("-draftBare") ? "draft" : "draft to Luca (email)"):\n\"Hi, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks!\"",
                         buttons: [ActionButton(label: "send ✓", data: "send"), ActionButton(label: "discard", data: "discard")]),
                 Message(id: UUID(uuidString: "0D0D0D0D-0000-4000-8000-000000000001")!, from: .me, text: "remind me to call the plumber when I’m home, and is tuesday free for the dentist", isVoice: true, read: true),
                 Message(from: .otto, text: "plumber reminder set for when you’re home. tuesday after 16:00 is free.", isVoice: true,
@@ -661,6 +822,16 @@ final class OttoStore {
                 if let m = messages.last(where: { !$0.buttons.isEmpty }), let b = m.buttons.first { tap(b, on: m.id) }
             }
         }
+        #if DEBUG
+        // `-callRow`: a call with Otto that ended a moment ago, as its line at the end of the thread.
+        if ProcessInfo.processInfo.arguments.contains("-callRow") {
+            logCall(CallRecord(seconds: 192, lines: [
+                .init(otto: false, text: "Hey, did the boiler man confirm for Tuesday?"),
+                .init(otto: true, text: "He did. Between nine and eleven, and he’ll ring the bell twice."),
+                .init(otto: false, text: "Good. Tell the landlord, and move the dentist to five."),
+                .init(otto: true, text: "The landlord has the draft from this morning; I’ll send it. The dentist has five on Tuesday, so that’s moved.")]))
+        }
+        #endif
         // `-scriptDemo`: a scripted session for the launch film; see scriptDemo().
         if ProcessInfo.processInfo.arguments.contains("-scriptDemo") { Task { await scriptDemo() } }
         // `-emptyThread`: Otto's thread with nothing in it, over whatever a fixture seeded.
@@ -686,7 +857,10 @@ final class OttoStore {
             let caption = kind == "private" ? "accounts.example.com · signing in"
                 : kind == "long" ? "shop.example-hardware.co.uk · compares the three boiler service plans and picks the cheapest annual"
                 : "boilercare.example.com · opens the service booking page"
-            browser = LiveBrowser(tile: BrowserTile(image: shot?.jpegData(compressionQuality: 0.8), caption: caption, url: "https://example.com/", ts: 1), shot: shot)
+            // `-browserTile control`: a page the Mac will hand over; with `-browserHold`, already in your hands.
+            browser = LiveBrowser(tile: BrowserTile(image: shot?.jpegData(compressionQuality: 0.8), caption: kind == "control" ? "accounts.example.com · stuck at the sign-in check" : caption,
+                                                    url: "https://example.com/", ts: 1, control: kind == "control",
+                                                    held: kind == "control" && ProcessInfo.processInfo.arguments.contains("-browserHold")), shot: shot)
         }
         // `-openTodos`: two open to-dos for the pill over the composer (`-todosOpen` opens it);
         // `-openTodos one` just one, `-openTodos many` the server's cap of 30, the one in progress at its 120 characters.
@@ -742,9 +916,29 @@ final class OttoStore {
         Task {
             for await u in backend.approvalUpdates {
                 switch u {
-                case .show(let a): if !approvals.contains(where: { $0.id == a.id }) { approvals.append(a); lapsedApproval = nil }
+                case .show(let a):
+                    // One already held, sent again (a reconnect): the Mac's copy is the newer, unless it's up for its receipt.
+                    if let i = approvals.firstIndex(where: { $0.id == a.id }) {
+                        if !keptApprovals.contains(a.id), approvals[i] != a { approvals[i] = a }
+                    } else {
+                        approvals.append(a); lapsedApproval = nil
+                        // When the Mac leaves the alert to the app: in front, the sheet is the alert; in the background
+                        // (keep-awake holds the socket) it's a banner, if iOS will show one. Only then is the Mac told.
+                        // Untold (notifications off, the app frozen), it sends its own push, so one always arrives.
+                        // In front it's told from the sheet itself, once that is on screen (sawApproval): a call, the
+                        // card or another sheet can be in its way, and then the Mac's push must still come.
+                        // Background only, not merely inactive (the app switcher, Notification Center pulled down): there
+                        // iOS shows no banner for an app that is still in front, and the Mac would be told of an alert nobody got.
+                        if backend.alertsApprovals, UIApplication.shared.applicationState == .background {
+                            Task {
+                                if await Notifier.shared.post(approval: a) { alertedApprovals.insert(a.id); await backend.alerted(approval: a.id) }
+                            }
+                        }
+                    }
                 // A paid payment stays for its receipt even though the Mac has settled it.
-                case .done(let id): if !keptApprovals.contains(id) { approvals.removeAll { $0.id == id } }
+                case .done(let id):
+                    if !keptApprovals.contains(id) { approvals.removeAll { $0.id == id } }
+                    if alertedApprovals.remove(id) != nil { Notifier.clear([Notifier.approvalID(id)]) }
                 }
             }
         }
@@ -792,6 +986,10 @@ final class OttoStore {
         }
         for await m in backend.incoming {
             if !serverTyping && m.from == .otto { ottoTyping = false }
+            // VoiceOver: a reply that lands while the app is in front is read out, as Messages reads a new message.
+            if foreground, animated, m.from == .otto, !m.text.isEmpty, UIAccessibility.isVoiceOverRunning {
+                AccessibilityNotification.Announcement("Otto: \(m.text.prefix(300))").post()
+            }
             // A reply held for a closed app is in /app/history too: a fresh launch reads
             // history first, then the socket flushes the held copy.
             if let i = messages.firstIndex(where: { $0.wireID == m.wireID }) {
@@ -926,7 +1124,7 @@ final class OttoStore {
         await type(ask); sendTyped(ask)
         await wait(0.5)
         await think(["Reading your mail", "Finding the landlord’s thread", "Writing"])
-        say("draft:\n\"Hi, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks!\"",
+        say("draft to Luca (email):\n\"Hi, Tuesday morning works for the boiler service. I’ll be home from 9. Thanks!\"",
             buttons: [ActionButton(label: "send ✓", data: "send"), ActionButton(label: "discard", data: "discard")])
         demoFocus = false
         await wait(2.8)
@@ -959,6 +1157,7 @@ final class OttoStore {
     func backgroundSync() async {
         UserDefaults.standard.set(Date(), forKey: "lastRefresh")
         await catchUp(notify: true, background: true)
+        await syncApprovals(background: true)
         await pips.backgroundCatchUp()
         await reportHealth("refresh")
     }
@@ -986,7 +1185,7 @@ final class OttoStore {
     /// the fact that the server has it after all.
     /// Back in front: a socket iOS froze in the background looks alive but dropped what was sent into it
     /// (a tapback, an edit, a reply), and no reconnect means no catch-up. One history read fills it in.
-    func resync() { Task { await catchUp(notify: false) } }
+    func resync(probe: Bool = true) { Task { if probe { await backend.probe() }; await catchUp(notify: false) }; Task { await syncApprovals() } }
 
     /// Otto deleted these (a live "delete" frame, or history on reconnect): out of the thread and the
     /// saved copy, with what pointed at them. An id that isn't here changes nothing.
@@ -1170,17 +1369,58 @@ final class OttoStore {
         for m in messages where m.pending == true && !(m.tap != nil && m.date < stale) { await deliver(m.id) }
     }
 
-    func hideApproval(_ id: String) { hiddenApprovals.insert(id) }
+    /// A call with Otto that just ended: one line in the thread, with what was said behind it (CallRecord).
+    func logCall(_ record: CallRecord) {
+        var line = Message(from: .terminal, text: "Call with Otto, \(record.length)", date: .now, serverID: "call|\(UUID().uuidString)")
+        line.call = record
+        messages.append(line)
+    }
+
+    /// Asks the Mac to end the turn Otto is on. It says so in the thread; the bubble goes when its typing does.
+    func stopTurn() async {
+        stopping = true; defer { stopping = false }
+        let ok = await backend.stopTurn()
+        UINotificationFeedbackGenerator().notificationOccurred(ok ? .success : .error)
+        stopUnconfirmed = !ok
+    }
+    /// The Mac didn't confirm a Stop: said in an alert with Try Again, since Otto may still be working.
+    var stopUnconfirmed = false
+    /// A Stop is on its way to the Mac: the bubble says so until the answer (or the wait for one) is over.
+    var stopping = false
+
+    /// An approval's sheet is on screen: when the Mac leaves the alert to the app, that is the alert, and only now
+    /// is the Mac told (within its 5 s, or its own push goes out as well, which is the safe way to be late).
+    func sawApproval(_ id: String) {
+        guard backend.alertsApprovals, sawApprovals.insert(id).inserted else { return }
+        // The Mac's push would have chimed; the sheet that stands in for it shouldn't arrive in silence. The
+        // system's message tone, or a buzz with the phone on silent.
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        AudioServicesPlayAlertSound(1007)
+        Task { await backend.alerted(approval: id) }
+    }
+
+    @ObservationIgnored private var sawApprovals: Set<String> = []
+
+    func hideApproval(_ id: String) { hiddenApprovals.insert(id); putOff.insert(id) }
+    /// Approvals that were ever put off with Later (see the sheet's `wider`).
+    private(set) var putOff: Set<String> = []
     func reopenApproval(_ id: String) { hiddenApprovals.remove(id) }
 
     /// `keep`: the decision goes out, but the sheet stays up (a payment's receipt) until `closeApproval`.
     /// True once the Mac has the decision. False leaves the approval up: it isn't queued for later,
     /// since a payment approved now shouldn't go through half an hour on, and the Mac shows it again
     /// on the next connect while it's still live.
-    func decide(_ id: String, approve: Bool, keep: Bool = false) async -> ApprovalOutcome {
+    func decide(_ id: String, approve: Bool, scope: ApprovalScope = .once, keep: Bool = false) async -> ApprovalOutcome {
         if keep { keptApprovals.insert(id) }   // before the send: the Mac's "done" can beat its reply
-        let outcome = await backend.decide(approval: id, approve: approve)
+        // On disk before it's sent: killed while the ack is awaited, the app comes back holding to this answer
+        // (savedUnconfirmed), not offering the other one for a decision the Mac may already have.
+        let decision = ApprovalDecision(approve: approve, scope: scope)
+        UserDefaults.standard.set(try? JSONEncoder().encode([id: decision]), forKey: "otto.sendingApproval")
+        let outcome = await backend.decide(approval: id, approve: approve, scope: scope)
+        if outcome == .unknown { unconfirmedApprovals[id] = decision }   // kept (and saved) before the in-flight record goes
+        UserDefaults.standard.removeObject(forKey: "otto.sendingApproval")
         if outcome != .done { keptApprovals.remove(id) }
+        if outcome == .done || outcome == .gone { decidedApprovals.insert(id) }
         if outcome == .gone || (outcome == .done && !keep) { approvals.removeAll { $0.id == id } }
         return outcome
     }
@@ -1194,6 +1434,10 @@ final class OttoStore {
 
     func closeApproval(_ id: String) { keptApprovals.remove(id); approvals.removeAll { $0.id == id } }
     @ObservationIgnored private var keptApprovals: Set<String> = []
+    /// Approvals this phone posted its own banner for, so only those have one to take down.
+    @ObservationIgnored private var alertedApprovals: Set<String> = []
+    /// Answered from this phone (or found gone): never shown again by a list of pending ones read just before.
+    @ObservationIgnored private var decidedApprovals: Set<String> = []
 
     /// Downscaled to 1600px so the upload is quick and the saved thread stays small.
     static func jpeg(_ image: UIImage) -> Data? {

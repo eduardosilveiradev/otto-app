@@ -634,7 +634,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         // A timed-out ask may still have landed, and then its answer goes to the app.
         case .timedOut: "Otto took too long. It may answer in the app."
         case .server(let code): "Otto's server hit an error (\(code))."
-        case .notSetUp, .refused: problem.message
+        case .notSetUp, .refused, .notOtto: problem.message
         }
         model.otto = .failed(why, retry: problem != .refused)
     }

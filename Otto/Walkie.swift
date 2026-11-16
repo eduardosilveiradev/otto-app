@@ -22,7 +22,7 @@ struct OpenWalkie: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        WalkieLauncher.shared.open = true
+        Doors.open("walkie")   // through the door that brings Otto's thread up first: the walkie's cover lives there, not on the Chats list
         return .result()
     }
 }
@@ -100,9 +100,12 @@ struct WalkieView: View {
             Group {
                 if stuck {
                     // The thread's own words for an unsent message, and the same way on.
-                    Button(action: retry) {
-                        (Text(sent?.pending == true ? "Not delivered · " : "Otto didn’t answer · ").foregroundStyle(Color.redInk)
-                         + Text("Try again").foregroundStyle(Color.actionInk)).hitSlop()
+                    // Not delivered: the same note again (the thread's retry, so no second copy). Delivered and
+                    // unanswered: Otto has it and may be acting on it, so the way on is the chat, not a second send.
+                    let undelivered = sent?.pending == true
+                    Button { if undelivered { retry() } else { dismiss() } } label: {
+                        (Text(undelivered ? "Not delivered · " : "No answer yet · ").foregroundStyle(Color.redInk)
+                         + Text(undelivered ? "Try again" : "Check the chat").foregroundStyle(Color.actionInk)).hitSlop()
                     }
                     .buttonStyle(.plain)
                 } else {
@@ -133,7 +136,7 @@ struct WalkieView: View {
             }
             #endif
         }
-        // "Thinking" gives up after a minute, and the note is offered again.
+        // "Thinking" gives up after a minute: the caption then points at the chat, or offers the note again if it never left.
         .task(id: sentAt) {
             guard sentAt != nil else { return }
             try? await Task.sleep(for: .seconds(60))
@@ -156,8 +159,10 @@ struct WalkieView: View {
         .onChange(of: store.messages.last?.id) { pickUpReply() }
         .onChange(of: store.messages.last?.audio?.id) { pickUpReply() }
         .onChange(of: store.messages.last?.isVoice) { pickUpReply() }
-        .sensoryFeedback(.impact(weight: .medium), trigger: holding)
-        .sensoryFeedback(.success, trigger: reply?.id)
+        // Felt when the recording starts, not when the finger lands: a press the microphone refused gives none.
+        .sensoryFeedback(.impact(weight: .medium), trigger: recorder.started != nil)
+        .micProblem(recorder)
+        .sensoryFeedback(.success, trigger: reply?.id) { _, new in new != nil }   // an answer arriving, not the last one being cleared for the next note
         .sensoryFeedback(.error, trigger: stuck) { _, now in now }   // eyes on the street: felt, not just shown
     }
 
@@ -201,7 +206,7 @@ struct WalkieView: View {
         case .listening: "Let go to send"
         case .thinking: "Otto’s thinking"
         case .speaking: "Otto"
-        case .idle: "Hold to talk"
+        case .idle: store.asleep ? "Your Mac is out of reach. A note goes when it’s back." : "Hold to talk"
         }
     }
 
@@ -229,25 +234,18 @@ struct WalkieView: View {
         note = store.sendVoice(url)
     }
 
-    /// The same note while it's still unsent (the thread's retry, so no second copy); said again
-    /// once it got there and nothing came back.
+    /// The same note again while it's still unsent: the thread's retry, so no second copy.
     private func retry() {
         guard let m = sent else { return }
-        if m.pending == true {
-            store.retry(m.id)
-            gaveUp = false
-            sentAt = .now
-        } else {
-            let copy = URL.temporaryDirectory.appending(path: "\(UUID().uuidString).m4a")
-            guard (try? FileManager.default.copyItem(at: VoiceStore.url(m.id), to: copy)) != nil else { return }
-            send(copy)
-        }
+        store.retry(m.id)
+        gaveUp = false
+        sentAt = .now
     }
 
-    /// The first thing Otto says after the note went up. Plays its voice when it has one;
-    /// a text-only answer is read out on the phone so you never have to look.
+    /// Otto's answer to the note. Plays its voice when it has one; a text-only answer is read out on the
+    /// phone so you never have to look.
     private func pickUpReply() {
-        if let since = sentAt, let m = store.messages.last(where: { $0.from == .otto && $0.date >= since }) {
+        if let since = sentAt, let m = Self.answer(in: store.messages, to: sent?.wireID, since: since) {
             sentAt = nil
             reply = m
         }
@@ -264,6 +262,14 @@ struct WalkieView: View {
         // Otherwise its voice is still on the way: the text goes out first and the clip follows.
     }
 
+    /// Which message answers the note: the one that names it (reply_to) when there is one, else the first thing
+    /// Otto said after it that it wasn't saying anyway. Something sent unprompted (it has a `src`: a reminder,
+    /// a brief) in the meantime is news, not the answer, and isn't read out as one.
+    nonisolated static func answer(in messages: [Message], to note: String?, since: Date) -> Message? {
+        let after = messages.filter { $0.from == .otto && $0.date >= since }
+        return after.first { note != nil && $0.replyTo == note } ?? after.first { $0.src == nil }
+    }
+
     /// Feeds the waveform: your level while you talk, a bouncing trace while Otto talks.
     private func meter() async {
         while !Task.isCancelled {
@@ -271,8 +277,9 @@ struct WalkieView: View {
             switch phase {
             case .listening: v = CGFloat(min(1, recorder.level() * 4))
             case .speaking:
+                // Otto's voice has no level to read, so this trace is drawn, not measured: under Reduce Motion it holds still.
                 let t = Date.now.timeIntervalSinceReferenceDate
-                v = 0.2 + 0.6 * abs(sin(t * 7.3)) * (0.5 + 0.5 * abs(sin(t * 2.1)))
+                v = still ? 0.4 : 0.2 + 0.6 * abs(sin(t * 7.3)) * (0.5 + 0.5 * abs(sin(t * 2.1)))
             default: v = 0
             }
             levels.removeFirst(); levels.append(v)

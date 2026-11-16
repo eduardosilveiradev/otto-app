@@ -1,11 +1,11 @@
 import SwiftUI
+import LocalAuthentication
 import PhotosUI
 import AVFoundation
 import QuickLook
 import PassKit
 import LinkPresentation
 import ThinkingOrbsKit
-import VoiceGlowKit
 
 /// What ChatView, Composer and Row need from a conversation (OttoStore).
 @MainActor protocol ChatThread: AnyObject {
@@ -37,7 +37,7 @@ extension OttoStore: ChatThread {
     var name: String { "Otto" }
     var isOtto: Bool { true }
     var typing: Bool { ottoTyping }
-    var typingStatus: String? { ottoStatus }
+    var typingStatus: String? { stopping ? String(localized: "Stopping…") : ottoStatus }
     var typingTodos: [TodoItem] { ottoTodos }
     var conversationID: String { "app" }
     func send(_ text: String) { send(text, shared: false) }
@@ -62,6 +62,9 @@ struct ChatView: View {
     /// When the "hold for walkie-talkie" hint last showed; it comes back every two months.
     @AppStorage("walkieHintAt") private var walkieHintAt = 0.0
     @State private var walkieHint = false
+    /// "Hold to stop Otto", once ever, on the bubble that carries the menu.
+    @AppStorage("stopHintShown") private var stopHintShown = false
+    @State private var stopHint = false
     /// Asleep for longer than a dropped socket takes to come back (a second or two), so a blip never flashes a line.
     @State private var unreachable = false
     @Environment(\.openURL) private var openURL
@@ -105,6 +108,9 @@ struct ChatView: View {
     private static let page = 60
 
     private var lastMine: Message.ID? { thread.messages.last(where: { $0.from == .me })?.id }
+    /// A message sent from this screen starts out pending; one of yours that came in from elsewhere doesn't.
+    /// (A function, not a closure on the modifier: that chain is at the type-checker's limit.)
+    private func sentFromHere(_ old: Message.ID?, _ new: Message.ID?) -> Bool { thread.messages.last { $0.id == new }?.pending == true }
     /// The message a tapped quote jumped to, lit up for a moment.
     @State private var flashed: Message.ID?
     /// A row is being swiped to reply: the thread holds still under it, like Messages.
@@ -123,6 +129,9 @@ struct ChatView: View {
     /// kept until it closes. Nil until they land. `/app/history` has no query, so this is as far back as search reaches.
     @State private var older: [Message]?
     @State private var olderFailed = false
+    /// The Mac sent as many as were asked for, so there may be older ones search can't see: the results say so.
+    @State private var olderCapped = false
+    private static let searchReach = 500
     @State private var fetching: Task<Void, Never>?
     private var searchWords: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var showingResults: Bool { ui.searching && !searchWords.isEmpty }
@@ -138,16 +147,17 @@ struct ChatView: View {
     }
     private func closeSearch(animated: Bool = true) {
         fetching?.cancel()
-        fetching = nil; older = nil; olderFailed = false; query = ""
+        fetching = nil; older = nil; olderFailed = false; olderCapped = false; query = ""
         let motion: Animation? = still ? .easeOut(duration: 0.2) : .snappy
         withAnimation(animated ? motion : nil) { ui.searching = false }
     }
     private func fetchOlder() {
         olderFailed = false
         fetching = Task {
-            let rows = await store.backend.history(background: false, limit: 500, since: nil)
+            let rows = await store.backend.history(background: false, limit: Self.searchReach, since: nil)
             guard !Task.isCancelled else { return }
             guard let rows else { olderFailed = true; return }
+            olderCapped = rows.count >= Self.searchReach
             let oldest = thread.messages.first?.date ?? .distantFuture
             older = rows.filter { $0.patch == nil && $0.date < oldest }
         }
@@ -257,11 +267,12 @@ struct ChatView: View {
         .overlay {
             if showingResults {
                 SearchResults(hits: hits, query: searchWords, loading: thread.isOtto && older == nil && !olderFailed, failed: olderFailed,
+                              reach: olderCapped ? (older?.count ?? 0) + thread.messages.count : nil,
                               bottomInset: ui.bottomInset,
                               who: { m in m.from == .me || m.from == .terminal ? "You" : row?.memberStates.first { $0.id == m.author }?.name ?? thread.name },
                               retry: fetchOlder, open: show, close: { closeSearch() })
             } else if thread.isOtto && messages.isEmpty && !store.ottoTyping {
-                EmptyChat(asleep: store.asleep, connected: store.connected)
+                EmptyChat(asleep: store.asleep, loading: !store.animated)
             }
         }
         .onChange(of: searchWords) {
@@ -272,7 +283,9 @@ struct ChatView: View {
             ottoTop
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
-        .task { await calls.run(store.backend) }
+        // Started again when the connection comes up: at launch the first try is made before it has, and a failed
+        // first poll otherwise waits out a minute before the next.
+        .task(id: store.connected) { await calls.run(store.backend) }
         .task(id: store.asleep) {
             guard store.asleep else { withAnimation(.easeOut(duration: 0.2)) { unreachable = false }; return }
             do { try await Task.sleep(for: .seconds(3)) } catch { return }
@@ -284,7 +297,7 @@ struct ChatView: View {
             await live.seen(date)
         }
         .modifier(ThreadSeen(pips: store.pips, thread: thread) { await jumpToMatch() })
-        .task { if thread.isOtto { await gate.run(store.backend) } }
+        .task(id: store.connected) { if thread.isOtto { await gate.run(store.backend) } }
         .sheet(isPresented: $showGate) { GateSheet(watch: gate) }
         // `-openGate`: open the boarding pass as soon as there is one, for screenshots.
         .onChange(of: gate.card?.key, initial: true) {
@@ -297,10 +310,6 @@ struct ChatView: View {
         .sheet(item: $openCall) { CallSheet(call: $0) }
         .sheet(item: Binding(get: { thread.isOtto ? store.otpDrawer : nil }, set: { store.otpDrawer = $0 })) {
             if let otp = $0.otp { OTPDrawer(otp: otp) }
-        }
-        // Closed only by its own buttons (Later hides it), so the setter has nothing to do.
-        .sheet(item: Binding(get: { thread.isOtto ? store.shownApproval : nil }, set: { _ in })) {
-            ApprovalSheet(request: $0)
         }
         // The header's fade, mirrored behind the composer: bubbles dissolve over the 16pt above it
         // and are gone by the top of the field, instead of reading through the glass.
@@ -348,6 +357,7 @@ struct ChatView: View {
                 .buttonStyle(.plain)
                 .font(size: 12, design: .monospaced, relativeTo: .caption).foregroundStyle(.secondary)
                 .accessibilityLabel("Otto: \(step)").accessibilityHint("Scrolls down to it")
+                .contextMenu { stopMenu }
                 .padding(.leading, 10).padding(.trailing, 62)
                 .padding(.bottom, ui.bottomInset - 8)
                 .transition(.opacity)
@@ -355,6 +365,8 @@ struct ChatView: View {
         }
         // Messages opens the contact card by zooming it out of the header, glass over the blurred
         // thread, edge to edge (measured off a screen recording), and closes it back into the header.
+        // Something elsewhere put words in the composer (a memory's Correct): the card steps aside for them.
+        .onChange(of: store.prefill) { _, words in if words != nil { showDetails = false } }
         .fullScreenCover(isPresented: $showDetails) {
             DetailsView()
                 .navigationTransition(.zoom(sourceID: "card", in: card))
@@ -372,9 +384,22 @@ struct ChatView: View {
             MediaViewerView(store: store).presentationBackground(.clear)
         }
         .fullScreenCover(isPresented: $browserOpen) { BrowserFullScreen() }
+        // On the thread, not on the bubble: hung there, it could wait for a bubble that had gone and come up on Otto's next turn.
+        .alert("Couldn’t confirm Stop", isPresented: Binding(get: { thread.isOtto && store.stopUnconfirmed }, set: { store.stopUnconfirmed = $0 })) {
+            Button("Try Again") { Task { await store.stopTurn() } }
+            Button("OK", role: .cancel) {}
+        } message: { Text("Your Mac didn’t answer, so Otto may still be working.") }
         .alert("Calling Otto", isPresented: Binding(get: { CallLauncher.shared.explain }, set: { CallLauncher.shared.explain = $0 })) {
             Button("OK", role: .cancel) {}
         } message: { Text("Add Otto’s phone number in details (tap Otto’s name).") }
+    }
+
+    /// Stop, for the bubble that shows what Otto is doing and for its line when scrolled away from it. Empty
+    /// (so no menu at all) unless this is Otto's thread and the Mac's hello said it can stop a turn.
+    @ViewBuilder private var stopMenu: some View {
+        if thread.isOtto, store.backend.canStop {
+            Button("Stop", systemImage: "stop.circle", role: .destructive) { Task { await store.stopTurn() } }
+        }
     }
 
     @ViewBuilder private var threadList: some View {
@@ -391,6 +416,8 @@ struct ChatView: View {
                         if newBlock { Stamp(date: m.date) }
                         if m.isPipLine {
                             PipLine(message: m, afterLine: !newBlock && prev?.isPipLine == true, highlighted: flashed == m.id).id(m.id).transition(.opacity)
+                        } else if let record = m.call {
+                            CallLine(record: record, date: m.date, afterStamp: newBlock).id(m.id).transition(.opacity)
                         } else if m.from == .terminal {
                             TerminalLine(message: m, afterStamp: newBlock).id(m.id).transition(.opacity)
                         } else {
@@ -449,6 +476,24 @@ struct ChatView: View {
                     }
                     if thread.typing {
                         Typing(status: thread.typingStatus, todos: thread.typingTodos, connected: thread.connected).padding(.top, 10).id("typing")
+                            // Touch and hold what Otto is doing to stop it: only with a Mac that can (its hello says so).
+                            .contextMenu { stopMenu }
+                            .accessibilityActions { stopMenu }
+                            // Said once, the first time Otto works on a Mac that can be stopped: a menu behind a
+                            // hold is otherwise found by nobody (the walkie-talkie's hint, for this bubble).
+                            .popover(isPresented: $stopHint, arrowEdge: .bottom) {
+                                Label("Hold to stop Otto", systemImage: "stop.circle")
+                                    .font(size: 14, weight: .medium, relativeTo: .subheadline)
+                                    .padding(.horizontal, 14).padding(.vertical, 10)
+                                    .presentationCompactAdaptation(.popover)
+                            }
+                            .task {
+                                guard thread.isOtto, store.backend.canStop, !stopHintShown else { return }
+                                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                                stopHintShown = true; stopHint = true
+                                try? await Task.sleep(for: .seconds(5))
+                                stopHint = false
+                            }
                             .transition(still ? .opacity : .asymmetric(insertion: .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity),
                                                                        removal: .opacity))
                     }
@@ -470,7 +515,7 @@ struct ChatView: View {
         // it slid back (measured frame by frame with -shiftLab). A burst (a catch-up) lands in one step
         // rather than sliding the whole thread by all of it.
         // A row going (Otto deleted it) fades and the rest close up; under Reduce Motion a short fade, no spring.
-        .animation(thread.animated && !burst ? (still && messages.count < counted.rows ? .easeOut(duration: 0.2) : .spring(response: 0.42, dampingFraction: 0.82)) : nil,
+        .animation(thread.animated && !burst ? (still ? .easeOut(duration: 0.2) : .spring(response: 0.42, dampingFraction: 0.82)) : nil,
                    value: messages.count)
         // After this update's other handlers have run, so they all still see a burst as one.
         .onChange(of: messages.count, initial: true) { _, n in Task { counted.rows = n } }
@@ -555,7 +600,9 @@ struct ChatView: View {
                 }
             }
         }
-        .sensoryFeedback(.impact(weight: .light), trigger: lastMine)
+        // Felt for a message sent from here (it starts out pending), not for one of yours that arrived from the
+        // share sheet, the Mac or another device.
+        .sensoryFeedback(.impact(weight: .light), trigger: lastMine, condition: sentFromHere)
         #if DEBUG
         // `-search <words>`: the thread searched for them, keyboard down (up with `-searchFocus`), for screenshots.
         .task {
@@ -641,11 +688,11 @@ struct ChatView: View {
             }
             if thread.isOtto, let live = calls.live {
                 CallBanner(call: live) { openCall = live }
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(still ? .opacity : .move(edge: .top).combined(with: .opacity))
             }
             if thread.isOtto, let card = gate.visible() {
                 GateBanner(card: card) { showGate = true }
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(still ? .opacity : .move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.snappy, value: calls.live?.id)
@@ -700,7 +747,7 @@ struct ChatView: View {
 
     /// Said under the name once the Mac has been out of reach a few seconds: the sleeping face alone
     /// reads as resting, and says nothing to VoiceOver. Tapping it opens the card with the server's fields.
-    private var offline: String? { unreachable ? String(localized: "Can’t reach your Mac") : nil }
+    private var offline: String? { unreachable ? (store.noNetwork ? String(localized: "You’re offline") : String(localized: "Can’t reach your Mac")) : nil }
 
     private var ottoLook: FaceLook {
         let base = row?.otto?.look ?? .otto
@@ -724,7 +771,8 @@ struct ChatView: View {
                     // SideStore downloads, re-signs and installs; it asks before replacing the app.
                     // A glass circle like the bar's others, so it never crowds the face.
                     Button { openURL(link) } label: {
-                        Image(systemName: "arrow.down").font(.system(size: 18, weight: .semibold))
+                        // An app with an arrow into it, not the bare arrow that means "jump to the newest message".
+                        Image(systemName: "arrow.down.app").font(.system(size: 18, weight: .semibold))
                             .frame(width: 44, height: 44)
                             .glassEffect(.regular.tint(.accentColor).interactive(), in: .circle)
                     }
@@ -788,7 +836,15 @@ struct Composer: View {
     @State private var draft = ""
     @State private var focused = false
     @State private var attachments: [Attachment] = []
+    private var draftKey: String { "otto.draft.\(thread.conversationID)" }
     @State private var showCamera = false
+    @State private var pickingPDF = false
+    /// A PDF that couldn't be read (locked, or not one): said once, in an alert.
+    @State private var unreadablePDF = false
+    /// A PDF just attached had more pages than go along: said in an alert, with how many did.
+    @State private var cutPDF: (shown: Int, total: Int)?
+    /// What was in the box when words were put there from elsewhere (a memory's Correct): back once those are sent or cleared.
+    @State private var setAside: String?
     @State private var showLibrary = false
     @State private var picked: [PhotosPickerItem] = []
     @State private var recorder = VoiceRecorder()
@@ -833,7 +889,7 @@ struct Composer: View {
             MentionBar(members: mentionMatches, pick: mention).transition(.opacity)
         }
         if let waiting {
-            ApprovalPill(request: waiting) { store.reopenApproval(waiting.id) }.transition(.opacity)
+            ApprovalPill(request: waiting, waiting: store.approvals.count { store.hiddenApprovals.contains($0.id) }) { store.reopenApproval(waiting.id) }.transition(.opacity)
         } else if let lapsed {
             ApprovalPill(request: lapsed, lapsed: true) { store.lapsedApproval = nil }.transition(.opacity)
         } else if !todos.isEmpty {
@@ -843,7 +899,8 @@ struct Composer: View {
             if thread.isOtto {
             Menu {
                 Button("Camera", systemImage: "camera") { showCamera = true }
-                    .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+                    .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))   // none (a restriction, the simulator): UIKit raises on presenting it
+                Button("PDF", systemImage: "doc") { pickingPDF = true }
                 Button("Photos", systemImage: "photo.on.rectangle") { showLibrary = true }
             } label: {
                 Image(systemName: "plus").font(.system(size: 19, weight: .medium))
@@ -872,6 +929,7 @@ struct Composer: View {
                             HStack(spacing: 8) {
                                 ThinkingOrb(state: .listening, size: .px20)
                                 Text(String(format: "%d:%02d", s / 60, s % 60)).monospacedDigit()
+                                RecordingTrace(recorder: recorder)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -957,9 +1015,17 @@ struct Composer: View {
         .onChange(of: store.demoFocus) { focused = store.demoFocus }
         #endif
         .onChange(of: attachments.count) { ui.relayout() }
-        .onChange(of: recorder.started != nil) { ui.recording = recorder.started != nil; ui.relayout() }
-        .onAppear { [recorder] in ui.level = { recorder.level() } }
+        .onChange(of: recorder.started != nil) { ui.relayout() }
         .onChange(of: thread.replyingTo) { if thread.replyingTo != nil { focused = true }; ui.relayout() }
+        // Unsent words survive the app being closed or killed: kept per conversation as they're typed, gone
+        // once sent or cleared. ponytail: the words only; photos waiting in the strip aren't kept.
+        .onAppear { if draft.isEmpty, let kept = UserDefaults.standard.string(forKey: draftKey) { draft = kept } }
+        .onChange(of: draft) {
+            if draft.isEmpty, let own = setAside { setAside = nil; draft = own; return }   // the prefilled words went: yours come back
+            // While yours are set aside they stay the saved draft: a relaunch brings back what you wrote, not the prefill.
+            // Nor with pictures or a PDF attached: those can't be kept, and their caption alone ("Ticket.pdf, 2 pages") would come back as a lie.
+            if setAside == nil, attachments.isEmpty { UserDefaults.standard.set(draft.isEmpty ? nil : draft, forKey: draftKey) }
+        }
         #if DEBUG
         // Layout checks without a keyboard or a server: `-growDraft` types, `-seedDraft`
         // fills the box, `-seedAttachments` adds two photos, `-keyboardDemo` loops focus,
@@ -992,8 +1058,38 @@ struct Composer: View {
         }
         #endif
         .sensoryFeedback(.impact(weight: .medium), trigger: recorder.started != nil)
+        .micProblem(recorder)
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker { img in withAnimation(.snappy) { attachments.append(Attachment(image: img)) } }.ignoresSafeArea()
+        }
+        // A PDF goes as its pages, drawn (PDFPages): they land in the strip like photos, with its name in the box.
+        .fileImporter(isPresented: $pickingPDF, allowedContentTypes: [.pdf]) { result in
+            guard let url = try? result.get() else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let read = (try? Data(contentsOf: url)).map { PDFPages.images($0) }
+            guard let read, !read.pages.isEmpty else { unreadablePDF = true; return }
+            withAnimation(.snappy) { attachments += read.pages.map { Attachment(image: $0) } }
+            // Its name and page count go along as words. Cut to its first pages, that is always said: on a line
+            // of its own under words already in the box, and in an alert, since Otto won't see the rest.
+            let caption = PDFPages.caption(url.lastPathComponent, shown: read.pages.count, total: read.total)
+            if draft.isEmpty { draft = caption } else if read.pages.count < read.total { draft += "\n" + caption }
+            if read.pages.count < read.total { cutPDF = (read.pages.count, read.total) }
+        }
+        .alert("Only the first \(cutPDF?.shown ?? 0) of \(cutPDF?.total ?? 0) pages are attached",
+               isPresented: Binding(get: { cutPDF != nil }, set: { if !$0 { cutPDF = nil } })) { Button("OK") {} } message: {
+            Text("A PDF goes to Otto as pictures of its pages, eight at most. For the rest, send them as another PDF, or ask Otto to open the file on your Mac.")
+        }
+        .alert("Couldn’t read that PDF", isPresented: $unreadablePDF) { Button("OK") {} } message: {
+            Text("It may be locked with a password. Unlock it, or send screenshots of the pages.")
+        }
+        // Words put in the box from elsewhere in the app (a memory's Correct): there to finish and send.
+        .onChange(of: store.prefill, initial: true) { _, words in
+            guard thread.isOtto, let words else { return }
+            store.prefill = nil
+            // What was already in the box isn't lost to it: set aside, and back once these words are sent or cleared.
+            if !draft.isEmpty, setAside == nil { setAside = draft }
+            draft = words; focused = true
         }
         .photosPicker(isPresented: $showLibrary, selection: $picked, maxSelectionCount: 10, matching: .images)
         .onChange(of: picked) {
@@ -1221,6 +1317,42 @@ struct Stamp: View {
 }
 
 /// A prompt typed into Otto's terminal, set like a Stamp: the time and its first words.
+/// A call with Otto, once it's over: one quiet line with how long it ran, as the terminal's line is drawn.
+/// Tapped, it shows what was said.
+private struct CallLine: View {
+    let record: CallRecord
+    let date: Date
+    /// Right under a Stamp, which already has the spacing above.
+    let afterStamp: Bool
+    #if DEBUG
+    /// `-callTranscript`: the sheet already up, for screenshots.
+    @State private var open = ProcessInfo.processInfo.arguments.contains("-callTranscript")
+    #else
+    @State private var open = false
+    #endif
+    var body: some View {
+        Button { open = true } label: {
+            (Text(Image(systemName: "phone.fill")) + Text(" Call with Otto · \(record.length)\(record.dropped == true ? " · dropped" : "")").fontWeight(.semibold)
+             + Text(record.lines.isEmpty ? "" : " · Transcript").foregroundStyle(Color.actionInk))
+                .font(size: 11, relativeTo: .caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 24)
+                // 44pt to tap around a line of small type.
+                .padding(.vertical, 15).contentShape(.rect).padding(.vertical, -15)
+        }
+        .buttonStyle(.plain)
+        .disabled(record.lines.isEmpty)
+        .padding(.top, afterStamp ? 2 : 10).padding(.bottom, 6)
+        .accessibilityLabel("Call with Otto, \(record.length)\(record.dropped == true ? ", dropped" : "")")
+        .accessibilityHint(record.lines.isEmpty ? "" : "Shows what was said")
+        .sheet(isPresented: $open) {
+            CallTranscript(lines: record.lines, title: "Call, \(date.formatted(date: .abbreviated, time: .shortened))")
+        }
+    }
+}
+
 private struct TerminalLine: View {
     let message: Message
     /// Right under a Stamp, which already has the spacing above.
@@ -1261,6 +1393,8 @@ private struct Row: View {
     var highlighted = false
     /// Reduce Motion: the highlight brightens without growing.
     var still = false
+    /// The send button of a draft that names nobody, tapped: asked about before it goes.
+    @State private var blindSend: ActionButton?
     var onQuote: () -> Void = {}
     var onSwiping: (Bool) -> Void = { _ in }
     let onTap: (ActionButton) -> Void
@@ -1331,6 +1465,10 @@ private struct Row: View {
                 CardHead(symbol: "square.and.pencil", kind: String(localized: "Draft")) { if !message.buttons.isEmpty { NeedsMark() } }
                 if let to = Self.draftTitle(d.head) {
                     Text(to).font(size: 16, weight: .semibold, relativeTo: .callout).padding(.top, 6)
+                } else if !message.buttons.isEmpty {
+                    // A send with no name on it is said as that, before the button that sends it.
+                    Text("Otto didn’t say who this goes to. Ask before you send.")
+                        .font(size: 14, relativeTo: .subheadline).foregroundStyle(.secondary).padding(.top, 6)
                 }
                 Text(Self.linked(d.body))
                     .font(size: 15, relativeTo: .subheadline)
@@ -1340,10 +1478,15 @@ private struct Row: View {
                     .padding(.top, 10)
                 if !message.buttons.isEmpty {
                     // Side by side while they fit; a third button or a long label stacks them.
+                    // With nobody named, the button that sends isn't the blue one and asks first: the card says to ask
+                    // who it goes to, and a filled Send one tap away said the opposite.
+                    let unnamed = Self.draftTitle(d.head) == nil
                     let buttons = ForEach(Array(message.buttons.enumerated()), id: \.element.id) { i, b in
-                        let button = Button(Self.buttonTitle(b.label)) { press(b) }
+                        // 44pt to tap, laid out as drawn: the slop goes up and down only, so neighbours don't overlap.
+                        let button = Button(Self.buttonTitle(b.label)) { if unnamed && i == 0 { blindSend = b } else { press(b) } }
                             .font(size: 15, weight: .semibold, relativeTo: .subheadline).buttonBorderShape(.capsule)
-                        if i == 0 { button.buttonStyle(.borderedProminent).tint(.blue) } else { button.quietButton() }
+                            .padding(.vertical, 6).contentShape(.rect).padding(.vertical, -6)
+                        if i == 0 && !unnamed { button.buttonStyle(.borderedProminent).tint(.blue) } else { button.quietButton() }
                     }
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 8) { buttons }
@@ -1353,6 +1496,11 @@ private struct Row: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .confirmationDialog("Send without knowing who gets it?", isPresented: Binding(get: { blindSend != nil }, set: { if !$0 { blindSend = nil } }),
+                                titleVisibility: .visible, presenting: blindSend) { b in
+                Button("Send Anyway") { press(b) }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in Text("Otto didn’t say who this draft goes to. Ask Otto first, or send it as it is.") }
         } else if message.isVoice || message.audio != nil {
             VStack(alignment: .leading, spacing: 6) {
                 VoiceRow(message: message, mine: mine)
@@ -1441,7 +1589,7 @@ private struct Row: View {
         if sideways == true { onSwiping(false) }
         sideways = nil
         guard swipe != 0 else { return }
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { swipe = 0 }
+        withAnimation(still ? .easeOut(duration: 0.15) : .spring(response: 0.35, dampingFraction: 0.8)) { swipe = 0 }
     }
     /// Otto's transport has tapbacks and quoted replies; the conversation API has neither.
     private var canAnswer: Bool { thread.isOtto && !message.isConversation }
@@ -1601,7 +1749,7 @@ private struct Row: View {
                 // stretch is field width over bubble width (the row is as wide as the screen).
                 .modifier(SendMorph(progress: morph, lift: lift))
                 .onAppear {
-                    guard fresh else { return }
+                    guard fresh, !still else { return }   // Reduce Motion: the bubble is simply there, no flight from the field
                     morph = 0
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { morph = 1 }
                 }
@@ -1998,15 +2146,20 @@ private struct VoiceRow: View {
     let message: Message
     let mine: Bool
     @State private var duration: TimeInterval?
+    /// The clip couldn't be fetched from the Mac (not sample data, not one still on its way).
+    @State private var missing = false
     /// Peak per slice, 0…1, read from the audio itself. Flat until it's decoded.
     @State private var levels: [CGFloat]?
     private var player: AudioPlayer { .shared }
+    @Environment(\.accessibilityReduceMotion) private var still
     private var key: String { message.audio?.id ?? message.id.uuidString }
     /// Every row asks on appear for its length; fetch each of Otto's files once.
     @MainActor private static var cache: [String: Data] = [:]
 
     var body: some View {
         let playing = player.playing == key
+        // Paused, the bars stay filled to where it stopped; a clip that wouldn't load says so where its length was.
+        let held = player.paused == key, failed = player.failed == key
         let ink: Color = mine ? .white : .primary
         // Otto's text is in, its voice isn't yet: an empty bar that breathes until the clip lands.
         let waiting = !mine && message.audio == nil
@@ -2022,31 +2175,68 @@ private struct VoiceRow: View {
                     // A 44pt target around the 26pt disc; the bubble's padding has the room.
                     .padding(9).contentShape(.rect).padding(-9)
             }
-            .accessibilityLabel(playing ? "Pause voice message" : "Play voice message")
+            .accessibilityLabel(playing ? "Pause voice message" : failed ? "Couldn’t play. Try again" : held ? "Resume voice message" : "Play voice message")
             .buttonStyle(.plain)
             .disabled(waiting)
-            TimelineView(.animation(paused: !playing && !waiting)) { tl in
-                let done = playing ? player.progress : 0
+            // Reduce Motion: the waiting bar holds still at half strength instead of breathing.
+            TimelineView(.animation(paused: !playing && (!waiting || still))) { tl in
+                let done = playing || held ? player.progress : 0
                 let bars = levels ?? Array(repeating: 0, count: Self.slices)
                 let t = tl.date.timeIntervalSinceReferenceDate
                 HStack(spacing: 2) {
                     ForEach(bars.indices, id: \.self) { i in
-                        Capsule().fill(ink.opacity(waiting ? 0.2 + 0.25 * (1 + sin(t * 4 - Double(i) * 0.45)) / 2
+                        Capsule().fill(ink.opacity(waiting ? (still ? 0.3 : 0.2 + 0.25 * (1 + sin(t * 4 - Double(i) * 0.45)) / 2)
                                                    : Double(i) / Double(bars.count) < done ? 1 : 0.55))
                             .frame(width: 2.5, height: 3 + bars[i] * 17)
                     }
                 }
                 .frame(height: 20)
             }
-            if let duration {
-                Text(Duration.seconds(duration.rounded()).formatted(.time(pattern: .minuteSecond)))
-                    .monospacedDigit().font(size: 14, weight: .medium, relativeTo: .subheadline)
-                    .foregroundStyle(ink)
+            if failed {
+                Text("Couldn’t play").font(size: 14, weight: .medium, relativeTo: .subheadline).foregroundStyle(ink)
+            } else {
+                // One slot for the clip's length and, while it plays or is paused part-way, how fast (a tap goes
+                // 1×, 1.5×, 2×). Both are always laid out, so the bubble is the same size at rest and playing: in
+                // a bubble that grew, the pause button would move out from under the finger that pressed play.
+                let active = playing || held
+                ZStack(alignment: .trailing) {
+                    if missing, duration == nil {
+                        Text("Not downloaded").font(size: 14, weight: .medium, relativeTo: .subheadline).foregroundStyle(ink.opacity(0.7))
+                    }
+                    if let duration {
+                        Text(Duration.seconds(duration.rounded()).formatted(.time(pattern: .minuteSecond)))
+                            .monospacedDigit().font(size: 14, weight: .medium, relativeTo: .subheadline)
+                            .foregroundStyle(ink)
+                            .opacity(active ? 0 : 1).accessibilityHidden(active)
+                    }
+                    // The button exists only while it can do something. Its label, hidden, holds the slot open the
+                    // rest of the time (.hidden() takes it out of VoiceOver and touches too; an invisible button
+                    // was still found by assistive tools).
+                    let speed = Text("\(player.rate.formatted())×")
+                        .monospacedDigit().font(size: 12, weight: .semibold, relativeTo: .caption)
+                        .foregroundStyle(ink)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(ink.opacity(0.18), in: .capsule)
+                    speed.hidden()
+                    if active {
+                        Button { player.nextRate() } label: {
+                            speed.padding(.vertical, 10).padding(.horizontal, 4).contentShape(.rect).padding(.vertical, -10).padding(.horizontal, -4)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Playback speed")
+                        .accessibilityValue("\(player.rate.formatted()) times")
+                        .transition(.opacity)
+                    }
+                }
+                .animation(.easeOut(duration: 0.15), value: active)
             }
         }
         .padding(.vertical, 2)
-        .task(id: key) {
-            guard duration == nil, let d = await load() else { return }
+        // Again on each connect: a clip that couldn't be fetched (says so where its length goes) is tried once the Mac is back.
+        .task(id: "\(key) \(store.connected)") {
+            guard duration == nil else { return }
+            guard let d = await load() else { missing = !waiting && !(store.backend is MockBackend); return }
+            missing = false
             duration = (try? AVAudioPlayer(data: d))?.duration
             let ext = message.audio.map { ($0.name as NSString).pathExtension } ?? "m4a"
             levels = await Task.detached { Self.levels(d, ext: ext.isEmpty ? "m4a" : ext) }.value
@@ -2091,21 +2281,42 @@ private struct VoiceRow: View {
     static let shared = AudioPlayer()
     /// The RemoteFile id playing now.
     private(set) var playing: String?
+    /// The clip held where it was paused: its next tap goes on from there.
+    private(set) var paused: String?
+    /// The clip that couldn't be loaded or played, until it's tapped again: its row says so.
+    private(set) var failed: String?
+    /// 1×, 1.5× or 2×: kept from clip to clip and across launches, as Messages keeps it.
+    private(set) var rate: Float = { let r = UserDefaults.standard.float(forKey: "otto.voiceRate"); return r > 0 ? r : 1 }()
     @ObservationIgnored private var player: AVAudioPlayer?
 
+    #if DEBUG
+    /// `-voicePaused`: the demo reply's clip held part-way, for a screenshot of the speed button.
+    override init() { super.init(); if CommandLine.arguments.contains("-voicePaused") { paused = "demo-voice" } }
+    #endif
+
+    func nextRate() {
+        rate = rate == 1 ? 1.5 : rate == 1.5 ? 2 : 1
+        UserDefaults.standard.set(rate, forKey: "otto.voiceRate")
+        player?.rate = rate
+    }
+
     func toggle(_ id: String, load: () async -> Data?) async {
-        if playing == id { stop(); return }
+        if playing == id { player?.pause(); playing = nil; paused = id; return }
+        if paused == id, let p = player { paused = nil; playing = id; p.play(); return }
         stop()
-        guard let data = await load(), let p = try? AVAudioPlayer(data: data) else { return }
+        failed = nil
+        guard let data = await load(), let p = try? AVAudioPlayer(data: data) else { failed = id; return }
         try? AVAudioSession.sharedInstance().setCategory(.playback)
         try? AVAudioSession.sharedInstance().setActive(true)
         p.delegate = self
+        p.enableRate = true
+        p.rate = rate
         p.play()
         player = p
         playing = id
     }
 
-    func stop() { player?.stop(); player = nil; playing = nil }
+    func stop() { player?.stop(); player = nil; playing = nil; paused = nil }
 
     /// 0…1 through what's playing. Not observed: read it from a TimelineView.
     var progress: Double {
@@ -2115,6 +2326,22 @@ private struct VoiceRow: View {
 
     nonisolated func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully: Bool) {
         Task { @MainActor in if player === p { stop() } }
+    }
+}
+
+extension View {
+    /// A voice note or walkie press that couldn't start recording says why, and where to fix it.
+    func micProblem(_ recorder: VoiceRecorder) -> some View {
+        alert(recorder.problem == .denied ? "Otto can’t use the microphone" : "Couldn’t start recording",
+              isPresented: Binding(get: { recorder.problem != nil }, set: { if !$0 { recorder.problem = nil } })) {
+            if recorder.problem == .denied {
+                Button("Open Settings") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
+                Button("Not Now", role: .cancel) {}
+            } else { Button("OK") {} }
+        } message: {
+            Text(recorder.problem == .denied ? "Turn on Microphone for Otto in Settings to send voice notes and use the walkie-talkie."
+                 : "Something else may be using the microphone. Try again in a moment.")
+        }
     }
 }
 
@@ -2418,14 +2645,37 @@ private struct BrowserShot: View {
 
 /// The tile, full screen: the page as big as it fits, still live while Otto works, and the last
 /// frame kept once it's done. A tap anywhere closes it.
-private struct BrowserFullScreen: View {
+struct BrowserFullScreen: View {
     @Environment(OttoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var shown: LiveBrowser?
+    /// You have the page: taps and typing go to it, and Otto waits until you hand it back.
+    @State private var holding = false
+    @State private var busy = false
+    @State private var typed = ""
+    /// The last thing the Mac didn't take, said under the picture until the next one lands.
+    @State private var problem: String?
+    /// Where the last tap landed, as fractions of the picture: a ring there, since the page itself answers a second later.
+    @State private var tapped: UnitPoint?
+    @FocusState private var typing: Bool
+    /// A frame has said the page is held. After that, one that doesn't means the Mac took it back.
+    @State private var confirmed = false
+    /// The inputs still on their way, as a chain (see `send`), and whether typing is among them.
+    @State private var queue: Task<Void, Never>?
+    @State private var typingOut = false
+    /// Goes up each time the Mac doesn't confirm an input: anything queued before that is dropped (see `send`).
+    @State private var unsure = 0
+    /// Pinched in to read or hit something small, and dragged around while in. Held across frames.
+    @State private var zoom: CGFloat = 1
+    @State private var zoomBase: CGFloat = 1
+    @State private var pan = CGSize.zero
+    @State private var panBase = CGSize.zero
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
+                // Watching, a tap anywhere closes it. Holding, only the close button does: taps belong to the page.
+                .onTapGesture { if !holding { dismiss() } }
             if let shown {
                 VStack(spacing: 14) {
                     Spacer(minLength: 0)
@@ -2438,31 +2688,217 @@ private struct BrowserFullScreen: View {
                         .transition(.opacity)
                     }
                     .aspectRatio(shown.shot.map { $0.size.width / max($0.size.height, 1) } ?? 16 / 10, contentMode: .fit)
+                    .overlay {
+                        GeometryReader { g in
+                            if let tapped {
+                                Circle().strokeBorder(.white, lineWidth: 2 / zoom).frame(width: 28 / zoom, height: 28 / zoom)
+                                    .position(x: tapped.x * g.size.width, y: tapped.y * g.size.height)
+                                    .transition(.opacity)
+                            }
+                        }
+                    }
+                    .scaleEffect(zoom).offset(pan)
+                    .overlay {
+                        // The gestures sit on the frame, not on the zoomed picture, so nothing outside it is ever hit.
+                        GeometryReader { g in
+                            // The picture is the page: a tap on it is a tap there, wherever it's been zoomed and dragged to.
+                            Color.clear.contentShape(.rect)
+                                .onTapGesture(coordinateSpace: .local) { at in
+                                    guard holding else { dismiss(); return }
+                                    let spot = Self.spot(at, in: g.size, zoom: zoom, pan: pan)
+                                    withAnimation(.easeOut(duration: 0.15)) { tapped = spot }
+                                    send(.tap(x: spot.x, y: spot.y))
+                                }
+                                .gesture(MagnifyGesture()
+                                    .onChanged { zoom = min(max(zoomBase * $0.magnification, 1), 4); pan = Self.kept(pan, in: g.size, zoom: zoom) }
+                                    .onEnded { _ in
+                                        withAnimation(.snappy) { if zoom <= 1.01 { zoom = 1; pan = .zero } }
+                                        zoomBase = zoom; panBase = pan
+                                    })
+                                .simultaneousGesture(DragGesture(minimumDistance: 10)
+                                    .onChanged { pan = Self.kept(CGSize(width: panBase.width + $0.translation.width, height: panBase.height + $0.translation.height), in: g.size, zoom: zoom) }
+                                    .onEnded { _ in panBase = pan },
+                                    including: zoom > 1 ? .all : .subviews)
+                        }
+                    }
                     .clipShape(.rect(cornerRadius: 10, style: .continuous))
                     .padding(.horizontal, 16)
-                    .accessibilityHidden(true)
-                    Text(shown.tile.caption)
+                    .accessibilityElement()
+                    .accessibilityLabel(holding ? "The page Otto has open. You have it." : "The page Otto has open")
+                    .accessibilityHint(holding ? "Touch the page directly to tap it. Pinch to zoom." : "Pinch to zoom")
+                    .accessibilityDirectTouch(holding)
+                    Text(problem ?? (holding ? "You have the page. Otto waits until you hand it back." : shown.tile.caption))
                         .font(size: 15, relativeTo: .subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(problem == nil ? Color.secondary : Color.redInk)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
+                        .allowsHitTesting(false)   // a tap on the caption is a tap on the black behind it: watching, it closes the page
                     Spacer(minLength: 0)
+                    if holding { controls } else if shown.tile.control {
+                        // Where Otto is stuck (a sign-in, a CAPTCHA), you can do that step yourself. Behind Face ID:
+                        // holding the page shows it whole, a sign-in page too, and lets this phone act on your Mac.
+                        Button { Task { await take() } } label: {
+                            Label("Take over", systemImage: "faceid").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).controlSize(.large).font(.headline)
+                        .disabled(busy)
+                        .padding(.horizontal, 20).padding(.bottom, 12)
+                    }
                 }
                 .animation(.easeOut(duration: 0.3), value: shown.tile.ts)
+                .animation(.easeOut(duration: 0.2), value: holding)
             }
             Button { dismiss() } label: {
                 Image(systemName: "xmark").font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44)
             }
             .glassEffect(.regular.interactive(), in: .circle)
             .tint(.white)
-            .accessibilityLabel("Close")
+            .accessibilityLabel(holding ? "Hand the page back and close" : "Close")
             .padding(.horizontal, 16)
         }
         .environment(\.colorScheme, .dark)
-        .contentShape(.rect)
-        .onTapGesture { dismiss() }
-        .onAppear { shown = store.browser; if shown == nil { dismiss() } }
-        .onChange(of: store.browser) { _, b in if let b { shown = b } }
+        .onAppear {
+            shown = store.browser; if shown == nil { dismiss() }
+            // A page already in your hands (the app was closed while holding it; `-browserHold` for screenshots).
+            if shown?.tile.held == true { holding = true; confirmed = true }
+        }
+        .onChange(of: store.browser) { _, b in
+            if let b { shown = b; withAnimation(.easeOut(duration: 0.3)) { tapped = nil } }
+            // The Mac took the page back on its own (five idle minutes, or the work ended): the controls go.
+            // Only after a frame has said "held": one sent just before the take-over doesn't count.
+            if b?.tile.held == true { confirmed = true } else if holding, confirmed { holding = false; confirmed = false }
+        }
+        // Closing never leaves Otto waiting on a page nobody holds.
+        // After what's still on its way to the page, in order, like Hand back: a release can't overtake a tap.
+        .onDisappear { if holding { Task { [backend = store.backend, queue] in await queue?.value; _ = await backend.holdBrowser(false) } } }
+    }
+
+    /// Typing, the keys a sign-in needs, a scroll each way, and the way out.
+    private var controls: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                // What's typed goes to the page and nowhere else: not into the thread, and not kept on the phone.
+                PageField(text: $typed, focused: $typing) { sendTyped() }
+                Button("Type it", action: sendTyped).buttonStyle(.bordered).buttonBorderShape(.capsule).disabled(typed.isEmpty || busy || typingOut)
+            }
+            // One row where it fits; on a narrow phone or at large text the way out gets a row of its own.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { keys; Spacer(minLength: 0); handBackButton }
+                VStack(spacing: 10) {
+                    HStack(spacing: 8) { keys; Spacer(minLength: 0) }
+                    handBackButton.frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+        }
+        .font(.subheadline.weight(.semibold))
+        .padding(.horizontal, 16).padding(.bottom, 12)
+    }
+
+    @ViewBuilder private var keys: some View {
+        key("Enter", "return", .key("enter"))
+        key("Tab", "arrow.right.to.line", .key("tab"))
+        key("Delete", "delete.left", .key("backspace"))
+        key("Scroll up", "chevron.up", .scroll(-0.8))
+        key("Scroll down", "chevron.down", .scroll(0.8))
+    }
+
+    private var handBackButton: some View {
+        Button { Task { await handBack() } } label: { Text("Hand back") }
+            .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).disabled(busy)
+    }
+
+    /// Where on the page a point of the frame is, as fractions of the picture, undoing the zoom (about the
+    /// centre) and the drag. Clamped: the frame only ever shows the picture.
+    static func spot(_ at: CGPoint, in size: CGSize, zoom: CGFloat, pan: CGSize) -> UnitPoint {
+        let x = ((at.x - size.width / 2 - pan.width) / zoom + size.width / 2) / max(size.width, 1)
+        let y = ((at.y - size.height / 2 - pan.height) / zoom + size.height / 2) / max(size.height, 1)
+        return UnitPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+    }
+
+    /// A drag held to where the zoomed picture still fills its frame: no black edge can be pulled in.
+    static func kept(_ pan: CGSize, in size: CGSize, zoom: CGFloat) -> CGSize {
+        let w = (zoom - 1) * size.width / 2, h = (zoom - 1) * size.height / 2
+        return CGSize(width: min(max(pan.width, -w), w), height: min(max(pan.height, -h), h))
+    }
+
+    private func key(_ name: String, _ symbol: String, _ input: BrowserInput) -> some View {
+        Button { send(input) } label: { Image(systemName: symbol).frame(width: 34, height: 34) }   // 44pt with the border's padding
+            .buttonStyle(.bordered).buttonBorderShape(.circle).tint(.white).disabled(busy)
+            .accessibilityLabel(name)
+    }
+
+    /// What's typed stays in the field until the Mac says it typed it: a send that fails loses nothing.
+    private func sendTyped() {
+        let words = typed
+        guard !words.isEmpty, !typingOut else { return }
+        typingOut = true
+        send(.text(words)) { ok in
+            typingOut = false
+            if ok, typed == words { typed = "" }
+        }
+    }
+
+    /// One at a time, in the order they were made: each waits for the one before, so Enter can't overtake the
+    /// typing it follows. A failure says so; for typing, it says to look first, since the text may have landed.
+    private func send(_ input: BrowserInput, then done: @escaping (Bool) -> Void = { _ in }) {
+        guard holding, !busy else { done(false); return }   // handing back, or the Mac took it: nothing more goes
+        let asked = unsure   // inputs made before one the Mac didn't confirm are dropped, not sent after it
+        queue = Task { [queue] in
+            await queue?.value
+            guard holding else { done(false); return }   // the page went back while this waited its turn
+            // An Enter queued behind typing that may not have landed mustn't submit the half-filled form: what was
+            // waiting is let go, and the next thing you do (having looked at the page) starts fresh.
+            guard asked == unsure else { done(false); return }
+            let ok = await store.backend.browserInput(input)
+            if !ok { unsure += 1 }
+            if case .text = input, !ok { problem = "Your Mac didn’t confirm the typing. Look at the page before you type it again." }
+            else { problem = ok ? nil : "Your Mac didn’t take that. Try again." }
+            if !ok { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+            done(ok)
+        }
+    }
+
+    private func take() async {
+        busy = true; defer { busy = false }
+        // Face ID, falling back to the passcode: someone holding an unlocked phone can't drive your Mac's browser.
+        guard (try? await LAContext().evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Take over the page Otto has open on your Mac")) == true else { return }
+        if await store.backend.holdBrowser(true) { problem = nil; holding = true }
+        else { problem = "Your Mac didn’t hand the page over. Try again." }
+    }
+
+    private func handBack() async {
+        busy = true; defer { busy = false }
+        typing = false
+        await queue?.value   // what you did last reaches the page before it goes back to Otto
+        if await store.backend.holdBrowser(false) { problem = nil; holding = false; confirmed = false }
+        else { problem = "Your Mac didn’t take the page back. Try again, or close this to let it go." }
+    }
+}
+
+/// The take-over's text field. What goes in is a password or a code as often as not: hidden as it's typed
+/// (which also keeps it out of the keyboard's learned words and away from third-party keyboards), with an eye
+/// to show it for a CAPTCHA's letters. No autocorrect or capitals either way; submit sends.
+private struct PageField: View {
+    @Binding var text: String
+    var focused: FocusState<Bool>.Binding
+    let submit: () -> Void
+    @State private var shown = false
+    var body: some View {
+        HStack(spacing: 4) {
+            Group {
+                if shown { TextField("Type into the page", text: $text) } else { SecureField("Type into the page", text: $text) }
+            }
+            .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.send)
+            .focused(focused).onSubmit(submit)
+            Button { shown.toggle() } label: {
+                Image(systemName: shown ? "eye.slash" : "eye").frame(width: 30, height: 40).contentShape(.rect)
+            }
+            .tint(.secondary)
+            .accessibilityLabel(shown ? "Hide what you type" : "Show what you type")
+        }
+        .padding(.leading, 14).padding(.trailing, 6).frame(minHeight: 40)
+        .background(Color.white.opacity(0.12), in: .capsule)
+        .font(.body)
     }
 }
 
@@ -2580,12 +3016,15 @@ struct TodoPill: View {
 /// First run, or a cleared thread: Otto front and centre with one line of what to do.
 private struct EmptyChat: View {
     let asleep: Bool
-    let connected: Bool
+    /// The first history hasn't come back yet: empty for now, not known to be empty.
+    var loading = false
 
-    // Offline, the header already says the Mac is out of reach: this says what to check.
-    private var title: LocalizedStringKey { connected ? "Say hi" : "Waiting for your Mac" }
+    // Out of reach (not merely still connecting at launch), the header already says so: this says what to check.
+    // Still loading, it says that, so "Say hi" never shows ahead of a thread that was about to arrive.
+    private var title: LocalizedStringKey { asleep ? "Waiting for your Mac" : loading ? "Getting your conversation" : "Say hi" }
     private var line: String {
-        if !connected { return "Check it’s awake and online. What you send goes out when it’s back." }
+        if asleep { return "Check it’s awake and online. What you send goes out when it’s back." }
+        if loading { return "You can write in the meantime. It goes out as soon as your Mac answers." }
         return "Reminders, mail, plans: I’ll keep track of the rest."
     }
     var body: some View {
@@ -2725,18 +3164,28 @@ final class VoiceRecorder {
     static var active = false
     private(set) var started: Date?
     private var recorder: AVAudioRecorder?
+    /// Why the last try didn't start, until it's read: the microphone is switched off for Otto, or it wouldn't record.
+    enum Problem { case denied, failed }
+    var problem: Problem?
 
     func start() async {
-        guard recorder == nil, await AVAudioApplication.requestRecordPermission() else { return }
+        guard recorder == nil else { return }
+        problem = nil
+        guard await AVAudioApplication.requestRecordPermission() else { problem = .denied; return }
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
         try? session.setActive(true)
         let url = URL.temporaryDirectory.appending(path: "voice-\(UUID().uuidString).m4a")
         let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 16_000,
                                        AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue]
-        guard let r = try? AVAudioRecorder(url: url, settings: settings) else { return }
-        r.isMeteringEnabled = true
-        guard r.record() else { return }
+        let made = try? AVAudioRecorder(url: url, settings: settings)
+        made?.isMeteringEnabled = true
+        guard let r = made, r.record() else {
+            // Nothing is recording: give the audio session back, and say so instead of doing nothing.
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            problem = .failed
+            return
+        }
         recorder = r
         started = .now
         Self.active = true
@@ -2756,8 +3205,8 @@ final class VoiceRecorder {
         return r.url
     }
 
-    /// Linear 0–1 loudness for the glow. Read off the recorder, not a second mic tap: the
-    /// library's own meter opens a mixable session, which lets music back in mid-note.
+    /// Linear 0–1 loudness, for the trace in the composer and the walkie's bars. Read off the recorder, not
+    /// a second mic tap: a second meter opens a mixable session, which lets music back in mid-note.
     func level() -> Double {
         guard let r = recorder else { return 0 }
         #if DEBUG
@@ -2801,31 +3250,33 @@ private enum Thumbs {
     static let keyboard = Animation.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500)
     /// Asks the dock to re-measure the composer (a draft wrapped onto a new line).
     @ObservationIgnored var relayout: () -> Void = {}
-    /// A voice note is recording, and how loud it is (0–1): drives the screen glow.
-    var recording = false
-    @ObservationIgnored var level: () -> Double = { 0 }
     /// The composer's height, so a sent bubble knows how far below it the text field was.
     @ObservationIgnored var height: CGFloat = 50
     /// The thread is being searched: the composer steps aside, so there's one text field at a time.
     var searching = false
 }
 
-/// The voice glow rising from the bottom edge of the screen while a note records. Its own
-/// full-screen layer between thread and composer: inside the composer's host it is clipped
-/// to the box. Extra gain for a phone at arm's length, a short attack so syllables show.
-private struct ScreenGlow: View {
-    let ui: ComposerUI
+/// A voice note's loudness as it records, newest on the right: the sign that the phone hears you, as
+/// Messages draws one. Gain for a phone at arm's length.
+private struct RecordingTrace: View {
+    let recorder: VoiceRecorder
+    @State private var levels: [CGFloat] = Array(repeating: 0, count: 20)
+    @Environment(\.accessibilityReduceMotion) private var still
     var body: some View {
-        Color.clear
-            .voiceGlow(type: .mobile, levelProvider: { ui.level() }, active: ui.recording,
-                       cornerRadius: 55, options: {   // roughly the display's own corner
-                           var o = VoiceGlowOptions()
-                           o.sensitivity = 10; o.attack = 0.12; o.release = 0.5; o.idle = 0.4
-                           o.brightness = 1.4; o.saturation = 1.5
-                           return o
-                       }())
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
+        HStack(spacing: 2) {
+            ForEach(levels.indices, id: \.self) { i in
+                Capsule().fill(.secondary).frame(width: 2.5, height: 3 + levels[i] * 17)
+            }
+        }
+        .frame(height: 20)
+        .animation(still ? nil : .linear(duration: 0.08), value: levels)
+        .task {
+            while !Task.isCancelled {
+                levels.removeFirst(); levels.append(CGFloat(min(1, recorder.level() * 4)))
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+        }
+        .accessibilityHidden(true)   // the timer beside it already says a note is recording
     }
 }
 
@@ -2846,17 +3297,14 @@ struct ChatScreen: UIViewControllerRepresentable {
 final class KeyboardDock: UIViewController {
     private let thread: UIHostingController<AnyView>
     private let composer: UIHostingController<AnyView>
-    private let glow: UIHostingController<AnyView>
     private let ui: ComposerUI
     private var composerHeight: NSLayoutConstraint!
-    private var glowBottom: NSLayoutConstraint!
 
     init(store: OttoStore, thread chat: any ChatThread, onBack: (() -> Void)? = nil) {
         let ui = ComposerUI()
         self.ui = ui
         thread = UIHostingController(rootView: AnyView(ChatView(ui: ui, thread: chat, onBack: onBack).environment(store)))
         composer = UIHostingController(rootView: AnyView(Composer(ui: ui, thread: chat).environment(store)))
-        glow = UIHostingController(rootView: AnyView(ScreenGlow(ui: ui)))
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -2874,7 +3322,7 @@ final class KeyboardDock: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        for host in [thread, glow, composer] {   // back to front
+        for host in [thread, composer] {   // back to front
             addChild(host)
             view.addSubview(host.view)
             host.view.translatesAutoresizingMaskIntoConstraints = false
@@ -2882,12 +3330,9 @@ final class KeyboardDock: UIViewController {
             host.safeAreaRegions = .container   // the keyboard is handled here, not by SwiftUI
             host.didMove(toParent: self)
         }
-        glow.view.isUserInteractionEnabled = false   // touches go through to the thread
-        glow.safeAreaRegions = []                    // down to the real screen edge
         // Measured at the real width (intrinsic size measures unconstrained, so a long
         // draft never wrapped and the box stayed one line tall).
         composerHeight = composer.view.heightAnchor.constraint(equalToConstant: 52)
-        glowBottom = glow.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ui.relayout = { [weak self] in DispatchQueue.main.async { self?.measureComposer(animated: true) } }
         NSLayoutConstraint.activate([
             thread.view.topAnchor.constraint(equalTo: view.topAnchor),
@@ -2896,10 +3341,6 @@ final class KeyboardDock: UIViewController {
             thread.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             thread.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             thread.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            glow.view.topAnchor.constraint(equalTo: view.topAnchor),
-            glowBottom,
-            glow.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            glow.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             composer.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composer.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             composer.view.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
@@ -2921,11 +3362,6 @@ final class KeyboardDock: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         measureComposer(animated: false)
-        // This view stops above the home indicator; the glow rises from the glass edge below it.
-        if let window = view.window {
-            let gap = max(0, window.bounds.maxY - view.convert(view.bounds, to: window).maxY)
-            if abs(glowBottom.constant - gap) > 0.5 { glowBottom.constant = gap }
-        }
         let covered = max(0, view.bounds.maxY - composer.view.frame.minY - view.safeAreaInsets.bottom)
         guard abs(ui.bottomInset - covered) > 0.5 else { return }
         // Inside the keyboard's animation block this runs once, with the final frame; a

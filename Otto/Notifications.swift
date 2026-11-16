@@ -14,6 +14,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
     static let refreshTask = "dev.otto.app.refresh"
     static let category = "OTTO_MESSAGE"
+    private static let approvalCategory = "OTTO_APPROVAL"
     private static let pipCategory = "OTTO_PIP_MESSAGE"
     private static let replyAction = "OTTO_REPLY"
 
@@ -29,6 +30,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.setNotificationCategories([
             UNNotificationCategory(identifier: Self.category, actions: [reply], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: Self.pipCategory, actions: [pipReply], intentIdentifiers: [], options: []),
+            // No actions: a yes is Face ID's, in the app, and the banner's tap goes there.
+            UNNotificationCategory(identifier: Self.approvalCategory, actions: [], intentIdentifiers: [], options: []),
         ])
 
         BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.refreshTask, using: nil) { task in
@@ -38,6 +41,22 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 task.setTaskCompleted(success: true)
             }
             task.expirationHandler = { work.cancel() }
+        }
+    }
+
+    /// Whether this phone may show Otto's banners at all: what the card and the Status page say, and act on.
+    enum Allowed { case yes, no, notAsked }
+    static func allowed() async -> Allowed {
+        #if DEBUG
+        // Screenshots: `-notificationsOff` is a phone that refused them; otherwise one that allowed them (the
+        // simulator, launched with -noNotificationPrompt, has never been asked).
+        if CommandLine.arguments.contains("-notificationsOff") { return .no }
+        if CommandLine.arguments.contains("-noNotificationPrompt") { return .yes }
+        #endif
+        switch await UNUserNotificationCenter.current().notificationSettings().authorizationStatus {
+        case .denied: return .no
+        case .notDetermined: return .notAsked
+        default: return .yes
         }
     }
 
@@ -96,15 +115,45 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 
+    /// An approval that arrived while the app was in the background: Otto's own alert, which opens its sheet.
+    /// False when iOS won't show one (notifications off or never allowed) or didn't take it: the caller then
+    /// tells the Mac nothing, and the Mac's own push goes out.
+    func post(approval a: ApprovalRequest) async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        let status = settings.authorizationStatus
+        guard status == .authorized || status == .provisional else { return false }
+        // Allowed, but with banners and the Lock Screen both off (or delivered quietly), iOS takes the request and
+        // shows nothing: that isn't an alert, and the Mac must not be told it was one.
+        guard settings.alertSetting == .enabled || settings.lockScreenSetting == .enabled else { return false }
+        let content = UNMutableNotificationContent()
+        content.title = "Otto needs your OK"
+        content.body = a.ask
+        content.sound = .default
+        content.categoryIdentifier = Self.approvalCategory
+        content.threadIdentifier = "approval"
+        content.userInfo["approval"] = a.id
+        content.relevanceScore = 1
+        return (try? await center.add(UNNotificationRequest(identifier: Self.approvalID(a.id), content: content, trigger: nil))) != nil
+    }
+    static func approvalID(_ id: String) -> String { "approval-\(id)" }
+
+    /// The notification centre's removals wait on the system's notification service for an answer. Off the main
+    /// thread, in order: a service that is slow or stuck then delays a badge, not the whole app. (Seen on the
+    /// simulator: the main thread parked in removePendingNotificationRequests for good, the thread frozen with it.)
+    private static let removals = DispatchQueue(label: "otto.notifications.removals")
+
     static func clear(_ ids: [String]) {
         guard !ids.isEmpty else { return }
-        let center = UNUserNotificationCenter.current()
-        center.removeDeliveredNotifications(withIdentifiers: ids)
-        center.removePendingNotificationRequests(withIdentifiers: ids)
-        center.getDeliveredNotifications { notifications in
-            let remaining = notifications.filter { !ids.contains($0.request.identifier) }.count
-            UserDefaults.standard.set(remaining, forKey: unreadKey)
-            center.setBadgeCount(remaining)
+        removals.async {
+            let center = UNUserNotificationCenter.current()
+            center.removeDeliveredNotifications(withIdentifiers: ids)
+            center.removePendingNotificationRequests(withIdentifiers: ids)
+            center.getDeliveredNotifications { notifications in
+                let remaining = notifications.filter { !ids.contains($0.request.identifier) }.count
+                UserDefaults.standard.set(remaining, forKey: unreadKey)
+                center.setBadgeCount(remaining)
+            }
         }
     }
 
@@ -113,9 +162,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Center and the icon's count goes to zero, like Messages.
     static func clearAll() {
         UserDefaults.standard.set(0, forKey: unreadKey)
-        let center = UNUserNotificationCenter.current()
-        center.removeAllDeliveredNotifications()
-        center.setBadgeCount(0)
+        removals.async {
+            let center = UNUserNotificationCenter.current()
+            center.removeAllDeliveredNotifications()
+            center.setBadgeCount(0)
+        }
     }
 
     // MARK: UNUserNotificationCenterDelegate
@@ -124,10 +175,20 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler done: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
+        // An approval's banner: Otto's thread, with the sheet over it (again, if it was put off with Later).
+        if info["approval"] != nil {
+            Task { @MainActor in Doors.open("approval"); done() }
+            return
+        }
         let conversation = info["conversation"] as? String
         // A reminder (Reminders.swift) opens Otto's own thread, where its message lands once the Mac is up.
         if let open = conversation ?? (info["reminder"] != nil ? "app" : nil), response.actionIdentifier == UNNotificationDefaultActionIdentifier {
             Task { @MainActor in OttoStore.shared.pips.open(open); done() }
+            return
+        }
+        // One of Otto's own messages: its thread, wherever the app was left (a pip's thread, the Chats list, a card page).
+        if conversation == nil, response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            Task { @MainActor in Doors.open("chat"); done() }
             return
         }
         if response.actionIdentifier == Self.replyAction,
@@ -135,7 +196,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
            !text.isEmpty {
             // On disk before iOS is told we're done: it may suspend the app the moment it hears that.
             Task { @MainActor in
-                if let conversation { await OttoStore.shared.pips.thread(conversation).sendNow(text) } else { OttoStore.shared.send(text); OttoStore.shared.saveNow() }
+                if let conversation { await OttoStore.shared.pips.thread(conversation).sendNow(text) } else {
+                    let id = UUID()
+                    OttoStore.shared.send(text, id: id); OttoStore.shared.saveNow()
+                    // A launch for a banner's Reply has no loop to send it once the socket is up (as Siri's has none):
+                    // it's delivered here, before iOS is told we're done, or left pending for the next time the app runs.
+                    _ = await OttoStore.shared.sendAndConfirm(id)
+                    OttoStore.shared.saveNow()
+                }
                 done()
             }
             return
@@ -183,6 +251,8 @@ enum Grace {
 @MainActor
 enum Keepalive {
     private static var player: AVAudioPlayer?
+    /// The interruption observer's token: a block observer is only ever removed by it.
+    private static var interruption: (any NSObjectProtocol)?
 
     static var enabled: Bool { UserDefaults.standard.object(forKey: "stayAwake") as? Bool ?? true }
 
@@ -200,10 +270,16 @@ enum Keepalive {
         player?.numberOfLoops = -1
         player?.volume = 0
         player?.play()
-        // A phone call or Siri interrupts playback; pick it back up afterwards.
-        NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { n in
+        // A phone call or Siri interrupts playback; pick it back up afterwards, if it's still wanted: in the
+        // background, switched on, and with no call, voice note or dictation holding the audio session.
+        interruption = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { n in
             let type = (n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
-            if type == .ended { MainActor.assumeIsolated { player?.play() } }
+            guard type == .ended else { return }
+            MainActor.assumeIsolated {
+                guard UIApplication.shared.applicationState == .background, enabled,
+                      !CallManager.active, !VoiceRecorder.active, !Dictation.active else { return }
+                player?.play()
+            }
         }
     }
 
@@ -211,7 +287,8 @@ enum Keepalive {
         guard let p = player else { return }
         p.stop()
         player = nil
-        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        if let interruption { NotificationCenter.default.removeObserver(interruption) }
+        interruption = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
