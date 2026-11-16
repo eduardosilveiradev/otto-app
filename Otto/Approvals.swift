@@ -59,8 +59,10 @@ struct ApprovalPill: View {
         let stacked = size.isAccessibilitySize
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2)) : AnyLayout(HStackLayout(spacing: 8))
         Button(action: tap) {
-            HStack(spacing: 8) {
+            HStack(alignment: stacked ? .firstTextBaseline : .center, spacing: 8) {
+                // On the ask's first line when it stacks, not halfway down three.
                 Circle().fill(lapsed ? Color.secondary : Color.otto).frame(width: 7, height: 7)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] }
                 layout {
                     Text(request.ask).foregroundStyle(lapsed ? .secondary : .primary).lineLimit(stacked ? 2 : 1)
                     if !stacked { Spacer(minLength: 0) }
@@ -75,6 +77,7 @@ struct ApprovalPill: View {
                     }
                     .foregroundStyle(.secondary).lineLimit(1).fixedSize()
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: lapsed ? "xmark" : "chevron.up")
                     .font(size: 10, weight: .semibold, relativeTo: .caption2)
                     .foregroundStyle(.secondary)
@@ -186,6 +189,16 @@ struct ApprovalSheet: View {
             .accessibilityElement(children: .combine)
         }
 
+        // Right under the amount, so a caveat (no refunds, a seat hold) is read before the lines and the
+        // buttons, never left under the bar's fade at the bottom of a long list.
+        if !p.notes.isEmpty || p.test == true {
+            Section {
+                if p.test == true { Label("Test — nothing will be charged", systemImage: "testtube.2").foregroundStyle(.secondary) }
+                ForEach(p.notes, id: \.self) { Label($0, systemImage: "exclamationmark.circle").font(.subheadline) }
+            } header: { Text("Before you pay") }
+            .labelStyle(PlainIcon())   // a caveat isn't an action: its glyph takes the text colour, not the blue
+        }
+
         Section {
             ForEach(Array(p.items.enumerated()), id: \.offset) { _, i in
                 HStack(alignment: .firstTextBaseline) {
@@ -208,13 +221,8 @@ struct ApprovalSheet: View {
         Section {
             Label(p.method, systemImage: "creditcard")
         } header: { Text("Paying with") }
+        .labelStyle(PlainIcon())
 
-        if !p.notes.isEmpty || p.test == true {
-            Section {
-                if p.test == true { Label("Test — nothing will be charged", systemImage: "testtube.2").foregroundStyle(.secondary) }
-                ForEach(p.notes, id: \.self) { Label($0, systemImage: "exclamationmark.circle").font(.subheadline) }
-            } header: { Text("Before you pay") }
-        }
     }
 
     @ViewBuilder private var changeRows: some View {
@@ -296,7 +304,7 @@ struct ApprovalSheet: View {
 /// line, so the tint is never the only cue.
 private struct DiffPreview: View {
     let lines: [String]
-    /// Every line in full, instead of the first six cut to one line each: this is what gets approved.
+    /// Every line, instead of the first six. Each one wraps in full either way: what's cut off can't be read before Face ID.
     var whole = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -308,7 +316,7 @@ private struct DiffPreview: View {
                 let lead = removed ? "− " : added ? "+ " : "  "
                 Text(verbatim: names ? String(code) : lead + code)
                     .font(.system(.caption, design: .monospaced).weight(names ? .semibold : .regular))
-                    .lineLimit(whole ? nil : 1).truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10).padding(.vertical, 2)
                     .background(removed ? Color.redTint : added ? Color.greenTint : Color.clear)

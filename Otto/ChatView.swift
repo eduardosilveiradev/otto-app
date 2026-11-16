@@ -65,6 +65,8 @@ struct ChatView: View {
     /// When the "hold for walkie-talkie" hint last showed; it comes back every two months.
     @AppStorage("walkieHintAt") private var walkieHintAt = 0.0
     @State private var walkieHint = false
+    /// Asleep for longer than a dropped socket takes to come back (a second or two), so a blip never flashes a line.
+    @State private var unreachable = false
     @Environment(\.openURL) private var openURL
     /// Shared with the composer, which lives in its own hosting controller (see KeyboardDock).
     let ui: ComposerUI
@@ -274,6 +276,11 @@ struct ChatView: View {
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
         .task { await calls.run(store.backend) }
+        .task(id: store.asleep) {
+            guard store.asleep else { withAnimation(.easeOut(duration: 0.2)) { unreachable = false }; return }
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            withAnimation(.easeOut(duration: 0.2)) { unreachable = true }
+        }
         .task(id: seenDate) {
             guard let date = seenDate, let live = store.backend as? LiveBackend else { return }
             do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
@@ -669,17 +676,17 @@ struct ChatView: View {
     @ViewBuilder private var title: some View {
         if let row, row.isGroup {
             Button { store.pips.sheet = .group(row.id) } label: {
-                HeaderTitle(name: row.name) { GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 68) }
+                HeaderTitle(name: row.name, status: offline) { GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 68) }
             }
             .padding(.top, -7)
         } else if let row, row.kind == "pip", let pip = row.pips.first {
             Button { store.pips.sheet = .pip(pip.id) } label: {
-                HeaderTitle(name: row.name) { FaceView(look: pip.look, size: 68, live: true).frame(width: 68, height: 68) }
+                HeaderTitle(name: row.name, status: offline) { FaceView(look: pip.look, size: 68, live: true).frame(width: 68, height: 68) }
             }
             .padding(.top, -7)
         } else if pipsOn {
             Button { showDetails = true } label: {
-                HeaderTitle(name: "Otto") { FaceView(look: ottoLook, size: 68, live: true).frame(width: 68, height: 68) }
+                HeaderTitle(name: "Otto", status: offline) { FaceView(look: ottoLook, size: 68, live: true).frame(width: 68, height: 68) }
             }
             .padding(.top, -7)
             .matchedTransitionSource(id: "card", in: card)
@@ -694,11 +701,16 @@ struct ChatView: View {
                     }
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .glassEffect(.regular.interactive(), in: .capsule)
+                    if let offline { HeaderStatus(text: offline) }
                 }
             }
             .matchedTransitionSource(id: "card", in: card)
         }
     }
+
+    /// Said under the name once the Mac has been out of reach a few seconds: the sleeping face alone
+    /// reads as resting, and says nothing to VoiceOver. Tapping it opens the card with the server's fields.
+    private var offline: String? { unreachable ? String(localized: "Can’t reach your Mac") : nil }
 
     private var ottoLook: FaceLook {
         let base = row?.otto?.look ?? .otto
@@ -853,6 +865,8 @@ struct Composer: View {
                 Image(systemName: "plus").font(.system(size: 19, weight: .medium))
                     .frame(width: 40, height: 40)
                     .glassEffect(.regular.interactive(), in: .circle)
+                    // 44pt to tap; the circle stays Messages' 40.
+                    .padding(2).contentShape(.rect).padding(-2)
             }
             .tint(.secondary)
             .accessibilityLabel("Add photo")
@@ -865,6 +879,7 @@ struct Composer: View {
                     if let started = recorder.started {
                         Button { withAnimation(.snappy) { recorder.cancel() } } label: {
                             Image(systemName: "xmark").frame(width: 36, height: 36)
+                                .padding(4).contentShape(.rect).padding(-4)   // 44pt to tap, laid out at 36
                         }
                         .tint(.secondary)
                         .accessibilityLabel("Cancel recording")
@@ -897,6 +912,7 @@ struct Composer: View {
                             if thread.isOtto {
                             Button { Task { await recorder.start() } } label: {
                                 Image(systemName: "waveform").frame(width: 36, height: 36)
+                                    .padding(4).contentShape(.rect).padding(-4)   // 44pt to tap, laid out at 36
                             }
                             .tint(.secondary)
                             .accessibilityLabel("Record voice message")
@@ -910,8 +926,10 @@ struct Composer: View {
                                     .foregroundStyle(.white)
                                     .frame(width: 37, height: 27)
                                     .background(Color(red: 0.525, green: 0.553, blue: 0.592), in: .capsule)
+                                    // 44×40 to tap, as tall as the field; the pill stays where Messages draws it.
+                                    .padding(.horizontal, 3.5).padding(.vertical, 6.5).contentShape(.rect)
                             }
-                            .padding(.trailing, 6.5).padding(.bottom, 4.5)   // centred in a one-line field (measured), like Messages
+                            .padding(.trailing, 3).padding(.bottom, -2)   // the pill centred in a one-line field (measured), like Messages
                             .accessibilityLabel("Send")
                             .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                         }
@@ -1044,8 +1062,11 @@ struct Composer: View {
                                     .symbolRenderingMode(.palette)
                                     .foregroundStyle(.white, Color.black.opacity(0.6))
                                     .font(.system(size: 20))
+                                    .padding(3)
+                                    // The thumbnail's top-right 44pt is the target; the glyph stays in its corner.
+                                    .frame(width: 44, height: 44, alignment: .topTrailing).contentShape(.rect)
                             }
-                            .padding(3)
+                            .accessibilityLabel("Remove photo")
                         }
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 }

@@ -24,6 +24,13 @@ struct OttoApp: App {
             }
             .onOpenURL { url in
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
+                // The widgets: Otto's thread, or the walkie-talkie over it. Before setup there's no store to open.
+                if url.scheme == "otto", url.host == "chat" || url.host == "walkie" {
+                    guard onboarded else { return }
+                    if OttoStore.shared.pips.active { OttoStore.shared.pips.open("app") }
+                    if url.host == "walkie" { WalkieLauncher.shared.open = true }
+                    return
+                }
                 // Meta AI comes back here after connecting the glasses; anything else isn't the SDK's.
                 guard url.query()?.contains("metaWearablesAction") == true else { return }
                 Task { _ = try? await Wearables.shared.handleUrl(url) }

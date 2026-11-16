@@ -232,6 +232,8 @@ struct ConversationsView: View {
 /// The face over the glass name capsule: every top bar in the app.
 struct HeaderTitle<Face: View>: View {
     let name: String
+    /// A line under the name, for something true of the whole conversation (the Mac out of reach).
+    var status: String? = nil
     @ViewBuilder let face: () -> Face
 
     var body: some View {
@@ -244,9 +246,20 @@ struct HeaderTitle<Face: View>: View {
             .padding(.horizontal, 12).padding(.vertical, 6)
             .glassEffect(.regular.interactive(), in: .capsule)
             .frame(maxWidth: 240)
+            if let status { HeaderStatus(text: status) }
         }
         // Bar text, so it grows only so far (see ChatView's header).
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+}
+
+/// The line under a header's name: small, quiet, one line, and in the header button's spoken name.
+struct HeaderStatus: View {
+    let text: String
+    var body: some View {
+        Text(text).font(size: 12, weight: .medium, relativeTo: .caption).foregroundStyle(.secondary)
+            .lineLimit(1).padding(.top, 10)
+            .transition(.opacity)
     }
 }
 
