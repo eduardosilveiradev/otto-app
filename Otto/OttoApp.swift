@@ -105,6 +105,8 @@ private struct MainRoot: View {
     /// from disk at once, and an empty one says it's still loading and takes a message meanwhile (EmptyChat).
     /// Nothing here waits for the Mac.
     @State private var splashing = true
+    /// The app has been in the background since it was last in front (not merely inactive).
+    @State private var wasBackground = false
     /// How a pairing link's Connect went, said once the Mac has answered (or hasn't).
     @State private var paired: (title: String, message: String)?
 
@@ -160,8 +162,11 @@ private struct MainRoot: View {
             .onChange(of: phase, initial: true) { _, p in
                 if store.foreground && p != .active { store.pips.leftApp() }
                 store.foreground = p == .active
-                if p == .active { store.sendShared(); Notifier.clearAll(); store.resync() }
-                if p == .background { store.flush(); Notifier.scheduleRefresh() }
+                // The socket is only pinged after a real stay in the background, where iOS may have frozen it. A
+                // Face ID prompt also takes the app out of .active and back: a 2 s ping there shared the socket with
+                // the approval's own ack, and on a slow link could cut a healthy connection mid-answer.
+                if p == .active { store.sendShared(); Notifier.clearAll(); store.resync(probe: wasBackground); wasBackground = false; ApprovalPresenter.shared.sync(store) }
+                if p == .background { wasBackground = true; store.flush(); Notifier.scheduleRefresh() }
                 Grace.update(background: p == .background)
                 Keepalive.update(background: p == .background)
             }
@@ -227,7 +232,7 @@ final class OttoStore {
     /// Decisions sent without an answer, by approval: only the same one may be sent again. Kept across a
     /// relaunch: the app killed after a lost ack must not come back offering the other answer for a decision
     /// that may already have landed. Never resent on its own; dropped once the Mac no longer lists the approval.
-    var unconfirmedApprovals: [String: ApprovalDecision] = OttoStore.savedUnconfirmed() {
+    var unconfirmedApprovals: [String: ApprovalDecision] = OttoStore.restoreUnconfirmed() {
         didSet {
             UserDefaults.standard.set(try? JSONEncoder().encode(unconfirmedApprovals), forKey: "otto.unconfirmedApprovals")
             UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: "otto.unconfirmedApprovalsAt")
@@ -235,6 +240,19 @@ final class OttoStore {
     }
     /// What was saved, unless it's over an hour old: the Mac holds an approval for half an hour, so by then
     /// every one of them is gone and nothing here can still bind (a server without the pending list never prunes).
+    /// At launch: what was saved, with a decision that was still being sent folded in under the same hour's
+    /// limit (its own record is then dropped, so it can't be restored launch after launch).
+    private static func restoreUnconfirmed() -> [String: ApprovalDecision] {
+        let d = UserDefaults.standard
+        let all = savedUnconfirmed()
+        if d.object(forKey: "otto.sendingApproval") != nil {
+            d.set(try? JSONEncoder().encode(all), forKey: "otto.unconfirmedApprovals")
+            d.set(Date.now.timeIntervalSince1970, forKey: "otto.unconfirmedApprovalsAt")
+            d.removeObject(forKey: "otto.sendingApproval")
+        }
+        return all
+    }
+
     nonisolated static func savedUnconfirmed(now: Date = .now) -> [String: ApprovalDecision] {
         let d = UserDefaults.standard
         func read(_ key: String) -> [String: ApprovalDecision] { d.data(forKey: key).flatMap { try? JSONDecoder().decode([String: ApprovalDecision].self, from: $0) } ?? [:] }
@@ -489,7 +507,9 @@ final class OttoStore {
     /// from a list that was read before the answer landed.
     nonisolated static func reconciled(_ held: [ApprovalRequest], with pending: [ApprovalRequest], keeping kept: Set<String>, decided: Set<String>) -> [ApprovalRequest] {
         let live = Set(pending.map(\.id)), had = Set(held.map(\.id))
-        return held.filter { live.contains($0.id) || kept.contains($0.id) } + pending.filter { !had.contains($0.id) && !decided.contains($0.id) }
+        // One the Mac still lists is taken as the Mac lists it now (its copy is the newer); one kept for its receipt stays as it is.
+        let fresh = Dictionary(pending.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return held.compactMap { kept.contains($0.id) ? $0 : fresh[$0.id] } + pending.filter { !had.contains($0.id) && !decided.contains($0.id) }
     }
 
     func start() async {
@@ -897,7 +917,10 @@ final class OttoStore {
             for await u in backend.approvalUpdates {
                 switch u {
                 case .show(let a):
-                    if !approvals.contains(where: { $0.id == a.id }) {
+                    // One already held, sent again (a reconnect): the Mac's copy is the newer, unless it's up for its receipt.
+                    if let i = approvals.firstIndex(where: { $0.id == a.id }) {
+                        if !keptApprovals.contains(a.id), approvals[i] != a { approvals[i] = a }
+                    } else {
                         approvals.append(a); lapsedApproval = nil
                         // When the Mac leaves the alert to the app: in front, the sheet is the alert; in the background
                         // (keep-awake holds the socket) it's a banner, if iOS will show one. Only then is the Mac told.
@@ -963,6 +986,10 @@ final class OttoStore {
         }
         for await m in backend.incoming {
             if !serverTyping && m.from == .otto { ottoTyping = false }
+            // VoiceOver: a reply that lands while the app is in front is read out, as Messages reads a new message.
+            if foreground, animated, m.from == .otto, !m.text.isEmpty, UIAccessibility.isVoiceOverRunning {
+                AccessibilityNotification.Announcement("Otto: \(m.text.prefix(300))").post()
+            }
             // A reply held for a closed app is in /app/history too: a fresh launch reads
             // history first, then the socket flushes the held copy.
             if let i = messages.firstIndex(where: { $0.wireID == m.wireID }) {
@@ -1158,7 +1185,7 @@ final class OttoStore {
     /// the fact that the server has it after all.
     /// Back in front: a socket iOS froze in the background looks alive but dropped what was sent into it
     /// (a tapback, an edit, a reply), and no reconnect means no catch-up. One history read fills it in.
-    func resync() { Task { await backend.probe(); await catchUp(notify: false) }; Task { await syncApprovals() } }
+    func resync(probe: Bool = true) { Task { if probe { await backend.probe() }; await catchUp(notify: false) }; Task { await syncApprovals() } }
 
     /// Otto deleted these (a live "delete" frame, or history on reconnect): out of the thread and the
     /// saved copy, with what pointed at them. An id that isn't here changes nothing.
@@ -1351,12 +1378,15 @@ final class OttoStore {
 
     /// Asks the Mac to end the turn Otto is on. It says so in the thread; the bubble goes when its typing does.
     func stopTurn() async {
+        stopping = true; defer { stopping = false }
         let ok = await backend.stopTurn()
         UINotificationFeedbackGenerator().notificationOccurred(ok ? .success : .error)
         stopUnconfirmed = !ok
     }
     /// The Mac didn't confirm a Stop: said in an alert with Try Again, since Otto may still be working.
     var stopUnconfirmed = false
+    /// A Stop is on its way to the Mac: the bubble says so until the answer (or the wait for one) is over.
+    var stopping = false
 
     /// An approval's sheet is on screen: when the Mac leaves the alert to the app, that is the alert, and only now
     /// is the Mac told (within its 5 s, or its own push goes out as well, which is the safe way to be late).
@@ -1371,7 +1401,9 @@ final class OttoStore {
 
     @ObservationIgnored private var sawApprovals: Set<String> = []
 
-    func hideApproval(_ id: String) { hiddenApprovals.insert(id) }
+    func hideApproval(_ id: String) { hiddenApprovals.insert(id); putOff.insert(id) }
+    /// Approvals that were ever put off with Later (see the sheet's `wider`).
+    private(set) var putOff: Set<String> = []
     func reopenApproval(_ id: String) { hiddenApprovals.remove(id) }
 
     /// `keep`: the decision goes out, but the sheet stays up (a payment's receipt) until `closeApproval`.

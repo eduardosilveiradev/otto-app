@@ -41,7 +41,8 @@ final class Dictation: ObservableObject {
     }
 
     private func handleRequest() {
-        guard let r = DictationBridge.readRequest() else { return }
+        // Nothing to act on: the listening screen (openedFromKeyboard puts it up first) mustn't be left with no way out.
+        guard let r = DictationBridge.readRequest() else { showListening = false; return }
         switch r.action {
         case .start: start(r)
         case .stop: stop()
@@ -117,7 +118,7 @@ final class Dictation: ObservableObject {
     }
 
     private func stop() {
-        guard let url = fileURL, let r = request else { return }
+        guard let url = fileURL, let r = request else { showListening = false; return }   // nothing was recording: the screen goes all the same
         file = nil            // closes the file
         fileURL = nil
         warmUntil = Date().addingTimeInterval(Self.warmFor)
@@ -138,8 +139,12 @@ final class Dictation: ObservableObject {
         showListening = false
     }
 
+    /// The listening screen's own way out, whatever state the recording is in.
+    func close() { cancel() }
+
     private func publish(_ p: DictationBridge.State.Phase, text: String? = nil) {
         phase = p
+        if p == .failed { showListening = false }   // the microphone refused or wouldn't start: no screen to be stuck on
         DictationBridge.write(.init(phase: p, id: request?.id, text: text, level: level,
                                     alive: engine.isRunning ? Date().timeIntervalSince1970 : 0))
         DictationBridge.post(DictationBridge.toKeyboard)
@@ -235,5 +240,8 @@ struct DictationListeningView: View {
             .padding(.bottom, 30)
         }
         .frame(maxWidth: .infinity)
+        .overlay(alignment: .topLeading) {
+            Button("Close") { d.close() }.padding(.horizontal, 20).padding(.vertical, 12)
+        }
     }
 }

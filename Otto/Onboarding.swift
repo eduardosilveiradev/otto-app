@@ -300,6 +300,9 @@ private struct ConnectPage: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).padding(.vertical, 10)
                         .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12, style: .continuous))
+                    Text("Put your Mac’s own address in place of the last line: Tailscale’s menu on the Mac shows it. Tailscale has to be on, on the Mac and on this phone.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     // The same pairing link, pasted: with the command it pairs, not down among the buttons.
                     if canPaste {
                         PasteButton(payloadType: String.self) { strings in

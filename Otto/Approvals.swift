@@ -218,12 +218,18 @@ struct ApprovalPill: View {
 
 struct ApprovalSheet: View {
     @Environment(OttoStore.self) private var store
-    let request: ApprovalRequest
+    /// As it was when the sheet went up; `request` is the store's current copy of it (the Mac may send it again).
+    private let given: ApprovalRequest
+    private var request: ApprovalRequest { store.approvals.first { $0.id == given.id } ?? given }
+    init(request: ApprovalRequest) { given = request }
     @State private var busy = false
     @State private var failed: String?
     /// The decision sent without an answer: the sheet then only offers that one again. Kept by the
     /// store, so Later and the pill bringing the sheet back can't offer the other one.
     private var unconfirmed: ApprovalDecision? { store.unconfirmedApprovals[request.id] }
+    /// What may be picked besides this once. Not "for the rest of this task" on one that was put off with Later:
+    /// the task may be over by now, the Mac then counts the answer as once, and the sheet mustn't promise more.
+    private var wider: [ApprovalScope] { request.widerScopes.filter { $0 != .task || !store.putOff.contains(request.id) } }
     /// How long a yes lasts. Starts at this once every time the sheet opens: a wider one is always picked, never left over.
     @State private var scope = ApprovalSheet.openingScope
     /// `-approvalScope always`: the sheet opens with that one picked, for screenshots. Once, always, in a real build.
@@ -249,7 +255,7 @@ struct ApprovalSheet: View {
                 }
                 // At accessibility sizes what a lasting yes means is the first thing on the sheet (in the bar it could
                 // push the buttons off the screen; at the end of the list it would be out of sight of them).
-                if !paid, size.isAccessibilitySize, let lasting, !request.widerScopes.isEmpty, unconfirmed == nil {
+                if !paid, size.isAccessibilitySize, let lasting, !wider.isEmpty, unconfirmed == nil {
                     Section { Text(lasting).fontWeight(.semibold) }
                 }
                 if paid, let p = request.payment {
@@ -299,7 +305,6 @@ struct ApprovalSheet: View {
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
-                let wider = request.widerScopes
                 if wider.isEmpty { expiry } else {
                     // The clock and how long a yes lasts on one line; stacked once the text is too large to share it.
                     let row = size.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 8))
@@ -537,6 +542,8 @@ struct ApprovalSheet: View {
             do {
                 // Face ID, falling back to the passcode: someone holding an unlocked phone still can't approve.
                 guard try await ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) else { return }
+            } catch let e as LAError where [.userCancel, .appCancel, .systemCancel].contains(e.code) {
+                return   // you cancelled it yourself: nothing to report
             } catch {
                 failed = "Not approved — \(error.localizedDescription)"
                 return
@@ -627,13 +634,14 @@ struct PrintedReceipt: View {
 
     private func run() async {
         if reduceMotion { stage = .complete; frac = 1; return }
-        try? await Task.sleep(for: .milliseconds(700))
+        // Closed part-way, it stops: a cancelled sleep returns at once, and the rest would run through in a burst of ticks.
+        do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
         withAnimation(Self.easeOut) { stage = .printing }
         let tick = UIImpactFeedbackGenerator(style: .soft)
         for s in Self.stops {
             withAnimation(.linear(duration: Self.push)) { frac = 1 - s }
             tick.impactOccurred(intensity: 0.5)
-            try? await Task.sleep(for: .seconds(Self.push + Self.pause))
+            do { try await Task.sleep(for: .seconds(Self.push + Self.pause)) } catch { return }
         }
         withAnimation(Self.easeOut) { stage = .complete }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -846,6 +854,10 @@ struct PrintedReceipt: View {
         guard var top = scene?.keyWindow?.rootViewController else { return nil }
         while let next = top.presentedViewController { top = next }
         guard !top.isBeingPresented, !top.isBeingDismissed, top.transitionCoordinator == nil, !(top is UIAlertController) else { return nil }
+        // Not while a voice note or a walkie press is recording: a sheet coming up under the finger could leave the
+        // hold never ended and the microphone open. It goes up when the recording stops (and the Mac's own push
+        // covers the wait, since nothing is said to have been alerted).
+        guard !VoiceRecorder.active else { return nil }
         return top
     }
 }

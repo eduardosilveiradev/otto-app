@@ -37,7 +37,7 @@ extension OttoStore: ChatThread {
     var name: String { "Otto" }
     var isOtto: Bool { true }
     var typing: Bool { ottoTyping }
-    var typingStatus: String? { ottoStatus }
+    var typingStatus: String? { stopping ? String(localized: "Stopping…") : ottoStatus }
     var typingTodos: [TodoItem] { ottoTodos }
     var conversationID: String { "app" }
     func send(_ text: String) { send(text, shared: false) }
@@ -108,6 +108,9 @@ struct ChatView: View {
     private static let page = 60
 
     private var lastMine: Message.ID? { thread.messages.last(where: { $0.from == .me })?.id }
+    /// A message sent from this screen starts out pending; one of yours that came in from elsewhere doesn't.
+    /// (A function, not a closure on the modifier: that chain is at the type-checker's limit.)
+    private func sentFromHere(_ old: Message.ID?, _ new: Message.ID?) -> Bool { thread.messages.last { $0.id == new }?.pending == true }
     /// The message a tapped quote jumped to, lit up for a moment.
     @State private var flashed: Message.ID?
     /// A row is being swiped to reply: the thread holds still under it, like Messages.
@@ -280,7 +283,9 @@ struct ChatView: View {
             ottoTop
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
-        .task { await calls.run(store.backend) }
+        // Started again when the connection comes up: at launch the first try is made before it has, and a failed
+        // first poll otherwise waits out a minute before the next.
+        .task(id: store.connected) { await calls.run(store.backend) }
         .task(id: store.asleep) {
             guard store.asleep else { withAnimation(.easeOut(duration: 0.2)) { unreachable = false }; return }
             do { try await Task.sleep(for: .seconds(3)) } catch { return }
@@ -292,7 +297,7 @@ struct ChatView: View {
             await live.seen(date)
         }
         .modifier(ThreadSeen(pips: store.pips, thread: thread) { await jumpToMatch() })
-        .task { if thread.isOtto { await gate.run(store.backend) } }
+        .task(id: store.connected) { if thread.isOtto { await gate.run(store.backend) } }
         .sheet(isPresented: $showGate) { GateSheet(watch: gate) }
         // `-openGate`: open the boarding pass as soon as there is one, for screenshots.
         .onChange(of: gate.card?.key, initial: true) {
@@ -379,6 +384,11 @@ struct ChatView: View {
             MediaViewerView(store: store).presentationBackground(.clear)
         }
         .fullScreenCover(isPresented: $browserOpen) { BrowserFullScreen() }
+        // On the thread, not on the bubble: hung there, it could wait for a bubble that had gone and come up on Otto's next turn.
+        .alert("Couldn’t confirm Stop", isPresented: Binding(get: { thread.isOtto && store.stopUnconfirmed }, set: { store.stopUnconfirmed = $0 })) {
+            Button("Try Again") { Task { await store.stopTurn() } }
+            Button("OK", role: .cancel) {}
+        } message: { Text("Your Mac didn’t answer, so Otto may still be working.") }
         .alert("Calling Otto", isPresented: Binding(get: { CallLauncher.shared.explain }, set: { CallLauncher.shared.explain = $0 })) {
             Button("OK", role: .cancel) {}
         } message: { Text("Add Otto’s phone number in details (tap Otto’s name).") }
@@ -484,10 +494,6 @@ struct ChatView: View {
                                 try? await Task.sleep(for: .seconds(5))
                                 stopHint = false
                             }
-                            .alert("Couldn’t confirm Stop", isPresented: Bindable(store).stopUnconfirmed) {
-                                Button("Try Again") { Task { await store.stopTurn() } }
-                                Button("OK", role: .cancel) {}
-                            } message: { Text("Your Mac didn’t answer, so Otto may still be working.") }
                             .transition(still ? .opacity : .asymmetric(insertion: .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity),
                                                                        removal: .opacity))
                     }
@@ -509,7 +515,7 @@ struct ChatView: View {
         // it slid back (measured frame by frame with -shiftLab). A burst (a catch-up) lands in one step
         // rather than sliding the whole thread by all of it.
         // A row going (Otto deleted it) fades and the rest close up; under Reduce Motion a short fade, no spring.
-        .animation(thread.animated && !burst ? (still && messages.count < counted.rows ? .easeOut(duration: 0.2) : .spring(response: 0.42, dampingFraction: 0.82)) : nil,
+        .animation(thread.animated && !burst ? (still ? .easeOut(duration: 0.2) : .spring(response: 0.42, dampingFraction: 0.82)) : nil,
                    value: messages.count)
         // After this update's other handlers have run, so they all still see a burst as one.
         .onChange(of: messages.count, initial: true) { _, n in Task { counted.rows = n } }
@@ -594,7 +600,9 @@ struct ChatView: View {
                 }
             }
         }
-        .sensoryFeedback(.impact(weight: .light), trigger: lastMine)
+        // Felt for a message sent from here (it starts out pending), not for one of yours that arrived from the
+        // share sheet, the Mac or another device.
+        .sensoryFeedback(.impact(weight: .light), trigger: lastMine, condition: sentFromHere)
         #if DEBUG
         // `-search <words>`: the thread searched for them, keyboard down (up with `-searchFocus`), for screenshots.
         .task {
@@ -1015,7 +1023,8 @@ struct Composer: View {
         .onChange(of: draft) {
             if draft.isEmpty, let own = setAside { setAside = nil; draft = own; return }   // the prefilled words went: yours come back
             // While yours are set aside they stay the saved draft: a relaunch brings back what you wrote, not the prefill.
-            if setAside == nil { UserDefaults.standard.set(draft.isEmpty ? nil : draft, forKey: draftKey) }
+            // Nor with pictures or a PDF attached: those can't be kept, and their caption alone ("Ticket.pdf, 2 pages") would come back as a lie.
+            if setAside == nil, attachments.isEmpty { UserDefaults.standard.set(draft.isEmpty ? nil : draft, forKey: draftKey) }
         }
         #if DEBUG
         // Layout checks without a keyboard or a server: `-growDraft` types, `-seedDraft`
@@ -1730,7 +1739,7 @@ private struct Row: View {
                 // stretch is field width over bubble width (the row is as wide as the screen).
                 .modifier(SendMorph(progress: morph, lift: lift))
                 .onAppear {
-                    guard fresh else { return }
+                    guard fresh, !still else { return }   // Reduce Motion: the bubble is simply there, no flight from the field
                     morph = 0
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { morph = 1 }
                 }
@@ -2190,18 +2199,24 @@ private struct VoiceRow: View {
                             .foregroundStyle(ink)
                             .opacity(active ? 0 : 1).accessibilityHidden(active)
                     }
-                    Button { player.nextRate() } label: {
-                        Text("\(player.rate.formatted())×")
-                            .monospacedDigit().font(size: 12, weight: .semibold, relativeTo: .caption)
-                            .foregroundStyle(ink)
-                            .padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(ink.opacity(0.18), in: .capsule)
-                            .padding(.vertical, 10).padding(.horizontal, 4).contentShape(.rect).padding(.vertical, -10).padding(.horizontal, -4)
+                    // The button exists only while it can do something. Its label, hidden, holds the slot open the
+                    // rest of the time (.hidden() takes it out of VoiceOver and touches too; an invisible button
+                    // was still found by assistive tools).
+                    let speed = Text("\(player.rate.formatted())×")
+                        .monospacedDigit().font(size: 12, weight: .semibold, relativeTo: .caption)
+                        .foregroundStyle(ink)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(ink.opacity(0.18), in: .capsule)
+                    speed.hidden()
+                    if active {
+                        Button { player.nextRate() } label: {
+                            speed.padding(.vertical, 10).padding(.horizontal, 4).contentShape(.rect).padding(.vertical, -10).padding(.horizontal, -4)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Playback speed")
+                        .accessibilityValue("\(player.rate.formatted()) times")
+                        .transition(.opacity)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Playback speed")
-                    .accessibilityValue("\(player.rate.formatted()) times")
-                    .opacity(active ? 1 : 0).allowsHitTesting(active).accessibilityHidden(!active)
                 }
                 .animation(.easeOut(duration: 0.15), value: active)
             }
@@ -2705,6 +2720,7 @@ struct BrowserFullScreen: View {
                         .foregroundStyle(problem == nil ? Color.secondary : Color.redInk)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
+                        .allowsHitTesting(false)   // a tap on the caption is a tap on the black behind it: watching, it closes the page
                     Spacer(minLength: 0)
                     if holding { controls } else if shown.tile.control {
                         // Where Otto is stuck (a sign-in, a CAPTCHA), you can do that step yourself. Behind Face ID:
