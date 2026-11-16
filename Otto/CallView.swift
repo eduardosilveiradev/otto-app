@@ -3,6 +3,7 @@ import AVFoundation
 import Combine
 import SwiftUI
 import Vapi
+import VoiceGlowKit
 
 /// A Vapi web call to the Otto assistant: audio over the internet instead of the
 /// phone network, so no carrier minutes. Config lives in UserDefaults like the
@@ -80,6 +81,8 @@ final class CallManager {
 
     /// 0…1, how loud Otto is right now; drives the face.
     var level: Float { vapi?.remoteAudioLevel ?? 0 }
+    /// 0…1, whoever is louder, Otto or the user (unless muted); drives the screen glow.
+    var anyLevel: Float { max(level, muted ? 0 : vapi?.localAudioLevel ?? 0) }
 
     func start(context: String? = nil) {
         let d = UserDefaults.standard
@@ -179,12 +182,24 @@ struct CallView: View {
     /// The group or pip the call was placed from; nil from Otto's own thread.
     var context: String? = nil
     @State private var transcript = false
-    /// Reduce Motion: the face keeps its size; the caption and the timer say the call is live.
+    /// Reduce Motion: the face keeps its size and the glow its idle level; the caption and the timer say the call is live.
     @Environment(\.accessibilityReduceMotion) private var still
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()   // plain black: nothing glows
+            Color.black.ignoresSafeArea()   // plain black: nothing glows behind the face
+
+            // The same glow as a recording voice note, rising from the screen's edge with either voice.
+            Color.clear
+                .voiceGlow(type: .mobile, levelProvider: { [call, still] in still ? 0 : Double(min(1, call.anyLevel * 4)) },
+                           active: call.phase == .live, theme: .dark, cornerRadius: 55, options: {
+                               var o = VoiceGlowOptions()
+                               o.sensitivity = 10; o.attack = 0.12; o.release = 0.5; o.idle = 0.4
+                               o.brightness = 1.4; o.saturation = 1.5
+                               return o
+                           }())
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
             VStack(spacing: 0) {
                 Spacer()
