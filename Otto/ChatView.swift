@@ -329,17 +329,22 @@ struct ChatView: View {
         // thinking bubble is scrolled out of view and the connection is fine, so the step is never on screen twice.
         .overlay(alignment: .bottomLeading) {
             if scrolledUp && !showingResults && thread.typing && thread.connected, let step = thread.typingStatus, !step.isEmpty {
-                HStack(spacing: 6) {
-                    OttoThinkingSpinner(kind: OttoThinkingSpinner.Kind(step: step) ?? .think, size: 13)
-                    Text(step).lineLimit(1).truncationMode(.tail)
-                        .contentTransition(.interpolate)
-                        .animation(.snappy, value: step)
+                // Tapped, back down to the bubble it comes from, with the rest of the work in it.
+                Button { move { $0.scrollTo(edge: .bottom) } } label: {
+                    HStack(spacing: 6) {
+                        OttoThinkingSpinner(kind: OttoThinkingSpinner.Kind(step: step) ?? .think, size: 13)
+                        Text(step).lineLimit(1).truncationMode(.tail)
+                            .contentTransition(.interpolate)
+                            .animation(.snappy, value: step)
+                    }
+                    // 36pt to tap without reaching down into the composer or far up into the bubbles over it.
+                    .padding(.horizontal, 10).padding(.vertical, 10).contentShape(.rect)
                 }
+                .buttonStyle(.plain)
                 .font(size: 12, design: .monospaced, relativeTo: .caption).foregroundStyle(.secondary)
-                .accessibilityElement(children: .ignore).accessibilityLabel("Otto: \(step)")
-                .padding(.leading, 20).padding(.trailing, 72)
-                .padding(.bottom, ui.bottomInset + 6)
-                .allowsHitTesting(false)
+                .accessibilityLabel("Otto: \(step)").accessibilityHint("Scrolls down to it")
+                .padding(.leading, 10).padding(.trailing, 62)
+                .padding(.bottom, ui.bottomInset - 4)
                 .transition(.opacity)
             }
         }
@@ -797,6 +802,10 @@ struct Composer: View {
     @State private var todosOpen = ProcessInfo.processInfo.arguments.contains("-todosOpen")
     /// Otto's open to-dos, over the box while it isn't working; the thinking bubble has them while it is.
     private var todos: [TodoItem] { thread.isOtto && !thread.typing && recorder.started == nil ? store.openTodos : [] }
+    /// An approval put off with Later. It needs you, so it takes the to-dos' place until it's answered.
+    private var waiting: ApprovalRequest? { thread.isOtto && recorder.started == nil ? store.waitingApproval : nil }
+    /// One the Mac let lapse before an answer: said once, in the same place, until tapped away.
+    private var lapsed: ApprovalRequest? { thread.isOtto && recorder.started == nil ? store.lapsedApproval : nil }
 
     struct Attachment: Identifiable { let id = UUID(); let image: UIImage }
 
@@ -827,7 +836,11 @@ struct Composer: View {
         if !mentionMatches.isEmpty {
             MentionBar(members: mentionMatches, pick: mention).transition(.opacity)
         }
-        if !todos.isEmpty {
+        if let waiting {
+            ApprovalPill(request: waiting) { store.reopenApproval(waiting.id) }.transition(.opacity)
+        } else if let lapsed {
+            ApprovalPill(request: lapsed, lapsed: true) { store.lapsedApproval = nil }.transition(.opacity)
+        } else if !todos.isEmpty {
             TodoPill(items: todos, open: $todosOpen).transition(.opacity)
         }
         HStack(alignment: .bottom, spacing: 12) {

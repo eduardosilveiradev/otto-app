@@ -34,15 +34,74 @@ struct ApprovalRequest: Decodable, Identifiable, Hashable {
     var payment: Payment? = nil
 }
 
+extension ApprovalRequest {
+    /// What it asks, in a few words: the payment's amount and payee, or the change's title.
+    var ask: String { payment.map { "Pay \($0.money($0.total)) to \($0.merchant)" } ?? title }
+    /// Whole minutes until the Mac drops it, rounded up; nil when the server sent no time.
+    func minutesLeft(at now: Date) -> Int? {
+        LiveBackend.date(expires).map { max(1, Int(($0.timeIntervalSince(now) / 60).rounded(.up))) }
+    }
+}
+
 enum ApprovalUpdate { case show(ApprovalRequest), done(String) }
+
+/// An approval put off with Later, over the composer until it's answered or lapses: what it asks
+/// and how long the Mac holds it. Tapping it brings the sheet back. Once the Mac has let it lapse
+/// unanswered, the same line says so until it's tapped away.
+struct ApprovalPill: View {
+    let request: ApprovalRequest
+    var lapsed = false
+    let tap: () -> Void
+    @Environment(\.dynamicTypeSize) private var size
+
+    var body: some View {
+        // At accessibility sizes the time goes under the ask, which gets two lines: the amount leads it and never truncates.
+        let stacked = size.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2)) : AnyLayout(HStackLayout(spacing: 8))
+        Button(action: tap) {
+            HStack(spacing: 8) {
+                Circle().fill(lapsed ? Color.secondary : Color.otto).frame(width: 7, height: 7)
+                layout {
+                    Text(request.ask).foregroundStyle(lapsed ? .secondary : .primary).lineLimit(stacked ? 2 : 1)
+                    if !stacked { Spacer(minLength: 0) }
+                    Group {
+                        if lapsed {
+                            Text("Expired")
+                        } else {
+                            TimelineView(.periodic(from: .now, by: 15)) { tl in
+                                if let m = request.minutesLeft(at: tl.date) { Text("\(m) min left").monospacedDigit() }
+                            }
+                        }
+                    }
+                    .foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                }
+                Image(systemName: lapsed ? "xmark" : "chevron.up")
+                    .font(size: 10, weight: .semibold, relativeTo: .caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .font(size: 13, weight: .medium, relativeTo: .footnote)
+            .padding(.vertical, stacked ? 8 : 0)
+            .frame(minHeight: 34)
+            // 44pt to tap, reaching into the gap above the box, as the to-do pill does.
+            .padding(.bottom, 10).contentShape(.rect).padding(.bottom, -10)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .glassEffect(.regular, in: .rect(cornerRadius: 17, style: .continuous))
+        .accessibilityLabel(lapsed ? "Expired before you answered: \(request.ask)" : "Waiting on you: \(request.ask)")
+        .accessibilityValue(lapsed ? "" : request.minutesLeft(at: .now).map { "\($0) minutes left" } ?? "")
+        .accessibilityHint(lapsed ? "Dismisses it" : "Opens it to approve or decline")
+    }
+}
 
 struct ApprovalSheet: View {
     @Environment(OttoStore.self) private var store
     let request: ApprovalRequest
     @State private var busy = false
     @State private var failed: String?
-    /// The decision sent without an answer: the sheet then only offers that one again.
-    @State private var unconfirmed: Bool?
+    /// The decision sent without an answer: the sheet then only offers that one again. Kept by the
+    /// store, so Later and the pill bringing the sheet back can't offer the other one.
+    private var unconfirmed: Bool? { store.unconfirmedApprovals[request.id] }
     /// Paid: the decision has gone to the Mac, and the receipt prints before the sheet closes.
     /// `-receiptDemo`: straight to the receipt, for recordings (Face ID can't be tapped in the simulator).
     @State private var paid = ProcessInfo.processInfo.arguments.contains("-receiptDemo")
@@ -54,7 +113,7 @@ struct ApprovalSheet: View {
                     Section { PrintedReceipt(payment: p).listRowBackground(Color.clear).listRowInsets(EdgeInsets()) }
                 } else if let p = request.payment { paymentRows(p) } else { changeRows }
 
-                if let failed {
+                if let failed = failed ?? unconfirmed.map({ _ in Self.unconfirmedLine }) {
                     Section { Text(failed).foregroundStyle(Color.redInk).font(.footnote) }
                 }
             }
@@ -85,6 +144,14 @@ struct ApprovalSheet: View {
                     .buttonStyle(.borderedProminent).controlSize(.large)
                     .padding(.horizontal, 20).padding(.vertical, 12)
                 } else {
+                VStack(spacing: 10) {
+                // The Mac holds it for half an hour; Later doesn't stop that clock.
+                TimelineView(.periodic(from: .now, by: 15)) { tl in
+                    if let m = request.minutesLeft(at: tl.date) {
+                        Text("Expires in \(m) min").monospacedDigit()
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
                 HStack(spacing: 12) {
                     Button { Task { await decide(false) } } label: {
                         Text("Decline").frame(maxWidth: .infinity)
@@ -98,6 +165,7 @@ struct ApprovalSheet: View {
                 .font(.headline)
                 .controlSize(.large)
                 .disabled(busy)
+                }
                 .padding(.horizontal, 20).padding(.vertical, 12)
                 }
                 }
@@ -217,10 +285,11 @@ struct ApprovalSheet: View {
         // The decision may have landed and only its answer been lost: trying again is safe (same decision),
         // but saying "nothing was paid" might not be true.
         case .unknown:
-            failed = "Couldn’t confirm with your Mac. Check the chat, or try again."
-            unconfirmed = approve
+            failed = Self.unconfirmedLine
+            store.unconfirmedApprovals[request.id] = approve
         }
     }
+    private static let unconfirmedLine = "Couldn’t confirm with your Mac. Check the chat, or try again."
 }
 
 /// A few changed lines of one file: removed on the red tint, added on the green. The sign leads each
