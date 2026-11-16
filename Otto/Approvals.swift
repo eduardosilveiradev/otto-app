@@ -136,6 +136,14 @@ enum ApprovalCheck {
         assert(link?.consequence.contains("calls") == true && PairingLink("otto://pair?server=https://m.example&token=t")?.consequence.contains("calls") == false, "a link that changes calls says so")
         assert(PairingLink("otto://pair?server=javascript:alert(1)&token=abc") == nil && PairingLink("otto://pair?server=https://x.example") == nil
                && PairingLink("https://evil.example/pair?server=https://x&token=t") == nil && PairingLink("otto://chat") == nil, "not a pairing link")
+        // A decision still marked as being sent (the app died waiting for its ack) comes back as unconfirmed.
+        let inFlight = ApprovalDecision(approve: true, scope: .always)
+        UserDefaults.standard.set(try? JSONEncoder().encode(["check": inFlight]), forKey: "otto.sendingApproval")
+        assert(OttoStore.savedUnconfirmed()["check"] == inFlight, "a decision in flight is kept")
+        UserDefaults.standard.removeObject(forKey: "otto.sendingApproval")
+        assert(OttoStore.savedUnconfirmed()["check"] == nil, "and gone once it's settled")
+        // Pairing: only Otto's own answer counts, not any page that says 200.
+        assert(ServerProblem.isOtto(Data(#"{"toggles":[]}"#.utf8)) && !ServerProblem.isOtto(Data("<html>Sign in to Wi-Fi</html>".utf8)) && !ServerProblem.isOtto(Data("[]".utf8)), "a 200 that isn't Otto's")
         print("approval check ok")
         // An answer given with no socket never leaves the phone: it's said as that, and nothing is queued to
         // go out on the next connect (a stale yes then would be the worst of both).

@@ -833,6 +833,10 @@ struct Composer: View {
     @State private var pickingPDF = false
     /// A PDF that couldn't be read (locked, or not one): said once, in an alert.
     @State private var unreadablePDF = false
+    /// A PDF just attached had more pages than go along: said in an alert, with how many did.
+    @State private var cutPDF: (shown: Int, total: Int)?
+    /// What was in the box when words were put there from elsewhere (a memory's Correct): back once those are sent or cleared.
+    @State private var setAside: String?
     @State private var showLibrary = false
     @State private var picked: [PhotosPickerItem] = []
     @State private var recorder = VoiceRecorder()
@@ -887,8 +891,8 @@ struct Composer: View {
             if thread.isOtto {
             Menu {
                 Button("Camera", systemImage: "camera") { showCamera = true }
+                    .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))   // none (a restriction, the simulator): UIKit raises on presenting it
                 Button("PDF", systemImage: "doc") { pickingPDF = true }
-                    .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
                 Button("Photos", systemImage: "photo.on.rectangle") { showLibrary = true }
             } label: {
                 Image(systemName: "plus").font(.system(size: 19, weight: .medium))
@@ -1008,7 +1012,11 @@ struct Composer: View {
         // Unsent words survive the app being closed or killed: kept per conversation as they're typed, gone
         // once sent or cleared. ponytail: the words only; photos waiting in the strip aren't kept.
         .onAppear { if draft.isEmpty, let kept = UserDefaults.standard.string(forKey: draftKey) { draft = kept } }
-        .onChange(of: draft) { UserDefaults.standard.set(draft.isEmpty ? nil : draft, forKey: draftKey) }
+        .onChange(of: draft) {
+            if draft.isEmpty, let own = setAside { setAside = nil; draft = own; return }   // the prefilled words went: yours come back
+            // While yours are set aside they stay the saved draft: a relaunch brings back what you wrote, not the prefill.
+            if setAside == nil { UserDefaults.standard.set(draft.isEmpty ? nil : draft, forKey: draftKey) }
+        }
         #if DEBUG
         // Layout checks without a keyboard or a server: `-growDraft` types, `-seedDraft`
         // fills the box, `-seedAttachments` adds two photos, `-keyboardDemo` loops focus,
@@ -1053,7 +1061,15 @@ struct Composer: View {
             let read = (try? Data(contentsOf: url)).map { PDFPages.images($0) }
             guard let read, !read.pages.isEmpty else { unreadablePDF = true; return }
             withAnimation(.snappy) { attachments += read.pages.map { Attachment(image: $0) } }
-            if draft.isEmpty { draft = PDFPages.caption(url.lastPathComponent, shown: read.pages.count, total: read.total) }
+            // Its name and page count go along as words. Cut to its first pages, that is always said: on a line
+            // of its own under words already in the box, and in an alert, since Otto won't see the rest.
+            let caption = PDFPages.caption(url.lastPathComponent, shown: read.pages.count, total: read.total)
+            if draft.isEmpty { draft = caption } else if read.pages.count < read.total { draft += "\n" + caption }
+            if read.pages.count < read.total { cutPDF = (read.pages.count, read.total) }
+        }
+        .alert("Only the first \(cutPDF?.shown ?? 0) of \(cutPDF?.total ?? 0) pages are attached",
+               isPresented: Binding(get: { cutPDF != nil }, set: { if !$0 { cutPDF = nil } })) { Button("OK") {} } message: {
+            Text("A PDF goes to Otto as pictures of its pages, eight at most. For the rest, send them as another PDF, or ask Otto to open the file on your Mac.")
         }
         .alert("Couldn’t read that PDF", isPresented: $unreadablePDF) { Button("OK") {} } message: {
             Text("It may be locked with a password. Unlock it, or send screenshots of the pages.")
@@ -1062,6 +1078,8 @@ struct Composer: View {
         .onChange(of: store.prefill, initial: true) { _, words in
             guard thread.isOtto, let words else { return }
             store.prefill = nil
+            // What was already in the box isn't lost to it: set aside, and back once these words are sent or cleared.
+            if !draft.isEmpty, setAside == nil { setAside = draft }
             draft = words; focused = true
         }
         .photosPicker(isPresented: $showLibrary, selection: $picked, maxSelectionCount: 10, matching: .images)

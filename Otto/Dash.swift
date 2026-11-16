@@ -124,6 +124,13 @@ extension OttoBackend {
             return nil
         }
     }
+
+    /// What this page showed the last time it could be read, and when: for a Mac that's out of reach now.
+    func dashKept<T: Decodable>(_ path: String, query: [String: String] = [:]) -> (value: T, at: Date)? {
+        guard let kept = dashKept(path, query: query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }),
+              let value = try? JSONDecoder().decode(T.self, from: kept.data) else { return nil }
+        return (value, kept.at)
+    }
 }
 
 /// Fetches one dashboard endpoint and hands it to `content` with a reload, or says the Mac is out of reach.
@@ -145,7 +152,7 @@ struct Loaded<T: Decodable, Content: View>: View {
                     .safeAreaInset(edge: .bottom) {
                         if stale {
                             HStack(spacing: 8) {
-                                Text("\(why.stale) This is from \(loadedAt.formatted(date: .omitted, time: .shortened)).")
+                                Text("\(why.stale) This is from \(loadedAt.formatted(date: Calendar.current.isDateInToday(loadedAt) ? .omitted : .abbreviated, time: .shortened)).")
                                     .font(.footnote).foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 Button("Try again") { Task { await load() } }.font(.footnote.weight(.semibold))
@@ -202,6 +209,10 @@ struct Loaded<T: Decodable, Content: View>: View {
 
     private func load() async {
         if let v: T = await store.backend.dash(path, query: query) { value = v; failed = false; stale = false; loadedAt = .now }
+        // No answer at all (not a refusal or a missing page): what this page showed last time, said to be old.
+        else if value == nil, store.backend.dashFailure(path) == 0, let kept: (value: T, at: Date) = store.backend.dashKept(path, query: query) {
+            value = kept.value; failed = false; stale = true; loadedAt = kept.at
+        }
         else if value == nil { failed = true } else { stale = true }
         #if DEBUG
         // `-staleDash`: as if a later read had failed, for screenshots of the line that says so.

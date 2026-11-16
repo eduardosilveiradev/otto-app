@@ -143,7 +143,7 @@ private struct MainRoot: View {
                         switch await link.problem() {
                         case nil: link.save(); paired = ("Connected to \(link.host)", "Quit and reopen Otto to switch to it.")
                         case .refused?: paired = ("Not connected", "\(link.host) didn’t accept this link’s token, so nothing was changed. Make a new link on your Mac.")
-                        case let problem?: paired = ("Not connected", "Nothing was changed. \(problem == .unreachable ? "Can’t reach \(link.host). Check it’s awake and on Tailscale." : problem.message)")
+                        case let problem?: paired = ("Not connected", "Nothing was changed. \(problem == .unreachable ? "Can’t reach \(link.host). Check it’s awake and on Tailscale." : problem.message)")   // .notOtto among them: a page that answered 200 isn't a Mac to pair with
                         }
                     }
                 }
@@ -235,10 +235,13 @@ final class OttoStore {
     }
     /// What was saved, unless it's over an hour old: the Mac holds an approval for half an hour, so by then
     /// every one of them is gone and nothing here can still bind (a server without the pending list never prunes).
-    private static func savedUnconfirmed(now: Date = .now) -> [String: ApprovalDecision] {
+    nonisolated static func savedUnconfirmed(now: Date = .now) -> [String: ApprovalDecision] {
         let d = UserDefaults.standard
-        guard now.timeIntervalSince1970 - d.double(forKey: "otto.unconfirmedApprovalsAt") < 3600 else { return [:] }
-        return d.data(forKey: "otto.unconfirmedApprovals").flatMap { try? JSONDecoder().decode([String: ApprovalDecision].self, from: $0) } ?? [:]
+        func read(_ key: String) -> [String: ApprovalDecision] { d.data(forKey: key).flatMap { try? JSONDecoder().decode([String: ApprovalDecision].self, from: $0) } ?? [:] }
+        // One still marked as being sent means the app died waiting for its ack: unconfirmed, as if no answer had come.
+        let sending = read("otto.sendingApproval")
+        guard now.timeIntervalSince1970 - d.double(forKey: "otto.unconfirmedApprovalsAt") < 3600 else { return sending }
+        return read("otto.unconfirmedApprovals").merging(sending) { kept, _ in kept }
     }
     /// The last one that lapsed on the Mac before it was answered: the pill says so until dismissed.
     var lapsedApproval: ApprovalRequest?
@@ -901,7 +904,9 @@ final class OttoStore {
                         // Untold (notifications off, the app frozen), it sends its own push, so one always arrives.
                         // In front it's told from the sheet itself, once that is on screen (sawApproval): a call, the
                         // card or another sheet can be in its way, and then the Mac's push must still come.
-                        if backend.alertsApprovals, !foreground {
+                        // Background only, not merely inactive (the app switcher, Notification Center pulled down): there
+                        // iOS shows no banner for an app that is still in front, and the Mac would be told of an alert nobody got.
+                        if backend.alertsApprovals, UIApplication.shared.applicationState == .background {
                             Task {
                                 if await Notifier.shared.post(approval: a) { alertedApprovals.insert(a.id); await backend.alerted(approval: a.id) }
                             }
@@ -1375,7 +1380,13 @@ final class OttoStore {
     /// on the next connect while it's still live.
     func decide(_ id: String, approve: Bool, scope: ApprovalScope = .once, keep: Bool = false) async -> ApprovalOutcome {
         if keep { keptApprovals.insert(id) }   // before the send: the Mac's "done" can beat its reply
+        // On disk before it's sent: killed while the ack is awaited, the app comes back holding to this answer
+        // (savedUnconfirmed), not offering the other one for a decision the Mac may already have.
+        let decision = ApprovalDecision(approve: approve, scope: scope)
+        UserDefaults.standard.set(try? JSONEncoder().encode([id: decision]), forKey: "otto.sendingApproval")
         let outcome = await backend.decide(approval: id, approve: approve, scope: scope)
+        if outcome == .unknown { unconfirmedApprovals[id] = decision }   // kept (and saved) before the in-flight record goes
+        UserDefaults.standard.removeObject(forKey: "otto.sendingApproval")
         if outcome != .done { keptApprovals.remove(id) }
         if outcome == .done || outcome == .gone { decidedApprovals.insert(id) }
         if outcome == .gone || (outcome == .done && !keep) { approvals.removeAll { $0.id == id } }

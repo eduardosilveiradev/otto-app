@@ -15,9 +15,10 @@ struct SettingsView: View {
     var body: some View {
         List {
             if page == nil && !failed { ProgressView().frame(maxWidth: .infinity) }
-            if failed {
+            // With switches on screen, a line over them; with nothing to show, the whole-page state below.
+            if failed, page != nil {
                 Section {
-                    Text(page == nil ? "Couldn’t reach your Mac for its settings." : "Couldn’t reach your Mac. These are as they were when it last answered.")
+                    Text("Couldn’t reach your Mac. These are as they were when it last answered.")
                         .foregroundStyle(.secondary)
                     Button("Try again") { Task { await load() } }
                 }
@@ -43,6 +44,21 @@ struct SettingsView: View {
             }
             if let note = page?.note, note.hasPrefix("couldn't") {
                 Section { Text(note).foregroundStyle(.secondary) }
+            }
+        }
+        // Nothing loaded: the state every other card page shows (Loaded), in the same words.
+        .overlay {
+            if page == nil && failed {
+                ContentUnavailableView {
+                    Label(store.noNetwork ? "You’re offline" : "Can’t reach your Mac", systemImage: "wifi.slash")
+                } description: {
+                    Text(store.noNetwork ? "Connect to Wi-Fi or mobile data."
+                         : store.backend is MockBackend ? "This page needs your Mac. You’re looking at sample data."
+                         : store.backend.isLive ? "Otto didn’t answer. Try again in a moment." : "Check it’s awake and on Tailscale.")
+                } actions: {
+                    Button("Try again") { Task { await load() } }
+                }
+                .background(Color(.systemGroupedBackground))
             }
         }
         .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)   // as every other card page: a large title sat on the first section's header

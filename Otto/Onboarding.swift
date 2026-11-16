@@ -35,8 +35,10 @@ struct PairingLink: Equatable {
         var req = URLRequest(url: url.appending(path: "app/settings"), timeoutInterval: 10)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
-            let code = (try await URLSession.shared.data(for: req).1 as? HTTPURLResponse)?.statusCode ?? 0
-            return (200..<300).contains(code) ? nil : ServerProblem(status: code, error: nil) ?? .server(code)
+            let (body, answer) = try await URLSession.shared.data(for: req)
+            let code = (answer as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(code) else { return ServerProblem(status: code, error: nil) ?? .server(code) }
+            return ServerProblem.isOtto(body) ? nil : .notOtto
         } catch { return ServerProblem(status: nil, error: error) ?? .unreachable }
     }
 
@@ -383,9 +385,9 @@ private struct ConnectPage: View {
         var req = URLRequest(url: url.appending(path: "app/settings"), timeoutInterval: 10)
         req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
         do {
-            let (_, res) = try await URLSession.shared.data(for: req)
+            let (body, res) = try await URLSession.shared.data(for: req)
             switch (res as? HTTPURLResponse)?.statusCode ?? 0 {
-            case 200..<300:
+            case 200..<300 where ServerProblem.isOtto(body):
                 savedServer = s; savedToken = t
                 next()
                 return true

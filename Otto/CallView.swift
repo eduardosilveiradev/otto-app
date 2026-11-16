@@ -280,7 +280,7 @@ struct CallTranscript: View {
                 }
                 .padding(20)
             }
-            .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(.bottom, for: .initialOffset)   // a long one opens at its end; a short one still starts under the title
             .overlay { if lines.isEmpty { ContentUnavailableView("Nothing was written down", systemImage: "text.bubble", description: Text("The call service sent no transcript for this call.")) } }
             .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

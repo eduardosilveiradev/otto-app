@@ -33,9 +33,11 @@ The app's answer gains one optional field:
 - `scope` is `"task"` or `"always"`, sent only on an approve and only when the frame offered it.
   Absent means once. A decline never carries one.
 - The op id is unchanged (`approval-<id>`), so a resend after a lost ack is still the same decision.
-  The app resends with the same scope, never a different one: it keeps an unacked decision (the
-  answer and its scope) on disk until the server stops listing the approval, so it holds across a
-  relaunch too, and it never resends on its own, only when the owner taps the same answer again.
+  The app resends with the same scope, never a different one: it writes the decision (the
+  answer and its scope) to disk before sending it, and keeps it while unacked until the server
+  stops listing the approval or an hour has passed (twice the 30 minutes the server holds an
+  approval), so it holds across a relaunch too, including one that kills the app while the ack is
+  awaited. It never resends on its own, only when the owner taps the same answer again.
 - On `task`, the server answers later approvals with the same `rule` (or, with no `rule`, the same
   `title`) from that turn or job itself, without raising them. On `always` it stores a rule (item 2)
   and does the same from then on. Either way the action is still journaled as today.
@@ -268,6 +270,7 @@ The hello frame gains an optional flag, and the app gains one frame:
 App side (`ChatView` in `Otto/ChatView.swift`, `OttoStore.stopTurn`): touch and hold the bubble
 that shows what Otto is doing, then "Stop". The bubble goes when the server sends `typing` off,
 not before, so it never claims a stop the Mac hasn't made; no ack within the usual wait is
-an error haptic and nothing else changes.
+an error haptic and an alert, "Couldn't confirm Stop", with Try Again (which sends a new `stop` with
+a new op id); the bubble stays as it was.
 
 Without it: no `stop` in the hello, so the bubble has no menu and the frame is never sent.

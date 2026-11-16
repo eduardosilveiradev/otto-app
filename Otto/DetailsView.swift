@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 import VisionKit
 
 /// The contact card: what Otto knows about today, and the few settings there are.
@@ -23,6 +24,9 @@ struct DetailsView: View {
     /// Set each time the address or token is submitted; the check under the token answers for it.
     @State private var submitted: UUID?
     @State private var serverCheck: ServerCheck?
+    /// Whether this phone may show Otto's banners: read on opening and on coming back from Settings.
+    @State private var allowed: Notifier.Allowed?
+    @Environment(\.scenePhase) private var phase
     /// The pairing link the fields were just filled from, until its check has come back.
     @State private var linked: PairingLink?
     /// The Mac keeps a list of what Otto may do without asking. False until it has answered with one,
@@ -104,8 +108,24 @@ struct DetailsView: View {
                             }))
                     }
                     Toggle("Stay connected in background", isOn: $stayAwake)
+                    // Off or never asked (onboarding's "Not now"): said here, with the way to turn them on. Only
+                    // ever on this tap: the system's prompt is never thrown up unasked.
+                    if let allowed, allowed != .yes {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Button(allowed == .no ? "Turn On Notifications in Settings" : "Turn On Notifications") {
+                                Task {
+                                    if allowed == .no, let url = URL(string: UIApplication.openNotificationSettingsURLString) { await UIApplication.shared.open(url) }
+                                    else { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
+                                    self.allowed = await Notifier.allowed()
+                                }
+                            }
+                            Text("They’re off, so this phone can’t alert you itself: reminders and approvals reach you only through Bark, if your Mac has it set up.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
                     NavigationLink("Settings") { SettingsView() }
                 }
+                .task(id: phase) { allowed = await Notifier.allowed() }
 
                 Section {
                     labeled("Server address") {
@@ -233,6 +253,10 @@ struct DetailsView: View {
                     try? await Task.sleep(for: .seconds(1)); proxy.scrollTo("server", anchor: .center); return
                 }
                 #endif
+                #if DEBUG
+                // `-notificationsOff`: the row that says so sits beside the settings, down the card.
+                if CommandLine.arguments.contains("-notificationsOff") { try? await Task.sleep(for: .seconds(2)); proxy.scrollTo("server", anchor: .bottom); return }
+                #endif
                 guard checkOnOpen else { return }
                 submitted = UUID()
                 try? await Task.sleep(for: .seconds(2))   // after the brief has loaded above it
@@ -290,10 +314,14 @@ struct DetailsView: View {
         serverCheck = .checking
         var req = URLRequest(url: url.appending(path: "app/settings"), timeoutInterval: 10)
         req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
-        var status: Int?, failure: (any Error)?
-        do { status = (try await URLSession.shared.data(for: req).1 as? HTTPURLResponse)?.statusCode } catch { failure = error }
+        var status: Int?, failure: (any Error)?, otto = false
+        do {
+            let (body, answer) = try await URLSession.shared.data(for: req)
+            status = (answer as? HTTPURLResponse)?.statusCode; otto = ServerProblem.isOtto(body)
+        } catch { failure = error }
         guard !Task.isCancelled else { return }   // edited or submitted again meanwhile
         serverCheck = switch ServerProblem(status: status, error: failure) {
+        case nil where !otto: .failed(ServerProblem.notOtto.message)
         case nil: .connected
         case .unreachable?, .timedOut?: .failed("Can’t reach that address. Check it, and that Tailscale is on.")
         case .refused?: .failed("The server didn’t accept that token. Check it, or make a new one on your Mac.")
