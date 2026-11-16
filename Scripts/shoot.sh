@@ -160,6 +160,10 @@ shot sheet payment 6 "Payment approval" $O -demoThread -paymentDemo
 shot sheet payment-receipt 6 "Payment approved: printed receipt" $O -demoThread -paymentDemo -receiptDemo
 shot sheet change-approval 6 "Approve a change to Otto's core" $O -demoThread -approvalDemo
 shot sheet change-approval-detail 6 "A change whose detail is its lines, not a git stat (the memory clean-up)" $O -demoThread -approvalDemo diet
+shot chat approval-waiting 6 "A payment put off with Later: waiting over the composer, with its time left" $O -demoThread -paymentDemo -approvalLater
+shot chat approval-waiting-todos 6 "A change put off with Later takes the to-dos' place until it's answered" $O -demoThread -approvalDemo -approvalLater -openTodos
+shot chat approval-waiting-worst 6 "Worst case: a long payee and a five-figure total, at an accessibility text size" $O -demoThread -approvalWorst -approvalLater -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+shot chat approval-lapsed 6 "It lapsed on the Mac before an answer: the pill says Expired until tapped away" $O -demoThread -paymentDemo -approvalLapsed
 shot sheet boarding-pass 11 "Flight-day boarding pass" $O -demoThread -mockGate -openGate
 shot sheet live-call 8 "A call Otto is placing, live transcript" $O -demoThread -mockCalls -openCall
 shot media viewer 6 "Full-screen photo viewer" $O -mediaThread -media
@@ -193,7 +197,7 @@ done
 for t in Unasked Changes Jobs Triggers; do
   shot activity "$(echo $t | tr A-Z a-z)" 6 "Activity, $t tab" $O -details -screen Activity -activityTab $t
 done
-for s in Loops Schedules Calls People Trips Packages; do
+for s in Loops Schedules Calls Memory People Trips Packages; do
   shot "$(echo $s | tr A-Z a-z)" empty 6 "$s with nothing in it" $O -details -screen $s -emptyDash
 done
 shot activity jobs-empty 6 "No background jobs" $O -details -screen Activity -activityTab Jobs -emptyDash

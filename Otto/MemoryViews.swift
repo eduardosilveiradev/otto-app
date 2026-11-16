@@ -13,17 +13,24 @@ private struct MemoryList: View {
     let reload: () async -> Void
     @Environment(OttoStore.self) private var store
     @State private var query = ""
-    /// Indexes the Mac ranked for `query`, best first, and the snapshot they index into; nil while
-    /// just filtering by text. A refresh brings a new snapshot, and old indexes would point anywhere.
-    @State private var rankedIn: (snapshot: String, order: [Int])?
-    private var ranked: [Int]? { rankedIn.flatMap { $0.snapshot == m.generatedAt ? $0.order.filter(m.items.indices.contains) : nil } }
+    /// Indexes the Mac ranked for a query, best first, the snapshot they index into and the query itself; nil
+    /// while just filtering by text. A refresh brings a new snapshot, and old indexes would point anywhere;
+    /// an edited query isn't the one ranked, so it filters by text again until it's submitted.
+    @State private var rankedIn: (snapshot: String, query: String, order: [Int])?
+    private var typed: String { query.trimmingCharacters(in: .whitespaces) }
+    private var ranked: [Int]? {
+        rankedIn.flatMap { $0.snapshot == m.generatedAt && $0.query == typed ? $0.order.filter(m.items.indices.contains) : nil }
+    }
     @State private var source = "all"
     @State private var cluster: Int?
     @State private var needsLook = false
     @State private var note: String?
+    /// The Mac's search is running, or didn't answer: said above the list, which shows text matches meanwhile.
+    @State private var searching = false
+    @State private var searchFailed = false
 
     private var shown: [MemoryItem] {
-        let q = query.trimmingCharacters(in: .whitespaces)
+        let q = typed
         return (ranked ?? m.items.indices.sorted { m.items[$0].updated > m.items[$1].updated }).filter { i in
             let it = m.items[i]
             return (source == "all" || it.store == source)
@@ -36,7 +43,8 @@ private struct MemoryList: View {
     var body: some View {
         let items = shown
         List {
-            if query.isEmpty && cluster == nil && !needsLook && source == "all" {
+            // Not on an empty page: the summary would open on nothing.
+            if query.isEmpty && cluster == nil && !needsLook && source == "all" && !m.items.isEmpty && !m.summary.text.isEmpty {
                 Section {
                     NavigationLink {
                         ScrollView { MarkdownText(text: m.summary.text).padding() }
@@ -47,19 +55,30 @@ private struct MemoryList: View {
                 } footer: { Text(m.summary.note) }
             }
             if let note { Section { Text(note).foregroundStyle(.secondary) } }
-            Section {
-                ForEach(items) { it in
-                    NavigationLink { MemoryDetailScreen(item: it) } label: { MemoryRow(item: it) }
+            if searching {
+                Section { Label { Text("Searching on your Mac…") } icon: { ProgressView() }.foregroundStyle(.secondary) }
+            } else if searchFailed {
+                Section {
+                    Text("Couldn’t reach your Mac to search, so these only match the words.").foregroundStyle(.secondary)
+                    Button("Try again") { Task { await search() } }
                 }
-            } header: {
-                Text(ranked != nil ? "Best matches · \(items.count)" : items.count == m.items.count ? "Everything · \(items.count)" : "\(items.count) of \(m.items.count)")
-            } footer: {
-                Text("Indexed \(ago(m.generatedAt))")
+            }
+            if !items.isEmpty {
+                Section {
+                    ForEach(items) { it in
+                        NavigationLink { MemoryDetailScreen(item: it) } label: { MemoryRow(item: it, asked: store.askedToForget.contains(it.id)) }
+                    }
+                } header: {
+                    Text(ranked != nil ? "Best matches · \(items.count)" : items.count == m.items.count ? "Everything · \(items.count)" : "\(items.count) of \(m.items.count)")
+                } footer: {
+                    Text("Indexed \(ago(m.generatedAt))")
+                }
             }
         }
+        .overlay { if items.isEmpty { empty } }
         .searchable(text: $query, prompt: "Search memory")
         .onSubmit(of: .search) { Task { await search() } }
-        .onChange(of: query) { if query.isEmpty { rankedIn = nil } }
+        .onChange(of: query) { searchFailed = false; if query.isEmpty { rankedIn = nil } }
         .refreshable { await reload() }
         .toolbar {
             Menu {
@@ -85,15 +104,39 @@ private struct MemoryList: View {
         }
     }
 
+    /// Why there's nothing to list: nothing kept yet, nothing matching the search, or filters that leave nothing.
+    @ViewBuilder private var empty: some View {
+        if m.items.isEmpty {
+            ContentUnavailableView("No memories yet", systemImage: "text.alignleft",
+                                   description: Text("Tell Otto something worth keeping and it shows up here."))
+        } else if !typed.isEmpty {
+            ContentUnavailableView.search(text: typed)
+        } else {
+            ContentUnavailableView {
+                Label("Nothing matches these filters", systemImage: "line.3.horizontal.decrease")
+            } actions: {
+                Button("Show everything") { source = "all"; cluster = nil; needsLook = false }
+            }
+        }
+    }
+
     private func search() async {
         struct Hits: Decodable { let results: [[Double]]; let generatedAt: String? }
-        let q = query.trimmingCharacters(in: .whitespaces)
+        let q = typed
         guard !q.isEmpty else { rankedIn = nil; return }
         let snapshot = m.generatedAt
-        if let r: Hits = await store.backend.dash("memory/search", query: ["q": q]) {
+        searching = true; searchFailed = false
+        let r: Hits? = await store.backend.dash("memory/search", query: ["q": q])
+        // A ranking for a query that's since been edited would be shown against the new one: drop it.
+        guard q == typed else { searching = false; return }
+        searching = false
+        searchFailed = r == nil
+        // A failed search says the list only matches the words, so it can't keep an older ranking.
+        if r == nil { rankedIn = nil }
+        if let r {
             // The positions are into the index the Mac searched; if that's newer than this list, reload
             // the list so they line up (until then they're held back, not shown against the old one).
-            rankedIn = (r.generatedAt ?? snapshot, r.results.compactMap { $0.first.map(Int.init) })
+            rankedIn = (r.generatedAt ?? snapshot, q, r.results.compactMap { $0.first.map(Int.init) })
             if let g = r.generatedAt, g != snapshot { await reload() }
         }
     }
@@ -107,6 +150,9 @@ private struct MemoryList: View {
 
 struct MemoryRow: View {
     let item: MemoryItem
+    /// Sent Otto a "forget" for it from its page: said on its row while it's still listed (the index drops a
+    /// forgotten one when it's next rebuilt), and true either way: you did ask.
+    var asked = false
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
@@ -115,7 +161,7 @@ struct MemoryRow: View {
                 if item.badge == "never" { Pill(text: "never recalled", tint: .orange) }
                 else if item.badge == "stale" { Pill(text: "stale", tint: .orange) }
             }
-            Text([item.kind, item.scope, item.status, item.due.map { "due \(day($0))" }, ago(item.updated)].compactMap { $0 }.joined(separator: " · "))
+            Text(asked ? "Asked Otto to forget" : [item.kind, item.scope, item.status, item.due.map { "due \(day($0))" }, ago(item.updated)].compactMap { $0 }.joined(separator: " · "))
                 .font(.footnote).foregroundStyle(.secondary)
         }
     }
@@ -123,6 +169,14 @@ struct MemoryRow: View {
 
 struct MemoryDetailScreen: View {
     let item: MemoryItem
+    /// The memory's name (its handle, as memviewer lists it) as the thread's "Forget it" chip sends it (`forget memory <name>`), kept to
+    /// letters, digits and -_. so a name the server sent can't turn into a sentence sent in your voice.
+    static func slug(_ name: String) -> String {
+        String(String(name.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) || "-_.".unicodeScalars.contains($0) ? Character($0) : "-" }).prefix(80))
+    }
+    @Environment(OttoStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var forgetting = false
     var body: some View {
         Loaded(path: "memory/item", query: ["id": item.id]) { (d: MemoryDetail, _) in
             List {
@@ -141,6 +195,23 @@ struct MemoryDetailScreen: View {
         }
         .navigationTitle(item.kind.capitalized)
         .navigationBarTitleDisplayMode(.inline)
+        // Forgetting goes through Otto, as the thread's "Forget it" does: a message in the chat, so it's
+        // on the record and Otto says when it's done. ponytail: no direct route; one would need the server.
+        // Memories only: a note's name is its first line, not a handle "forget memory" can find.
+        .toolbar {
+            if item.store != "notes" { Button("Forget", systemImage: "trash") { forgetting = true } }
+        }
+        .confirmationDialog("Ask Otto to forget this?", isPresented: $forgetting, titleVisibility: .visible) {
+            Button("Ask Otto to forget it", role: .destructive) {
+                store.send("forget memory \(Self.slug(item.name))")
+                store.askedToForget.insert(item.id)
+                dismiss()
+            }
+        } message: {
+            // A dialog's message is never clipped, so a long memory is cut to about what its row shows.
+            let what = item.description.count > 80 ? String(item.description.prefix(79)) + "…" : item.description
+            Text("“\(what)” goes to Otto as a message in your chat, and Otto confirms there when it’s gone.")
+        }
     }
 }
 

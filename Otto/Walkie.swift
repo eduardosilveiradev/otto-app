@@ -71,6 +71,7 @@ struct WalkieView: View {
                     Image(systemName: "xmark").font(.system(size: 15, weight: .semibold))
                         .frame(width: 40, height: 40)
                         .glassEffect(.regular.interactive(), in: .circle)
+                        .padding(2).contentShape(.rect).padding(-2)   // 44pt to tap, drawn at 40
                 }
                 .tint(.primary)
                 .accessibilityLabel("Close walkie-talkie")

@@ -103,7 +103,8 @@ extension CodeJob {
         case "merged": String(localized: "Merged")
         case "stopped": String(localized: "Stopped")
         case "failed": String(localized: "Failed")
-        default: state.prefix(1).uppercased() + state.dropFirst()
+        // A state this build doesn't know, in words: "paused-by-host" reads "Paused by host".
+        default: { let w = state.replacing(/[-_]/, with: " "); return w.prefix(1).uppercased() + w.dropFirst() }()
         }
     }
 

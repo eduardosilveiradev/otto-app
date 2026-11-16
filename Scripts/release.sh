@@ -23,13 +23,16 @@ APP="$WORK/dd/Build/Products/Release-iphoneos/Otto.app"
 # A plain `build` leaves symbol tables in: ~5 MB on Otto itself and ~9 MB on the calling SDK.
 # Nothing on the phone reads them (crash logs symbolicate here), and every MB is install time.
 if [ "${STRIP:-1}" = 1 ]; then   # STRIP=0 Scripts/release.sh ships symbols, to rule stripping out
-  xcrun strip -rSTx "$APP/Otto" "$APP/PlugIns/OttoShare.appex/OttoShare" 2>/dev/null
-  for f in "$APP"/Frameworks/*.framework; do xcrun strip -x "$f/$(basename "$f" .framework)" 2>/dev/null; done
+  xcrun strip -rSTx "$APP/Otto" "$APP/PlugIns/OttoShare.appex/OttoShare" "$APP/PlugIns/OttoWidget.appex/OttoWidget" 2>/dev/null
+  # Some SDKs' binaries come read-only (the glasses' MWDAT ones), and a strip that can't write stops the script.
+  for f in "$APP"/Frameworks/*.framework; do b="$f/$(basename "$f" .framework)"; chmod u+w "$b"; xcrun strip -x "$b" 2>/dev/null; done
 fi
 # An unsigned build carries no entitlements, and SideStore reads them off the signature to
-# know which app group to register for the app and its share extension. Sign ad hoc with
-# them, extension first; SideStore re-signs both for real on the phone.
+# know which app group to register for the app and its extensions. Sign ad hoc with them,
+# extensions first; SideStore re-signs them for real on the phone. The widget reads what's
+# waiting on you from the group, so it needs it too.
 codesign -f -s - --entitlements "$ROOT/OttoShare.entitlements" "$APP/PlugIns/OttoShare.appex"
+codesign -f -s - --entitlements "$ROOT/OttoWidget.entitlements" "$APP/PlugIns/OttoWidget.appex"
 codesign -f -s - --entitlements "$ROOT/Otto.entitlements" "$APP"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Info.plist")"
 mkdir -p "$WORK/ipa/Payload" "$OUT"

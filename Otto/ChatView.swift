@@ -48,23 +48,22 @@ struct ChatView: View {
     @Environment(OttoStore.self) private var store
     @State private var showDetails = ProcessInfo.processInfo.arguments.contains("-details")
     @Namespace private var card
-    @State private var showCall = false
     /// The live browser tile, opened full screen.
     @State private var browserOpen = ProcessInfo.processInfo.arguments.contains("-browserOpen")
     /// Otto's Chrome tile, in its own thread and only while the server can be heard (a stale one would mislead).
     private var browser: LiveBrowser? { thread.isOtto && thread.connected ? store.browser : nil }
     /// `-call` (with `-vapiPublicKey`, `-vapiAssistantId` and, in DEBUG, `-vapiHost`): open straight into a web call.
-    @State private var webCall = ProcessInfo.processInfo.arguments.contains("-call")
+    private var webCall: Binding<Bool> { Binding(get: { CallLauncher.shared.open }, set: { CallLauncher.shared.open = $0 }) }
     /// Calls Otto is placing for you; a live one shows as a banner under the header.
     @State private var calls = CallWatch()
     @State private var gate = GateWatch()
     @State private var showGate = false
     @State private var openCall: DashCall?
-    /// Otto's phone line (the Vapi assistant). Set in details; dialled with the phone app.
-    @AppStorage("callNumber") private var callNumber = ""
     /// When the "hold for walkie-talkie" hint last showed; it comes back every two months.
     @AppStorage("walkieHintAt") private var walkieHintAt = 0.0
     @State private var walkieHint = false
+    /// Asleep for longer than a dropped socket takes to come back (a second or two), so a blip never flashes a line.
+    @State private var unreachable = false
     @Environment(\.openURL) private var openURL
     /// Shared with the composer, which lives in its own hosting controller (see KeyboardDock).
     let ui: ComposerUI
@@ -274,6 +273,11 @@ struct ChatView: View {
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
         .task { await calls.run(store.backend) }
+        .task(id: store.asleep) {
+            guard store.asleep else { withAnimation(.easeOut(duration: 0.2)) { unreachable = false }; return }
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            withAnimation(.easeOut(duration: 0.2)) { unreachable = true }
+        }
         .task(id: seenDate) {
             guard let date = seenDate, let live = store.backend as? LiveBackend else { return }
             do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
@@ -316,12 +320,13 @@ struct ChatView: View {
                         .font(.system(size: 16, weight: .semibold))
                         .frame(width: 40, height: 40)
                         .glassEffect(.regular.interactive(), in: .circle)
+                        .padding(2).contentShape(.rect).padding(-2)   // 44pt to tap, drawn at 40
                 }
                 .tint(.primary)
                 .accessibilityLabel("Scroll to bottom")
                 .padding(.trailing, 16)
                 .padding(.bottom, ui.bottomInset + 12)
-                .transition(.scale(scale: 0.6).combined(with: .opacity))
+                .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
             }
         }
         .animation(.snappy, value: scrolledUp)
@@ -329,17 +334,22 @@ struct ChatView: View {
         // thinking bubble is scrolled out of view and the connection is fine, so the step is never on screen twice.
         .overlay(alignment: .bottomLeading) {
             if scrolledUp && !showingResults && thread.typing && thread.connected, let step = thread.typingStatus, !step.isEmpty {
-                HStack(spacing: 6) {
-                    OttoThinkingSpinner(kind: OttoThinkingSpinner.Kind(step: step) ?? .think, size: 13)
-                    Text(step).lineLimit(1).truncationMode(.tail)
-                        .contentTransition(.interpolate)
-                        .animation(.snappy, value: step)
+                // Tapped, back down to the bubble it comes from, with the rest of the work in it.
+                Button { move { $0.scrollTo(edge: .bottom) } } label: {
+                    HStack(spacing: 6) {
+                        OttoThinkingSpinner(kind: OttoThinkingSpinner.Kind(step: step) ?? .think, size: 13)
+                        Text(step).lineLimit(1).truncationMode(.tail)
+                            .contentTransition(.interpolate)
+                            .animation(.snappy, value: step)
+                    }
+                    // 44pt to tap: half above the line, half below, the lower part under the composer's own touches.
+                    .padding(.horizontal, 10).padding(.vertical, 14).contentShape(.rect)
                 }
+                .buttonStyle(.plain)
                 .font(size: 12, design: .monospaced, relativeTo: .caption).foregroundStyle(.secondary)
-                .accessibilityElement(children: .ignore).accessibilityLabel("Otto: \(step)")
-                .padding(.leading, 20).padding(.trailing, 72)
-                .padding(.bottom, ui.bottomInset + 6)
-                .allowsHitTesting(false)
+                .accessibilityLabel("Otto: \(step)").accessibilityHint("Scrolls down to it")
+                .padding(.leading, 10).padding(.trailing, 62)
+                .padding(.bottom, ui.bottomInset - 8)
                 .transition(.opacity)
             }
         }
@@ -356,13 +366,13 @@ struct ChatView: View {
                         .ignoresSafeArea()
                 }
         }
-        .fullScreenCover(isPresented: $webCall) { CallView(context: callContext) }
+        .fullScreenCover(isPresented: webCall) { CallView(context: callContext) }
         .fullScreenCover(isPresented: Binding(get: { WalkieLauncher.shared.open }, set: { WalkieLauncher.shared.open = $0 })) { WalkieView() }
         .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
             MediaViewerView(store: store).presentationBackground(.clear)
         }
         .fullScreenCover(isPresented: $browserOpen) { BrowserFullScreen() }
-        .alert("Calling Otto", isPresented: $showCall) {
+        .alert("Calling Otto", isPresented: Binding(get: { CallLauncher.shared.explain }, set: { CallLauncher.shared.explain = $0 })) {
             Button("OK", role: .cancel) {}
         } message: { Text("Add Otto’s phone number in details (tap Otto’s name).") }
     }
@@ -664,36 +674,31 @@ struct ChatView: View {
     @ViewBuilder private var title: some View {
         if let row, row.isGroup {
             Button { store.pips.sheet = .group(row.id) } label: {
-                HeaderTitle(name: row.name) { GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 68) }
+                HeaderTitle(name: row.name, status: offline) { GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 68) }
             }
-            .padding(.top, -7)
+            .liftedTitle()
         } else if let row, row.kind == "pip", let pip = row.pips.first {
             Button { store.pips.sheet = .pip(pip.id) } label: {
-                HeaderTitle(name: row.name) { FaceView(look: pip.look, size: 68, live: true).frame(width: 68, height: 68) }
+                HeaderTitle(name: row.name, status: offline) { FaceView(look: pip.look, size: 68, live: true).frame(width: 68, height: 68) }
             }
-            .padding(.top, -7)
+            .liftedTitle()
         } else if pipsOn {
             Button { showDetails = true } label: {
-                HeaderTitle(name: "Otto") { FaceView(look: ottoLook, size: 68, live: true).frame(width: 68, height: 68) }
+                HeaderTitle(name: "Otto", status: offline) { FaceView(look: ottoLook, size: 68, live: true).frame(width: 68, height: 68) }
             }
-            .padding(.top, -7)
+            .liftedTitle()
             .matchedTransitionSource(id: "card", in: card)
         } else {
             Button { showDetails = true } label: {
-                VStack(spacing: -6) {
-                    OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep)
-                    HStack(spacing: 4) {
-                        Text("Otto").font(size: 15, weight: .semibold, relativeTo: .subheadline)
-                        Image(systemName: "chevron.right").font(size: 11, weight: .semibold, relativeTo: .caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                }
+                HeaderTitle(name: "Otto", status: offline) { OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep) }
             }
             .matchedTransitionSource(id: "card", in: card)
         }
     }
+
+    /// Said under the name once the Mac has been out of reach a few seconds: the sleeping face alone
+    /// reads as resting, and says nothing to VoiceOver. Tapping it opens the card with the server's fields.
+    private var offline: String? { unreachable ? String(localized: "Can’t reach your Mac") : nil }
 
     private var ottoLook: FaceLook {
         let base = row?.otto?.look ?? .otto
@@ -702,7 +707,7 @@ struct ChatView: View {
     }
 
     private var header: some View {
-        ZStack {
+        ZStack(alignment: Alignment(horizontal: .center, vertical: .headerRow)) {
             HStack {
                 if let onBack {
                     Button(action: onBack) {
@@ -725,13 +730,7 @@ struct ChatView: View {
                     .accessibilityLabel("Update Otto")
                 }
                 Spacer()
-                Button {
-                    // Web call (free, over the internet) when Vapi is set up; the phone line otherwise.
-                    let digits = callNumber.filter { $0.isNumber || $0 == "+" }
-                    if CallManager.configured { webCall = true }
-                    else if let url = URL(string: "tel:\(digits)"), !digits.isEmpty { openURL(url) }
-                    else { showCall = true }
-                } label: {
+                Button { CallLauncher.shared.start() } label: {
                     Image(systemName: "phone").font(.system(size: 18))
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: .circle)
@@ -797,6 +796,10 @@ struct Composer: View {
     @State private var todosOpen = ProcessInfo.processInfo.arguments.contains("-todosOpen")
     /// Otto's open to-dos, over the box while it isn't working; the thinking bubble has them while it is.
     private var todos: [TodoItem] { thread.isOtto && !thread.typing && recorder.started == nil ? store.openTodos : [] }
+    /// An approval put off with Later. It needs you, so it takes the to-dos' place until it's answered.
+    private var waiting: ApprovalRequest? { thread.isOtto && recorder.started == nil ? store.waitingApproval : nil }
+    /// One the Mac let lapse before an answer: said once, in the same place, until tapped away.
+    private var lapsed: ApprovalRequest? { thread.isOtto && recorder.started == nil ? store.lapsedApproval : nil }
 
     struct Attachment: Identifiable { let id = UUID(); let image: UIImage }
 
@@ -827,7 +830,11 @@ struct Composer: View {
         if !mentionMatches.isEmpty {
             MentionBar(members: mentionMatches, pick: mention).transition(.opacity)
         }
-        if !todos.isEmpty {
+        if let waiting {
+            ApprovalPill(request: waiting) { store.reopenApproval(waiting.id) }.transition(.opacity)
+        } else if let lapsed {
+            ApprovalPill(request: lapsed, lapsed: true) { store.lapsedApproval = nil }.transition(.opacity)
+        } else if !todos.isEmpty {
             TodoPill(items: todos, open: $todosOpen).transition(.opacity)
         }
         HStack(alignment: .bottom, spacing: 12) {
@@ -840,6 +847,8 @@ struct Composer: View {
                 Image(systemName: "plus").font(.system(size: 19, weight: .medium))
                     .frame(width: 40, height: 40)
                     .glassEffect(.regular.interactive(), in: .circle)
+                    // 44pt to tap; the circle stays Messages' 40.
+                    .padding(2).contentShape(.rect).padding(-2)
             }
             .tint(.secondary)
             .accessibilityLabel("Add photo")
@@ -852,6 +861,7 @@ struct Composer: View {
                     if let started = recorder.started {
                         Button { withAnimation(.snappy) { recorder.cancel() } } label: {
                             Image(systemName: "xmark").frame(width: 36, height: 36)
+                                .padding(4).contentShape(.rect).padding(-4)   // 44pt to tap, laid out at 36
                         }
                         .tint(.secondary)
                         .accessibilityLabel("Cancel recording")
@@ -871,6 +881,7 @@ struct Composer: View {
                                 .symbolRenderingMode(.palette)
                                 .foregroundStyle(.white, Color.red)
                                 .frame(width: 36, height: 36)
+                                .padding(4).contentShape(.rect).padding(-4)   // 44pt to tap, laid out at 36
                         }
                         .accessibilityLabel("Send voice message")
                     } else {
@@ -884,6 +895,7 @@ struct Composer: View {
                             if thread.isOtto {
                             Button { Task { await recorder.start() } } label: {
                                 Image(systemName: "waveform").frame(width: 36, height: 36)
+                                    .padding(4).contentShape(.rect).padding(-4)   // 44pt to tap, laid out at 36
                             }
                             .tint(.secondary)
                             .accessibilityLabel("Record voice message")
@@ -897,8 +909,10 @@ struct Composer: View {
                                     .foregroundStyle(.white)
                                     .frame(width: 37, height: 27)
                                     .background(Color(red: 0.525, green: 0.553, blue: 0.592), in: .capsule)
+                                    // 44pt to tap, a little past the field; the pill stays where Messages draws it.
+                                    .padding(.horizontal, 3.5).padding(.vertical, 8.5).contentShape(.rect)
                             }
-                            .padding(.trailing, 6.5).padding(.bottom, 4.5)   // centred in a one-line field (measured), like Messages
+                            .padding(.trailing, 3).padding(.bottom, -4)   // the pill centred in a one-line field (measured), like Messages
                             .accessibilityLabel("Send")
                             .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                         }
@@ -1026,15 +1040,18 @@ struct Composer: View {
                         .frame(width: 64, height: 64)
                         .clipShape(.rect(cornerRadius: 12, style: .continuous))
                         .overlay(alignment: .topTrailing) {
-                            Button { withAnimation(.snappy) { attachments.removeAll { $0.id == a.id } } } label: {
+                            Button { withAnimation(still ? nil : .snappy) { attachments.removeAll { $0.id == a.id } } } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .symbolRenderingMode(.palette)
                                     .foregroundStyle(.white, Color.black.opacity(0.6))
                                     .font(.system(size: 20))
+                                    .padding(3)
+                                    // The thumbnail's top-right 44pt is the target; the glyph stays in its corner.
+                                    .frame(width: 44, height: 44, alignment: .topTrailing).contentShape(.rect)
                             }
-                            .padding(3)
+                            .accessibilityLabel("Remove photo")
                         }
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                        .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                 }
             }
             .padding(.horizontal, 10).padding(.top, 10)
@@ -2298,6 +2315,7 @@ struct Typing: View {
 
     /// The mark's kind, held through to-do bookkeeping steps so ticking one off doesn't flicker it.
     @State private var kind = OttoThinkingSpinner.Kind(step: nil) ?? .think
+    @Environment(\.accessibilityReduceMotion) private var still
 
     #if DEBUG
     /// `-spinnerKind <kind>`: hold one kind, for screenshots of idle and done.
@@ -2328,13 +2346,16 @@ struct Typing: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14).padding(.vertical, 12)
         .background(BubbleShape(mine: false, tail: true).fill(.incomingBubble))
+        // The bubble springs to a shorter step faster than the old letters fade: keep them inside it.
+        .clipShape(BubbleShape(mine: false, tail: true))
         .padding(.trailing, 90)
         .frame(maxWidth: .infinity, alignment: .leading)
         // Last, so the bubble behind the text is inside the animation too: it grows and
-        // shrinks with a longer or shorter step instead of jumping to the new size.
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: status)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: todos)
-        .animation(.snappy(duration: 0.25), value: connected)
+        // shrinks with a longer or shorter step instead of jumping to the new size. Under Reduce Motion
+        // the step and the bubble change at once; these would otherwise override the thread's nil.
+        .animation(still ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: status)
+        .animation(still ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: todos)
+        .animation(still ? nil : .snappy(duration: 0.25), value: connected)
         .onChange(of: status, initial: true) { _, s in if let k = OttoThinkingSpinner.Kind(step: s) { kind = k } }
     }
 }
@@ -2552,9 +2573,10 @@ private struct EmptyChat: View {
     let asleep: Bool
     let connected: Bool
 
-    private var title: LocalizedStringKey { connected ? "Say hi" : "Can’t reach your Mac" }
+    // Offline, the header already says the Mac is out of reach: this says what to check.
+    private var title: LocalizedStringKey { connected ? "Say hi" : "Waiting for your Mac" }
     private var line: String {
-        if !connected { return "What you send goes out when it’s back." }
+        if !connected { return "Check it’s awake and online. What you send goes out when it’s back." }
         return "Reminders, mail, plans: I’ll keep track of the rest."
     }
     var body: some View {

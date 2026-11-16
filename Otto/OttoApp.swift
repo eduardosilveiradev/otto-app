@@ -1,6 +1,8 @@
+import ActivityKit
 import MWDATCore
 import SwiftUI
 import ThinkingOrbsKit
+import WidgetKit
 
 @main
 struct OttoApp: App {
@@ -11,8 +13,21 @@ struct OttoApp: App {
         Notifier.shared.register()   // the background task must be registered before launch ends
         Dictation.shared.setUp()     // the keyboard's mic requests arrive any time
         try? Wearables.configure()
+        // What reaches the app from its widgets and controls (WidgetData's intents run here).
+        OpenWalkieControl.run = { Doors.open("walkie") }
+        MuteOttoCall.run = { CallManager.current?.toggleMute() }
+        HangUpOttoCall.run = { CallManager.current?.hangUp() }
+        // A call's Live Activity outlives an app that was killed mid-call; no call is live at launch.
+        Task { for a in Activity<CallActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
+        // `-callActivity`: a call's Live Activity 83 seconds in, for screenshots of the Lock Screen and the Dynamic Island.
+        if CommandLine.arguments.contains("-callActivity") {
+            Task {
+                try? await Task.sleep(for: .seconds(1))   // after the clean-up above
+                _ = try? Activity.request(attributes: CallActivityAttributes(), content: .init(state: .init(started: .now.addingTimeInterval(-83)), staleDate: nil))
+            }
+        }
         #endif
     }
 
@@ -24,11 +39,32 @@ struct OttoApp: App {
             }
             .onOpenURL { url in
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
+                // The widgets: Otto's thread, the walkie-talkie, or an approval put off with Later.
+                if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval"].contains(door) { Doors.open(door); return }
                 // Meta AI comes back here after connecting the glasses; anything else isn't the SDK's.
                 guard url.query()?.contains("metaWearablesAction") == true else { return }
                 Task { _ = try? await Wearables.shared.handleUrl(url) }
             }
             .modifier(DictationCover())
+        }
+    }
+}
+
+/// The ways in from outside the app (widgets, controls, the Action Button): Otto's thread, with the
+/// walkie-talkie, a call or an approval put off with Later over it. Nothing before setup: there's no store yet.
+@MainActor enum Doors {
+    static func open(_ door: String) {
+        // As OttoApp's @AppStorage reads it: unset means "paired already" if there's a server.
+        // bool(forKey:) also takes a launch argument's "YES", which arrives as a string.
+        let d = UserDefaults.standard
+        guard d.object(forKey: "onboarded") == nil ? d.string(forKey: "serverURL")?.isEmpty == false : d.bool(forKey: "onboarded") else { return }
+        let store = OttoStore.shared
+        if store.pips.active { store.pips.open("app") }
+        switch door {
+        case "walkie": WalkieLauncher.shared.open = true
+        case "call": CallLauncher.shared.start()
+        case "approval": if let w = store.waitingApproval { store.reopenApproval(w.id) }
+        default: break
         }
     }
 }
@@ -47,7 +83,8 @@ private struct MainRoot: View {
     /// Offline at launch: stop waiting on the connection and open the chat. 12s, not less: a phone
     /// reaching the Mac through the tunnel can take several seconds, and that is still loading.
     @State private var gaveUp = false
-    /// Up only until there is something to show: the saved thread is there at once, as Messages opens on it.
+    /// Up until the Mac answers (or `gaveUp`). The saved thread is read from disk at once and laid out
+    /// underneath, so it's all there when the splash fades.
     @State private var splashing = true
 
     private var ready: Bool { store.connected || !store.backend.isLive || gaveUp }
@@ -144,12 +181,22 @@ final class OttoStore {
     /// What Otto is doing in Chrome: the tile over the thinking orb. Memory only, like the frames
     /// it comes from; the picture is decoded once here, not on every pass of the thread.
     var browser: LiveBrowser?
-    /// Approval screens waiting on you, newest last; `Later` hides one until the next launch.
+    /// Approval screens waiting on you, newest last; `Later` moves one into the pill over the composer.
     var approvals: [ApprovalRequest] = []
     var hiddenApprovals: Set<String> = []
     /// A code that just came in, open in its drawer (OTP.swift); the chip in its bubble reopens it.
     var otpDrawer: Message? = nil
     var shownApproval: ApprovalRequest? { approvals.last { !hiddenApprovals.contains($0.id) } }
+    /// The newest one put off with Later, still live on the Mac: the pill that brings it back.
+    var waitingApproval: ApprovalRequest? { approvals.last { hiddenApprovals.contains($0.id) } }
+    /// Decisions sent without an answer, by approval: only the same one may be sent again.
+    var unconfirmedApprovals: [String: Bool] = [:]
+    /// The last one that lapsed on the Mac before it was answered: the pill says so until dismissed.
+    var lapsedApproval: ApprovalRequest?
+    /// Memories you asked Otto to forget from their page, marked on their rows while they're still listed.
+    var askedToForget: Set<String> = []
+    /// What the widget was last given, so the group's defaults are written only when it changes.
+    @ObservationIgnored private var widgetAsk = WidgetData.ask
     /// The server sends "typing" frames; until one arrives (an older server), the app guesses.
     @ObservationIgnored private var serverTyping = false
 
@@ -313,7 +360,19 @@ final class OttoStore {
             markUndelivered()
             // An approval past its time is gone on the Mac too: off the screen, unless it's showing its receipt.
             let lapsed = { (a: ApprovalRequest) in !self.keptApprovals.contains(a.id) && (LiveBackend.date(a.expires).map { $0 < .now } ?? false) }
-            if approvals.contains(where: lapsed) { approvals.removeAll(where: lapsed) }
+            if let gone = approvals.last(where: lapsed) {
+                // The Mac drops it without a word, so the pill says it lapsed. Not for one whose answer
+                // went out unconfirmed: that may have landed, and "expired" might not be true.
+                if unconfirmedApprovals[gone.id] == nil { lapsedApproval = gone }
+                approvals.removeAll(where: lapsed)
+            }
+            // The Home Screen widget's line: the approval waiting on you, until the Mac would drop it.
+            let ask = (shownApproval ?? waitingApproval).flatMap { a in LiveBackend.date(a.expires).map { WidgetData.Ask(text: a.ask, expires: $0) } }
+            if ask != widgetAsk {
+                widgetAsk = ask
+                WidgetData.ask = ask
+                WidgetCenter.shared.reloadTimelines(ofKind: "dev.otto.chat")
+            }
             // An ack that never came on a socket that still looks fine: try again every 15s.
             if live && n % 15 == 0 { Task { await resendPending() } }
             if live != connected { connected = live }
@@ -336,6 +395,8 @@ final class OttoStore {
         }
         #if DEBUG
         PipFixture.seed(self)
+        // The demo approvals lapse as a live one would: 30 minutes from when it was raised, six ago.
+        let demoExpiry = Date.now.addingTimeInterval(24 * 60).ISO8601Format()
         // `-seedThread`: a thread with long bubbles (and a link), for checking layout without a server.
         if ProcessInfo.processInfo.arguments.contains("-seedThread") {
             let long = String(repeating: "this is a long message that should wrap onto several lines. ", count: 6)
@@ -372,7 +433,7 @@ final class OttoStore {
         }
         // `-paymentDemo`: a payment confirmation up over the thread.
         if ProcessInfo.processInfo.arguments.contains("-paymentDemo") {
-            approvals = [ApprovalRequest(id: "demo-pay", title: "Pay 17.00 EUR", summary: "Multisala Lux Roma", files: [], branch: nil, stat: nil, expires: nil,
+            approvals = [ApprovalRequest(id: "demo-pay", title: "Pay 17.00 EUR", summary: "Multisala Lux Roma", files: [], branch: nil, stat: nil, expires: demoExpiry,
                 payment: .init(merchant: "Multisala Lux Roma", site: "lux.cdr.18tickets.it",
                                items: [.init(name: "Primetime ticket", detail: "Sun 1 Nov 17:50 · Sala 6 · E4", quantity: 1, unit: 8.5),
                                        .init(name: "Primetime ticket", detail: "Sun 1 Nov 17:50 · Sala 6 · E5", quantity: 1, unit: 8.5)],
@@ -389,16 +450,27 @@ final class OttoStore {
                               lines: ["-  schedule(weekly, review)", "+  schedule(weekly, review, sundayDigest)"]),
                         .init(path: "otto/tests/digest.test.ts", tier: "free", why: "an empty week sends nothing",
                               lines: ["+test('an empty week sends nothing', async () => {"])],
-                branch: "otto/sunday-digest", stat: "3 files changed, 142 insertions(+), 6 deletions(-)", expires: nil)]
+                branch: "otto/sunday-digest", stat: "3 files changed, 142 insertions(+), 6 deletions(-)", expires: demoExpiry)]
             // `-approvalDemo diet`: a change whose detail is its lines, not a git stat (the memory clean-up).
             if UserDefaults.standard.string(forKey: "approvalDemo") == "diet" {
                 approvals = [ApprovalRequest(id: "demo-diet", title: "Memory diet",
                     summary: "About 9k tokens load before you type. This drops 2 index lines for memories nothing has recalled (the memories stay searchable) and deletes 1 memory a newer one replaces.",
                     files: [.init(path: "~/.otto/memory/home/MEMORY.md", tier: "free", why: "2 index lines dropped"),
                             .init(path: "~/.otto/memory/home/boiler-2025.md", tier: "free", why: "deleted, boiler-2026 replaces it")],
-                    branch: nil, stat: "--- home/MEMORY.md\n- [Boiler service 2025](boiler-2025.md): the yearly check, the landlord books it\n- [Gym hours](gym-hours.md): closed since March\n--- home/boiler-2025.md (deleted; boiler-2026 replaces it)\n- The boiler is serviced every November.\n- The landlord books the engineer through the building office, which only takes requests by email and wants the flat number, the serial number from the sticker inside the boiler door, two mornings that work, and a phone number the engineer can ring from the street, because the entry phone on this stair has been broken since the spring before last.", expires: nil)]
+                    branch: nil, stat: "--- home/MEMORY.md\n- [Boiler service 2025](boiler-2025.md): the yearly check, the landlord books it\n- [Gym hours](gym-hours.md): closed since March\n--- home/boiler-2025.md (deleted; boiler-2026 replaces it)\n- The boiler is serviced every November.\n- The landlord books the engineer through the building office, which only takes requests by email and wants the flat number, the serial number from the sticker inside the boiler door, two mornings that work, and a phone number the engineer can ring from the street, because the entry phone on this stair has been broken since the spring before last.", expires: demoExpiry)]
             }
         }
+        // `-approvalWorst`: a payment with a long payee and a five-figure total, for the pill's worst case.
+        if ProcessInfo.processInfo.arguments.contains("-approvalWorst") {
+            approvals = [ApprovalRequest(id: "demo-worst", title: "Pay", summary: "", files: [], branch: nil, stat: nil, expires: demoExpiry,
+                payment: .init(merchant: "Ristorante e Pizzeria Da Gennaro alla Stazione Termini di Roma", site: nil,
+                               items: [.init(name: "Dinner for 40, deposit", detail: nil, quantity: 1, unit: 12_480.5)],
+                               total: 12_480.5, currency: "EUR", method: "Link card ending 4242", notes: [], test: nil))]
+        }
+        // `-approvalLater`: the demo approval already put off with Later, waiting in its pill over the composer.
+        if ProcessInfo.processInfo.arguments.contains("-approvalLater") { hiddenApprovals = Set(approvals.map(\.id)) }
+        // `-approvalLapsed`: it ran out on the Mac before an answer, and the pill says so.
+        if ProcessInfo.processInfo.arguments.contains("-approvalLapsed") { lapsedApproval = approvals.last; approvals = [] }
         // `-longThread`: one of everything a thread can hold, for the design review.
         if ProcessInfo.processInfo.arguments.contains("-longThread") {
             func m(_ from: Sender, _ text: String, _ edit: (inout Message) -> Void = { _ in }) -> Message {
@@ -589,6 +661,8 @@ final class OttoStore {
         #if DEBUG
         // `-spinnerCheck`: the thinking mark's step table and pose maths.
         if ProcessInfo.processInfo.arguments.contains("-spinnerCheck") { OttoThinkingSpinnerCheck.run() }
+        // `-approvalCheck`: the approval clock's rounding, and the forget message's name filter.
+        if ProcessInfo.processInfo.arguments.contains("-approvalCheck") { ApprovalCheck.run() }
         #endif
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
         if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift"
@@ -661,7 +735,7 @@ final class OttoStore {
         Task {
             for await u in backend.approvalUpdates {
                 switch u {
-                case .show(let a): if !approvals.contains(where: { $0.id == a.id }) { approvals.append(a) }
+                case .show(let a): if !approvals.contains(where: { $0.id == a.id }) { approvals.append(a); lapsedApproval = nil }
                 // A paid payment stays for its receipt even though the Mac has settled it.
                 case .done(let id): if !keptApprovals.contains(id) { approvals.removeAll { $0.id == id } }
                 }
@@ -1079,6 +1153,7 @@ final class OttoStore {
     }
 
     func hideApproval(_ id: String) { hiddenApprovals.insert(id) }
+    func reopenApproval(_ id: String) { hiddenApprovals.remove(id) }
 
     /// `keep`: the decision goes out, but the sheet stays up (a payment's receipt) until `closeApproval`.
     /// True once the Mac has the decision. False leaves the approval up: it isn't queued for later,

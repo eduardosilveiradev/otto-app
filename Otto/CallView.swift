@@ -1,3 +1,4 @@
+import ActivityKit
 import AVFoundation
 import Combine
 import SwiftUI
@@ -9,13 +10,36 @@ import VoiceGlowKit
 /// server's: `vapiPublicKey`, `vapiAssistantId`, and `ownerNumber`, which is passed
 /// as the caller's number because a web call has none and the assistant's prompt
 /// recognises its owner by `{{customer.number}}`.
+/// Calls Otto from anywhere: the header's phone button, or the "Call Otto" App Shortcut.
+/// `-call` (with `-vapiPublicKey`, `-vapiAssistantId` and, in DEBUG, `-vapiHost`): open straight into one.
+@MainActor @Observable
+final class CallLauncher {
+    static let shared = CallLauncher()
+    /// The web call's screen is up.
+    var open = ProcessInfo.processInfo.arguments.contains("-call")
+    /// Neither a web call nor Otto's number is set up: the alert that says where.
+    var explain = false
+
+    /// A web call (free, over the internet) when Vapi is set up; Otto's phone line, dialled with the Phone
+    /// app, otherwise; and with neither, the alert pointing at details.
+    func start() {
+        // Otto's phone line (the Vapi assistant). Set in details.
+        let digits = (UserDefaults.standard.string(forKey: "callNumber") ?? "").filter { $0.isNumber || $0 == "+" }
+        if CallManager.configured { open = true }
+        else if let url = URL(string: "tel:\(digits)"), !digits.isEmpty { UIApplication.shared.open(url) }
+        else { explain = true }
+    }
+}
+
 @MainActor @Observable
 final class CallManager {
+    /// The call under way, for what reaches it from outside the call screen: its Live Activity's buttons, the Action Button.
+    static weak var current: CallManager?
     enum Phase { case idle, connecting, live, ended }
-    var phase = Phase.idle { didSet { Self.active = phase == .connecting || phase == .live } }
+    var phase = Phase.idle { didSet { Self.active = phase == .connecting || phase == .live; showOutside() } }
     /// The keepalive's silent audio must stay out of a call's audio session.
     static var active = false
-    var muted = false
+    var muted = false { didSet { updateOutside() } }
     var speaker = false
     var ottoSpeaking = false
     var startedAt: Date?
@@ -25,6 +49,25 @@ final class CallManager {
     private var bag = Set<AnyCancellable>()
     /// The request that sets the call up; cancelled when it's given up on, so it can't connect later.
     private var attempt: Task<Void, Never>?
+    /// The call on the Lock Screen and in the Dynamic Island while it's live (the audio keeps the app
+    /// running in the background, so it can end it itself).
+    private var activity: Activity<CallActivityAttributes>?
+
+    private func showOutside() {
+        if phase == .live, activity == nil, ActivityAuthorizationInfo().areActivitiesEnabled {
+            activity = try? Activity.request(attributes: CallActivityAttributes(), content: .init(state: .init(started: .now, muted: muted), staleDate: nil))
+        } else if phase == .ended || phase == .idle, let a = activity {
+            activity = nil
+            Task { await a.end(nil, dismissalPolicy: .immediate) }
+        }
+    }
+
+    /// Mute changed here or from the Lock Screen: the Live Activity's button follows.
+    private func updateOutside() {
+        guard let a = activity else { return }
+        let state = CallActivityAttributes.ContentState(started: startedAt ?? .now, muted: muted)
+        Task { await a.update(.init(state: state, staleDate: nil)) }
+    }
 
     static var configured: Bool {
         let d = UserDefaults.standard
@@ -46,6 +89,7 @@ final class CallManager {
         let vapi = Vapi(publicKey: key)
         #endif
         self.vapi = vapi
+        Self.current = self
         error = nil
         phase = .connecting
         vapi.eventPublisher.receive(on: DispatchQueue.main).sink { [weak self] event in
