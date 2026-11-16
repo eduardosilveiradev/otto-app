@@ -1,0 +1,157 @@
+onboarding-hello-dark.png	onboarding	hello	dark	Welcome page
+onboarding-connect-dark.png	onboarding	connect	dark	Pair with the Mac (no camera in the simulator, so typing is the main button)
+onboarding-connect-manual-dark.png	onboarding	connect-manual	dark	Typed server address and token
+onboarding-connect-error-dark.png	onboarding	connect-error	dark	Pairing failed: Mac unreachable
+onboarding-notify-dark.png	onboarding	notify	dark	Notifications step
+onboarding-talk-dark.png	onboarding	talk	dark	Talk / Siri step
+onboarding-share-dark.png	onboarding	share	dark	Share-sheet step
+onboarding-awake-dark.png	onboarding	awake	dark	Stay-connected step
+onboarding-done-dark.png	onboarding	done	dark	All set
+launch-connecting-dark.png	launch	connecting	dark	Splash while the Mac is being reached
+chat-empty-dark.png	chat	empty	dark	Fresh thread, nothing yet
+chat-normal-dark.png	chat	normal	dark	Everyday thread: brief, draft with buttons, voice notes
+chat-long-a-dark.png	chat	long-a	dark	Long thread, part 1: quote reply, draft buttons, voice both ways, photo with tapback, link, terminal line
+chat-long-b-dark.png	chat	long-b	dark	Long thread, part 2: card, schedule chip, recorded chips, file, code chip, failed and pending sends
+chat-actions-dark.png	chat	actions	dark	Reply quote, long text, photo, voice note, link preview, tapbacks
+chat-cards-all-dark.png	chat	cards-all	dark	Every card type (bottom of the thread)
+chat-cards-mixed-dark.png	chat	cards-mixed	dark	Mixed card: stat, bars, list, progress, actions
+chat-cards-table-timeline-dark.png	chat	cards-table-timeline	dark	Table and timeline cards
+chat-cards-checklist-keyvalue-dark.png	chat	cards-checklist-keyvalue	dark	Checklist and key-value cards
+chat-cards-image-text-dark.png	chat	cards-image-text	dark	Image and text cards
+chat-schedule-recorded-dark.png	chat	schedule-recorded	dark	Schedule chip, recorded chips (money, loop, memory, place, calendar write), wallet passes
+chat-long-bubbles-dark.png	chat	long-bubbles	dark	Long wrapping bubbles, links, terminal line
+chat-thinking-dark.png	chat	thinking	dark	Otto typing with its live status line
+chat-thinking-todos-dark.png	chat	thinking-todos	dark	Typing bubble with a to-do list
+chat-spinner-think-dark.png	chat	spinner-think	dark	Thinking mark, think (Wobble): a plain Thinking step
+chat-spinner-look-dark.png	chat	spinner-look	dark	Thinking mark, look (Mull): reading a file
+chat-spinner-away-dark.png	chat	spinner-away	dark	Thinking mark, away (Pip): waiting on the web
+chat-spinner-do-dark.png	chat	spinner-do	dark	Thinking mark, do (Hop): running a command
+chat-spinner-idle-dark.png	chat	spinner-idle	dark	Thinking mark held on idle: the still face
+chat-spinner-done-dark.png	chat	spinner-done	dark	Thinking mark held on done: settled, after its squash and blink
+chat-todos-none-dark.png	chat	todos-none	dark	No open to-dos: nothing over the composer
+chat-todos-two-dark.png	chat	todos-two	dark	Two open to-dos while Otto is idle: the pill over the composer
+chat-todos-one-dark.png	chat	todos-one	dark	A single open to-do
+chat-todos-many-dark.png	chat	todos-many	dark	Worst case opened: 30 to-dos, a 120-character one in progress; six shown, the rest counted
+chat-todos-expanded-dark.png	chat	todos-expanded	dark	To-do pill tapped open: the one in progress first
+chat-todos-while-typing-dark.png	chat	todos-while-typing	dark	Otto working: the list is in the bubble, the pill steps aside
+chat-browser-tile-dark.png	chat	browser-tile	dark	Otto in Chrome: the live page tile over the thinking orb
+chat-browser-tile-private-dark.png	chat	browser-tile-private	dark	Sign-in page: caption only, no picture
+chat-browser-tile-long-dark.png	chat	browser-tile-long	dark	Worst case: the server's 100-character caption, two lines kept
+chat-browser-tile-idle-dark.png	chat	browser-tile-idle	dark	Tile still up after the reply ended (done comes 20 s later)
+media-browser-full-dark.png	media	browser-full	dark	Browser tile tapped: the page full screen
+media-browser-take-over-dark.png	media	browser-take-over	dark	A page the Mac will hand over: Take over, behind Face ID
+media-browser-holding-dark.png	media	browser-holding	dark	The page in your hands: taps go to it, with typing, keys and Hand back
+chat-voice-speed-dark.png	chat	voice-speed	dark	A voice reply paused part-way: the speed button (1x, 1.5x, 2x) beside its length
+chat-draft-unnamed-dark.png	chat	draft-unnamed	dark	A draft the Mac sent without saying who it goes to: the card says so above Send
+chat-offline-dark.png	chat	offline	dark	Server unreachable: Otto asleep, reconnecting
+chat-no-network-dark.png	chat	no-network	dark	This phone has no network at all: the header says so, not that the Mac is out of reach
+chat-offline-pending-dark.png	chat	offline-pending	dark	Dead server with a send waiting: Will send when back online
+chat-offline-empty-dark.png	chat	offline-empty	dark	Real dead server: empty thread, asleep
+chat-update-available-dark.png	chat	update-available	dark	Update button in the header
+chat-walkie-hint-dark.png	chat	walkie-hint	dark	Hold-for-walkie-talkie hint
+chat-call-row-dark.png	chat	call-row	dark	A call with Otto that just ended: its line in the thread, with how long it ran
+sheet-call-transcript-dark.png	sheet	call-transcript	dark	The call's line tapped: what was said
+chat-flight-banner-dark.png	chat	flight-banner	dark	Flight-day card under the header
+chat-call-banner-dark.png	chat	call-banner	dark	Live call banner under the header
+composer-focused-dark.png	composer	focused	dark	Composer focused with text
+composer-long-draft-dark.png	composer	long-draft	dark	Composer grown by a long draft
+composer-attachments-dark.png	composer	attachments	dark	Two photos waiting in the composer
+composer-recording-dark.png	composer	recording	dark	Recording a voice note
+sheet-otp-drawer-dark.png	sheet	otp-drawer	dark	One-time code drawer
+sheet-payment-dark.png	sheet	payment	dark	Payment approval
+sheet-payment-receipt-dark.png	sheet	payment-receipt	dark	Payment approved: printed receipt
+sheet-change-approval-dark.png	sheet	change-approval	dark	Approve a change to Otto's core
+sheet-change-approval-detail-dark.png	sheet	change-approval-detail	dark	A change whose detail is its lines, not a git stat (the memory clean-up)
+sheet-approval-scopes-dark.png	sheet	approval-scopes	dark	An ask the Mac will take a wider yes for: just this once is picked
+sheet-approval-out-of-reach-dark.png	sheet	approval-out-of-reach	dark	An ask while the Mac is out of reach: the buttons are off and a line says nothing can be sent yet
+sheet-schedule-dark.png	sheet	schedule	dark	A schedule's page from its chip: when it runs, what Otto will do, and Change or Stop (asked for in the chat)
+sheet-approval-scopes-always-dark.png	sheet	approval-scopes-always	dark	Always picked: what it means in words, before Face ID
+sheet-approval-scopes-worst-dark.png	sheet	approval-scopes-worst	dark	Worst case: the longest rule a server might name, at an accessibility text size
+sheet-approval-draft-dark.png	sheet	approval-draft	dark	An email Otto wants to send in your name: every recipient and every word
+sheet-approval-draft-worst-dark.png	sheet	approval-draft-worst	dark	Worst case: fourteen recipients, an unbreakable address, no subject, a channel this build can't name
+chat-approval-waiting-dark.png	chat	approval-waiting	dark	A payment put off with Later: waiting over the composer, with its time left
+chat-approval-waiting-todos-dark.png	chat	approval-waiting-todos	dark	A change put off with Later takes the to-dos' place until it's answered
+chat-approval-waiting-worst-dark.png	chat	approval-waiting-worst	dark	Worst case: a long payee and a five-figure total, at an accessibility text size
+chat-approval-waiting-two-dark.png	chat	approval-waiting-two	dark	Two put off with Later: the pill shows the newest and says two are waiting
+pips-approval-in-chats-dark.png	pips	approval-in-chats	dark	An approval raised while the Chats list is up: its sheet over the list
+pips-otto-needs-you-dark.png	pips	otto-needs-you	dark	Chats with an approval put off: Otto's row says it needs you
+chat-approval-lapsed-dark.png	chat	approval-lapsed	dark	It lapsed on the Mac before an answer: the pill says Expired until tapped away
+sheet-boarding-pass-dark.png	sheet	boarding-pass	dark	Flight-day boarding pass
+sheet-live-call-dark.png	sheet	live-call	dark	A call Otto is placing, live transcript
+media-viewer-dark.png	media	viewer	dark	Full-screen photo viewer
+study-bubble-dark.png	study	bubble	dark	Study set Otto sent, in the thread
+study-cards-dark.png	study	cards	dark	Study set open on its cards
+study-flipped-dark.png	study	flipped	dark	A card turned over: Again or Knew it
+study-quiz-dark.png	study	quiz	dark	Quiz with a wrong answer picked
+chat-jobs-dark.png	chat	jobs	dark	Coding jobs under Otto's messages: one at work, one waiting on an answer
+sheet-job-dark.png	sheet	job	dark	Job detail sheet: a job up for review, with its pull request
+chat-jobs-worst-dark.png	chat	jobs-worst	dark	Worst case: a long title and question with five answers, a state this build doesn't know, a job the Mac no longer lists
+sheet-job-worst-dark.png	sheet	job-worst	dark	Worst case opened: a failure with a long error, thirty steps and a pull request in the thousands
+walkie-open-dark.png	walkie	open	dark	Walkie-talkie
+call-web-call-failed-dark.png	call	web-call-failed	dark	Web call that couldn't connect
+search-pulled-open-dark.png	search	pulled-open	dark	Search bar pulled down, keyboard up
+search-results-dark.png	search	results	dark	Matches for a word
+search-results-typing-dark.png	search	results-typing	dark	Matches while typing
+search-no-results-dark.png	search	no-results	dark	Nothing matches
+search-jumped-dark.png	search	jumped	dark	Tapped a match: thread scrolled to it, lit up
+details-card-dark.png	details	card	dark	Contact card: today, sections, settings, server
+details-snoozed-dark.png	details	snoozed	dark	Snoozed, with what's held
+details-pair-link-pasted-dark.png	details	pair-link-pasted	dark	A pairing link pasted into the address: both fields filled and checked at once; the call keys it carried wait for a Mac that answers
+details-server-check-failed-dark.png	details	server-check-failed	dark	Server check under the token: can't reach
+loops-list-dark.png	loops	list	dark	Loops screen
+schedules-list-dark.png	schedules	list	dark	Schedules screen
+calls-list-dark.png	calls	list	dark	Calls screen
+memory-list-dark.png	memory	list	dark	Memory screen
+people-list-dark.png	people	list	dark	People screen
+money-list-dark.png	money	list	dark	Money screen
+trips-list-dark.png	trips	list	dark	Trips screen
+passport-list-dark.png	passport	list	dark	Passport screen
+packages-list-dark.png	packages	list	dark	Packages screen
+status-list-dark.png	status	list	dark	Status screen
+devices-list-dark.png	devices	list	dark	Devices screen
+rules-list-dark.png	rules	list	dark	Rules screen
+glasses-list-dark.png	glasses	list	dark	Glasses screen
+settings-list-dark.png	settings	list	dark	Settings screen
+activity-unasked-dark.png	activity	unasked	dark	Activity, Unasked tab
+activity-changes-dark.png	activity	changes	dark	Activity, Changes tab
+activity-jobs-dark.png	activity	jobs	dark	Activity, Jobs tab
+activity-triggers-dark.png	activity	triggers	dark	Activity, Triggers tab
+loops-empty-dark.png	loops	empty	dark	Loops with nothing in it
+schedules-empty-dark.png	schedules	empty	dark	Schedules with nothing in it
+calls-empty-dark.png	calls	empty	dark	Calls with nothing in it
+memory-empty-dark.png	memory	empty	dark	Memory with nothing in it
+people-empty-dark.png	people	empty	dark	People with nothing in it
+trips-empty-dark.png	trips	empty	dark	Trips with nothing in it
+packages-empty-dark.png	packages	empty	dark	Packages with nothing in it
+rules-empty-dark.png	rules	empty	dark	Rules with nothing in it
+rules-worst-dark.png	rules	worst	dark	Worst case: the longest rule, one used once, one used 1,284 times, one with no dates
+activity-jobs-empty-dark.png	activity	jobs-empty	dark	No background jobs
+calls-error-dark.png	calls	error	dark	Can't reach your Mac (no callbot)
+loops-stale-dark.png	loops	stale	dark	A refresh that failed: the page keeps what it had and says how old it is
+settings-error-dark.png	settings	error	dark	Settings when the Mac doesn't answer
+loops-error-dark.png	loops	error	dark	Can't reach your Mac (dead server)
+pips-conversations-dark.png	pips	conversations	dark	Conversations list
+pips-otto-only-dark.png	pips	otto-only	dark	Only Otto: the empty conversations hint
+pips-otto-thread-dark.png	pips	otto-thread	dark	Otto's thread with pips: handoff lines
+pips-otto-started-group-dark.png	pips	otto-started-group	dark	Otto starts a group: group link bubble
+pips-pip-thread-dark.png	pips	pip-thread	dark	A pip's own thread (Code, needs you)
+pips-group-thread-dark.png	pips	group-thread	dark	Group thread with @mention draft and activity
+pips-new-group-dark.png	pips	new-group	dark	A group Otto just made
+pips-search-jump-dark.png	pips	search-jump	dark	Search hit opened deep in a group
+pips-handoff-dark.png	pips	handoff	dark	Handoff sheet: Otto asked Code
+pips-handoff-you-dark.png	pips	handoff-you	dark	Handoff sheet: you asked School
+pips-handoff-you-failed-dark.png	pips	handoff-you-failed	dark	Handoff sheet: your ask failed
+pips-handoff-failed-dark.png	pips	handoff-failed	dark	Handoff sheet: School didn't wake
+pips-pip-details-dark.png	pips	pip-details	dark	Pip details sheet
+pips-pip-edit-dark.png	pips	pip-edit	dark	Editing a pip
+pips-pip-edit-schedule-dark.png	pips	pip-edit-schedule	dark	Editing a pip's schedule
+pips-pip-delete-confirm-dark.png	pips	pip-delete-confirm	dark	Delete pip confirmation
+pips-create-pip-dark.png	pips	create-pip	dark	New pip sheet
+pips-create-pip-failed-dark.png	pips	create-pip-failed	dark	New pip: server refused
+pips-create-group-dark.png	pips	create-group	dark	New group sheet
+pips-group-card-dark.png	pips	group-card	dark	Group details sheet
+pips-group-changed-dark.png	pips	group-changed	dark	Group renamed, member added and removed
+pips-group-delete-confirm-dark.png	pips	group-delete-confirm	dark	Delete group confirmation
+pips-group-rename-failed-dark.png	pips	group-rename-failed	dark	Group rename on a server without the routes
+pips-faces-dark.png	pips	faces	dark	Every face in every pose
+permissions-notifications-dark.png	permissions	notifications	dark	System notification permission alert on first launch
