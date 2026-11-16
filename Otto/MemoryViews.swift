@@ -45,7 +45,10 @@ private struct MemoryList: View {
         let items = shown
         List {
             // Not on an empty page: the summary would open on nothing.
-            if query.isEmpty && cluster == nil && !needsLook && source == "all" && !m.items.isEmpty && !m.summary.text.isEmpty {
+            // After a forget the summary may still say what was forgotten, until the Mac rewrites it: not shown meanwhile.
+            if query.isEmpty && cluster == nil && !needsLook && source == "all" && !m.items.isEmpty && !m.summary.text.isEmpty && !store.forgotten.isEmpty {
+                Section { Text("Otto is rewriting what it knows about you without what you just forgot. It’s back here when that’s done.").foregroundStyle(.secondary) }
+            } else if query.isEmpty && cluster == nil && !needsLook && source == "all" && !m.items.isEmpty && !m.summary.text.isEmpty {
                 Section {
                     NavigationLink {
                         ScrollView { MarkdownText(text: m.summary.text).padding() }
@@ -224,7 +227,7 @@ struct MemoryDetailScreen: View {
         } message: {
             // A dialog's message is never clipped, so a long memory is cut to about what its row shows.
             let what = item.description.count > 80 ? String(item.description.prefix(79)) + "…" : item.description
-            Text(direct ? "“\(what)” is deleted from what Otto keeps. It can’t be brought back. The summary catches up when it’s next rewritten, tonight."
+            Text(direct ? "“\(what)” is deleted from what Otto keeps. It can’t be brought back."
                  : "“\(what)” goes to Otto as a message in your chat, and Otto confirms there when it’s gone.")
         }
         // No answer isn't a no: the Mac may have deleted it and the reply been lost. Asking again is safe either way.

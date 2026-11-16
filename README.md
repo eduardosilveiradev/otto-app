@@ -41,14 +41,22 @@ what Otto knows about your day.
 - PDFs: shared from any app, or from the composer's + menu; they go as
   pictures of their pages
 - Pairing from a link: an `otto://pair` link tapped anywhere (the Camera's QR
-  banner, a message), pasted into the card's address field, or scanned there
+  banner, a message), pasted into the card's address field, or scanned there.
+  A link that opened the app from outside always asks before it's used
+- A web call leaves a line in the thread with how long it ran; tap it for
+  what was said. During the call, tap the caption for the same
+- Voice notes play at 1×, 1.5× or 2×
+- A schedule's page has Change and Stop: both open the chat with the words
+  ready, since Otto is the one who changes its schedules
+- What you were typing is still in the box after the app is closed
 - Built here and waiting on the server
   (`design/hillclimb-2026-11-16/server-contract.md`): a yes that lasts for the
   task or for good, with a page in the contact card to take it back; who a
   message Otto wants to send goes to, on its approval; approvals kept right
   while the phone was asleep; Forget on a memory's page without a chat
-  message; the app's own alert for an approval; and taking over the page Otto
-  has open in Chrome when it's stuck at a sign-in. Until the server sends
+  message; the app's own alert for an approval; taking over the page Otto
+  has open in Chrome when it's stuck at a sign-in; and Stop on the bubble
+  that shows what Otto is doing. Until the server sends
   them, none of these shows. `Scripts/contract-server.ts` stands in for that
   server on the simulator.
 - Siri: "Ask Otto" answers out loud, and anything that would change something

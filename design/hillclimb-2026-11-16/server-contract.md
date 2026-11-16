@@ -1,6 +1,6 @@
 # What the iPhone app expects from otto-core that the server doesn't send yet
 
-Ten additions to `otto/server.ts` (the "App transport" block) and `otto/dash.ts`. The app's side of
+Eleven additions to `otto/server.ts` (the "App transport" block) and `otto/dash.ts`. The app's side of
 each is built. Every one is switched on by something the server sends first, so against today's
 server the app behaves exactly as it does now: no new button, row or request that leads nowhere.
 
@@ -126,12 +126,15 @@ POST /app/dash/memory/forget     {"id":"<MemoryItem.id>"} → 200 {"ok":true}
 The server deletes that memory and its index line; the next `GET /app/dash/memory` may still list
 it until the index is rebuilt.
 
-The POST is idempotent: asked twice, the second answers `{"ok":false}`.
+The POST is idempotent: asked twice, the second answers `{"ok":false}`. Forgetting also takes the
+memory out of the summary: the server rewrites `summary.text` without it (or blanks it until the
+nightly rewrite) before the memory page is next served with a new `generatedAt`.
 
 App side (`MemoryDetailScreen` in `Otto/MemoryViews.swift`): with `canForget`, the page's Forget
 asks "Forget this?", says it can't be brought back, deletes and takes the row off the list at once;
-the row stays off across a relaunch until a rebuilt index no longer lists it. Any non-2xx or no
-answer: "Couldn't confirm", with Try Again, since the memory may or may not be gone.
+the row stays off across a relaunch until a rebuilt index no longer lists it, and until then the
+summary isn't shown either, so the forgotten fact can't be read there. Any non-2xx or no answer:
+"Couldn't confirm", with Try Again, since the memory may or may not be gone.
 
 Without it: no `canForget`, so Forget asks Otto in the chat (`forget memory <name>`), as today.
 
@@ -146,23 +149,28 @@ soon as the app connects, with either link.
 
 ## 7. The app alerts for an approval while it's connected
 
-The hello frame gains an optional list:
+The hello frame gains an optional list, and the app gains one frame:
 
 ```json
-{"type":"hello","acks":true,"alerts":["approval"]}
+{"type":"hello","acks":true,"alerts":["approval"]}          otto -> app, on connect
+{"type":"approval_alerted","id":"a1"}                       app -> otto
 ```
 
-With `"approval"` in it, the server promises this: when it raises an approval while at least one
-phone app socket is open (not a desktop's), it sends no Bark push for it. Today `raiseApproval`
-forces the push because the app never alerted for one. With no phone socket open it pushes as now.
+With `"approval"` in the hello's list the server holds its Bark push for an approval for 5 seconds
+after sending the frame. If any phone app socket (not a desktop's) answers `approval_alerted` for
+that id in that time, the push is dropped; otherwise it goes out as it does today. So responsibility
+passes only when a phone says it has alerted, never on a socket merely being open. Today
+`raiseApproval` forces the push because the app never alerted for one.
 
-App side (`OttoStore`'s approval updates in `Otto/OttoApp.swift`, `Notifier.post(approval:)`): an
-approval frame that arrives while the app is in the background (keep-awake holds the socket) becomes
-Otto's own notification, "Otto needs your OK" with what it asks; a tap opens the approval. It is
-removed when the approval is settled.
+App side (`OttoStore`'s approval updates in `Otto/OttoApp.swift`, `Notifier.post(approval:)`):
+- In front, the approval's sheet is on screen, and the app sends `approval_alerted` at once.
+- In the background (keep-awake holds the socket) it posts Otto's own notification, "Otto needs
+  your OK" with what it asks, and sends `approval_alerted` only once iOS has taken the notification.
+  With notifications switched off or never allowed it posts nothing and sends nothing, so the Bark
+  push follows. A tap opens the approval; the notification is removed when the approval is settled.
 
-Without it: no `alerts`, so the app posts nothing and the forced Bark push is the only alert, as
-today. Never both.
+Without it: no `alerts`, so the app posts nothing, sends nothing, and the forced Bark push is the
+only alert, as today. Never both.
 
 ## 8. Taking over the page Otto has open
 
@@ -185,8 +193,11 @@ POST /app/browser/input   one of                                 → 200 {"ok":t
 ```
 
 - `control`: the server takes a hold for this page. Absent or false: view only, as today.
-- While held, frames carry `"held":true`, keep coming (at most one a second, and one right after
-  each input), and carry the picture even for a page the tile would otherwise show without one (a
+- `{"held":…}` is the state after the request, and `{"ok":true}` is sent only once the input has
+  been carried out on the page. The app sends one input at a time and waits for each answer, so
+  the server sees them in the order they were made.
+- While held, frames carry `"held":true`, keep coming (up to four a second while the page is
+  changing, at least one right after each input, and none while nothing changes), and carry the picture even for a page the tile would otherwise show without one (a
   sign-in page): the owner asked to see it, behind Face ID.
 - The server lets go on its own after 5 minutes with no input, when the app's socket closes, or
   when the work ends, and says so with a frame whose `held` is false.
@@ -195,8 +206,11 @@ POST /app/browser/input   one of                                 → 200 {"ok":t
 
 App side (`BrowserFullScreen` in `Otto/ChatView.swift`): with `control`, the full-screen page has
 "Take over" behind Face ID. Holding, a tap on the picture is a tap on the page, a field types into
-it, and there are Enter, Tab and scroll keys and "Hand back". Closing the screen hands back too. A
-request that gets no 2xx is said under the picture.
+it (hidden as it's typed unless shown), and there are Enter, Tab, Delete and scroll keys and "Hand
+back". The picture can be pinched in and dragged; a tap is sent as the point of the page it is on.
+Closing the screen hands back too. What's typed stays in the field until the server answers
+`{"ok":true}`; an input with no such answer is said under the picture, and for typing the app says
+to look at the page before typing it again.
 
 Without it: no `control`, so the page is view only and closes on a tap, as today.
 
@@ -217,5 +231,33 @@ when the Mac has them: `vapiKey=<Vapi public key>&vapiAssistant=<assistant id>`.
 
 App side (`PairingLink` in `Otto/Onboarding.swift`): pairing by scan, paste or a tapped link then
 also sets up calls inside the app. They can be typed in the contact card too ("Calls in the app").
+A link that opened the app from outside (a message, a web page) is never used unasked: the app
+names the Mac, says that calls change too when the link carries these, and waits for Connect. The
+keys are kept only once that Mac has accepted the token.
 
 Without them: the phone button dials Otto's number, as today.
+
+## 11. Stopping the turn Otto is on
+
+The hello frame gains an optional flag, and the app gains one frame:
+
+```json
+{"type":"hello","acks":true,"stop":true}                    otto -> app, on connect
+{"type":"stop","op":"7C1F…"}                                app -> otto
+```
+
+- With `"stop":true` the server takes `stop`: it interrupts the turn the session is on (what Esc
+  does in the terminal), ends the typing state as at the end of any turn (`{"type":"typing",
+  "on":false}` and `{"type":"todos","items":[]}`), and sends an ordinary message saying it stopped
+  and where it got to ("Stopped. I'd read two of the five emails; nothing was sent.").
+- It answers `{"type":"ack","id":"<op>"}` like any other op, once the interrupt has been asked for.
+  With no turn running it acks and does nothing else: no message.
+- A coding job isn't a turn. It keeps running; it has its own Stop (`POST /app/jobs/stop`).
+- Whatever the turn had already done stays done. The message should say so when it matters.
+
+App side (`ChatView` in `Otto/ChatView.swift`, `OttoStore.stopTurn`): touch and hold the bubble
+that shows what Otto is doing, then "Stop". The bubble goes when the server sends `typing` off,
+not before, so it never claims a stop the Mac hasn't made; no ack within the usual wait is
+an error haptic and nothing else changes.
+
+Without it: no `stop` in the hello, so the bubble has no menu and the frame is never sent.

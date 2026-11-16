@@ -44,6 +44,11 @@ final class CallManager {
     var ottoSpeaking = false
     var startedAt: Date?
     var error: String?
+    /// What's been said, as the call service writes it down: the finished sentences, and the one still being spoken.
+    private(set) var lines: [CallRecord.Line] = []
+    private(set) var hearing: CallRecord.Line?
+    /// The thread the call was placed from; nil is Otto's own, where it leaves its line when it ends.
+    private var context: String?
 
     private var vapi: Vapi?
     private var bag = Set<AnyCancellable>()
@@ -89,8 +94,10 @@ final class CallManager {
         let vapi = Vapi(publicKey: key)
         #endif
         self.vapi = vapi
+        self.context = context
         Self.current = self
         error = nil
+        lines = []; hearing = nil; startedAt = nil
         phase = .connecting
         vapi.eventPublisher.receive(on: DispatchQueue.main).sink { [weak self] event in
             guard let self else { return }
@@ -103,8 +110,11 @@ final class CallManager {
                     try? await vapi.startLocalAudioLevelObserver()
                 }
             // Ended before it started: a room that can't be joined says "left" before its error.
-            case .callDidEnd: if phase == .connecting { fail("Couldn’t connect.") } else { phase = .ended }
+            case .callDidEnd: if phase == .connecting { fail("Couldn’t connect.") } else { finish() }
             case .speechUpdate(let s): if s.role == .assistant { ottoSpeaking = s.status == .started }
+            case .transcript(let t):
+                let line = CallRecord.Line(otto: t.role == .assistant, text: t.transcript)
+                if t.transcriptType == .final { lines.append(line); hearing = nil } else { hearing = line }
             // The app's own words, not the system's ("Could not connect to the server."). A web call goes over
             // the internet to the call service, not to the Mac, so the Mac isn't what it blames.
             case .error: fail("Couldn’t start the call. Check your connection and try again.")
@@ -128,7 +138,16 @@ final class CallManager {
     }
 
     /// Ends this attempt for good: nothing it sends later (a late answer, an event) changes the screen.
-    func hangUp() { attempt?.cancel(); bag = []; vapi?.stop(); phase = .ended }
+    func hangUp() { attempt?.cancel(); bag = []; vapi?.stop(); finish() }
+
+    /// Over. A call that was live leaves its line in Otto's thread: how long it ran, with what was said behind it.
+    private func finish() {
+        if phase == .live, context == nil, let start = startedAt {
+            if let hearing { lines.append(hearing) }   // cut off mid-sentence: what was heard of it still counts
+            OttoStore.shared.logCall(CallRecord(seconds: max(1, Int(Date.now.timeIntervalSince(start).rounded())), lines: lines))
+        }
+        phase = .ended
+    }
 
     private func fail(_ message: String) { error = message; hangUp() }
 
@@ -150,6 +169,7 @@ struct CallView: View {
     @State private var call = CallManager()
     /// The group or pip the call was placed from; nil from Otto's own thread.
     var context: String? = nil
+    @State private var transcript = false
     /// Reduce Motion: the face keeps its size and the glow its idle level; the caption and the timer say the call is live.
     @Environment(\.accessibilityReduceMotion) private var still
 
@@ -181,6 +201,19 @@ struct CallView: View {
                 Text("Otto").font(.largeTitle.weight(.semibold)).foregroundStyle(.white)
                     .padding(.top, 8)
                 status.font(.headline).foregroundStyle(.white.opacity(0.6)).padding(.top, 4)
+                // What's being said, in words, for a noisy street or ears that didn't catch it: the last line,
+                // and the whole call behind it.
+                if let line = call.hearing ?? call.lines.last {
+                    Button { transcript = true } label: {
+                        Text((line.otto ? "" : "You: ") + line.text)
+                            .font(.subheadline).foregroundStyle(.white.opacity(0.85)).multilineTextAlignment(.center).lineLimit(3)
+                            .padding(.horizontal, 32).padding(.vertical, 10).contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel((line.otto ? "Otto said: " : "You said: ") + line.text)
+                    .accessibilityHint("Shows everything said so far")
+                    .transition(.opacity)
+                }
                 if let e = call.error {
                     Text(e).font(.footnote).foregroundStyle(.white.opacity(0.6)).multilineTextAlignment(.center)   // one status with "call failed"
                         .padding(.top, 8).padding(.horizontal, 40)
@@ -211,6 +244,7 @@ struct CallView: View {
             }
         }
         .onAppear { call.start(context: context) }
+        .sheet(isPresented: $transcript) { CallTranscript(lines: call.lines + (call.hearing.map { [$0] } ?? []), title: "This call") }
         #if DEBUG
         .task(id: call.error) {
             guard call.error != nil, labTryAgain else { return }
@@ -234,6 +268,35 @@ struct CallView: View {
                 Text(start, style: .timer).monospacedDigit()
             }
         }
+    }
+}
+
+/// What was said on a call, line by line, yours on the trailing side as in the thread.
+struct CallTranscript: View {
+    let lines: [CallRecord.Line]
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(line.otto ? "Otto" : "You").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                            Text(line.text).textSelection(.enabled)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .padding(20)
+            }
+            .defaultScrollAnchor(.bottom)
+            .overlay { if lines.isEmpty { ContentUnavailableView("Nothing was written down", systemImage: "text.bubble", description: Text("The call service sent no transcript for this call.")) } }
+            .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

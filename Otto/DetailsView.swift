@@ -47,7 +47,7 @@ struct DetailsView: View {
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
                             if let line = store.backend is MockBackend ? "Sample data"
-                                : store.asleep ? "Asleep. Can’t reach your Mac." : nil {
+                                : store.asleep ? (store.noNetwork ? "Asleep. This phone is offline." : "Asleep. Can’t reach your Mac.") : nil {
                                 Text(line).font(.subheadline).foregroundStyle(.secondary)
                             }
                         }
@@ -121,7 +121,7 @@ struct DetailsView: View {
                         if let serverCheck { checkLine(serverCheck) }
                     }
                     .id("server")
-                    if DataScannerViewController.isSupported {
+                    if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
                         Button("Scan a pairing code", systemImage: "qrcode.viewfinder") { scanning = true }
                     }
                     labeled("Otto’s phone number") {
@@ -197,6 +197,9 @@ struct DetailsView: View {
                 QRScanner { code in
                     scanning = false
                     if let link = PairingLink(code) { apply(link) } else { serverCheck = .failed("That isn’t an Otto pairing code.") }
+                } failed: {
+                    scanning = false
+                    serverCheck = .failed("The scanner isn’t available right now. Paste the link into the address instead.")
                 }
                 .ignoresSafeArea()
                 .overlay(alignment: .topTrailing) {
@@ -229,9 +232,11 @@ struct DetailsView: View {
         }
     }
 
+    /// From the card's own scanner, or pasted into its address field: the owner's act, so it fills the fields,
+    /// where every value it brought can be read, and runs the check.
     private func apply(_ link: PairingLink) {
         server = link.server; token = link.token
-        link.saveCallKeys()
+        if let key = link.callKey, let assistant = link.callAssistant { callKey = key; callAssistant = assistant }   // both or neither
         submitted = UUID()
     }
 

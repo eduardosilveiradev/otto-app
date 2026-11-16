@@ -145,13 +145,15 @@ struct Loaded<T: Decodable, Content: View>: View {
                     .safeAreaInset(edge: .bottom) {
                         if stale {
                             HStack(spacing: 8) {
-                                Text("Couldn’t reach your Mac. This is from \(loadedAt.formatted(date: .omitted, time: .shortened)).")
+                                Text("\(why.stale) This is from \(loadedAt.formatted(date: .omitted, time: .shortened)).")
                                     .font(.footnote).foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 Button("Try again") { Task { await load() } }.font(.footnote.weight(.semibold))
                             }
                             .padding(.horizontal, 14).padding(.vertical, 10)
-                            .glassEffect(.regular, in: .rect(cornerRadius: 17, style: .continuous))
+                            // Solid, not glass: rows scrolled under it would read through its words.
+                            .background(Color(.tertiarySystemGroupedBackground), in: .rect(cornerRadius: 17, style: .continuous))
+                            .overlay { RoundedRectangle(cornerRadius: 17, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5) }
                             .padding(.horizontal, 16).padding(.bottom, 8)
                             .transition(.opacity)
                         }
@@ -160,9 +162,9 @@ struct Loaded<T: Decodable, Content: View>: View {
             }
             else if failed {
                 ContentUnavailableView {
-                    Label("Can’t reach your Mac", systemImage: "wifi.slash")
+                    Label(why.title, systemImage: why.symbol)
                 } description: {
-                    Text(store.backend.isLive ? "Otto didn’t answer." : "This needs the Otto server.")
+                    Text(why.detail)
                 } actions: {
                     Button("Try again") { failed = false; Task { await load() } }
                 }
@@ -174,6 +176,19 @@ struct Loaded<T: Decodable, Content: View>: View {
             }
         }
         .task(id: query) { await load() }
+    }
+
+    /// What went wrong, told apart: this phone is offline, the Mac didn't answer, its Otto has no such page
+    /// (an older one), it refused the token, or it hit an error.
+    private var why: (title: String, symbol: String, detail: String, stale: String) {
+        switch store.backend.dashFailure(path) {
+        case 404?: ("Not on your Mac yet", "arrow.down.app", "The Otto on your Mac doesn’t have this page. Update it there.", "Your Mac no longer has this page.")
+        case 401?, 403?: ("Your Mac didn’t accept this phone", "lock", "Pair again from the contact card.", "Your Mac didn’t accept this phone.")
+        case let code? where code >= 400: ("Otto hit an error", "exclamationmark.triangle", "Your Mac answered with an error (\(code)). Try again in a moment.", "Otto hit an error (\(code)).")
+        default:
+            if store.noNetwork { ("You’re offline", "wifi.slash", "Connect to Wi-Fi or mobile data.", "You’re offline.") }
+            else { ("Can’t reach your Mac", "wifi.slash", store.backend.isLive ? "Otto didn’t answer." : "This needs the Otto server.", "Couldn’t reach your Mac.") }
+        }
     }
 
     private func load() async {

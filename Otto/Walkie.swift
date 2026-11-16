@@ -159,7 +159,9 @@ struct WalkieView: View {
         .onChange(of: store.messages.last?.id) { pickUpReply() }
         .onChange(of: store.messages.last?.audio?.id) { pickUpReply() }
         .onChange(of: store.messages.last?.isVoice) { pickUpReply() }
-        .sensoryFeedback(.impact(weight: .medium), trigger: holding)
+        // Felt when the recording starts, not when the finger lands: a press the microphone refused gives none.
+        .sensoryFeedback(.impact(weight: .medium), trigger: recorder.started != nil)
+        .micProblem(recorder)
         .sensoryFeedback(.success, trigger: reply?.id)
         .sensoryFeedback(.error, trigger: stuck) { _, now in now }   // eyes on the street: felt, not just shown
     }

@@ -65,7 +65,13 @@ private extension String {
 /// Sits inside Otto's bubble under the text: what was just scheduled, tap for the whole of it.
 struct ScheduleChip: View {
     let trigger: DashTrigger
-    @State private var open = false
+    #if DEBUG
+    /// `-scheduleOpen`: the chip's sheet already up and at full height, for screenshots.
+    private static let shot = CommandLine.arguments.contains("-scheduleOpen")
+    #else
+    private static let shot = false
+    #endif
+    @State private var open = shot
     @Environment(OttoStore.self) private var store
 
     var body: some View {
@@ -91,13 +97,15 @@ struct ScheduleChip: View {
                     .toolbar { Button("Done") { open = false } }
             }
             .environment(store)
-            .presentationDetents([.medium, .large])
+            .presentationDetents(Self.shot ? [.large] : [.medium, .large])
         }
     }
 }
 
 struct ScheduleDetail: View {
     let id: String
+    @Environment(OttoStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         Loaded(path: "triggers/item", query: ["id": id]) { (t: TriggerDetail, reload) in
@@ -127,8 +135,20 @@ struct ScheduleDetail: View {
             Section("What Otto will do") {
                 Text(t.action).font(.callout).textSelection(.enabled)
             }
+            // Otto changes its own schedules, so both open the composer on the words that ask it: you finish
+            // the sentence or just send, and Otto answers in the chat.
+            if t.enabled {
+                Section {
+                    Button("Change", systemImage: "pencil") { ask("Change the schedule “\(t.gist)”: ") }
+                    Button(t.repeating ? "Stop It" : "Cancel It", systemImage: "stop.circle", role: .destructive) { ask("Stop the schedule “\(t.gist)”") }
+                } footer: {
+                    Text("Opens the chat with the words ready. Nothing changes until you send them.")
+                }
+            }
         }
     }
+
+    private func ask(_ words: String) { store.prefill = words; dismiss() }
 }
 
 /// Everything armed, soonest first, and what has already run.

@@ -116,6 +116,8 @@ struct Message: Identifiable, Codable {
     var card: Card? = nil
     /// Coding jobs this message started, by id: each draws as a card under the bubble (Jobs.swift).
     var jobs: [String]? = nil
+    /// A call with Otto that ended here: this message is its line in the thread (CallView.swift).
+    var call: CallRecord? = nil
     /// A verification code to show in the drawer (OTP.swift). Cleared when the server edits the message after it expires.
     var otp: OTPCode? = nil
     /// A desktop was focused when it went out (server's desktop-focus quiet): in the thread, but no banner.
@@ -200,9 +202,20 @@ struct Brief {
     var triggers: [Trigger]
 }
 
+/// A call with Otto inside the app, once it's over: how long it ran and what was said. Kept with its line in
+/// the thread on this phone; the Mac's history has no such row, so other devices don't show it.
+struct CallRecord: Codable, Hashable {
+    struct Line: Codable, Hashable { let otto: Bool; let text: String }
+    var seconds: Int
+    var lines: [Line] = []
+    /// "3:12", or "1:02:07" past the hour.
+    var length: String { Duration.seconds(seconds).formatted(.time(pattern: seconds >= 3600 ? .hourMinuteSecond : .minuteSecond)) }
+}
+
 /// What became of an approval decision: the Mac has it; there was nothing left to decide (it
-/// expired, or a restart dropped it), so nothing was done; or no answer came, so either may be true.
-enum ApprovalOutcome { case done, gone, unknown }
+/// expired, or a restart dropped it), so nothing was done; it went out and no answer came, so either may be
+/// true; or it never left the phone (no connection), so nothing was decided and either answer is still open.
+enum ApprovalOutcome { case done, gone, unknown, notSent }
 
 // MARK: - The backend seam
 
@@ -244,13 +257,20 @@ protocol OttoBackend: AnyObject {
     /// GET /app/approvals: every approval the Mac still holds. Nil when it couldn't be asked or has no
     /// such route, which is not "none": the caller then leaves what it has alone.
     func pendingApprovals(background: Bool) async -> [ApprovalRequest]?
-    /// The Mac leaves the alert for an approval to the app while it's connected (its hello says so).
+    /// The Mac leaves the alert for an approval to the app while it's connected (its hello says so), as long
+    /// as the app tells it each time that it did alert (`alerted`). Untold, the Mac sends its own push.
     var alertsApprovals: Bool { get }
+    func alerted(approval id: String) async
     /// Back in front: find out now whether the connection is still there.
     func probe() async
-    /// Take the page Otto has open, or hand it back (POST /app/browser/hold). False when the Mac didn't take it.
+    /// The Mac can end the turn Otto is on when asked (its hello says so), and the asking.
+    var canStop: Bool { get }
+    func stopTurn() async -> Bool
+    /// Why the last read of a card page failed: its HTTP status, 0 when no answer came, nil when it didn't fail.
+    func dashFailure(_ path: String) -> Int?
+    /// Take the page Otto has open, or hand it back (POST /app/browser/hold). True once the Mac says it is as asked.
     func holdBrowser(_ hold: Bool) async -> Bool
-    /// A tap, typing or a key on the held page (POST /app/browser/input). False when the Mac didn't take it.
+    /// A tap, typing or a key on the held page (POST /app/browser/input). True once the Mac says it did it.
     func browserInput(_ input: BrowserInput) async -> Bool
     /// The newest `limit` messages of the thread on the server, or with `since`, every one after it.
     /// Nil when the server couldn't be reached or answered with an error.
@@ -320,6 +340,10 @@ extension OttoBackend {
     func decide(approval id: String, approve: Bool, scope: ApprovalScope) async -> ApprovalOutcome { .done }
     func pendingApprovals(background: Bool) async -> [ApprovalRequest]? { nil }
     var alertsApprovals: Bool { false }
+    func alerted(approval id: String) async {}
+    var canStop: Bool { false }
+    func stopTurn() async -> Bool { false }
+    func dashFailure(_ path: String) -> Int? { nil }
     func probe() async {}
     func holdBrowser(_ hold: Bool) async -> Bool { !isLive }   // sample data: there's no page to hold, so it just plays along
     func browserInput(_ input: BrowserInput) async -> Bool { !isLive }

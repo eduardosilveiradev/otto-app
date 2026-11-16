@@ -1,5 +1,6 @@
 import ActivityKit
 import MWDATCore
+import Network
 import SwiftUI
 import ThinkingOrbsKit
 import WidgetKit
@@ -49,8 +50,8 @@ struct OttoApp: App {
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
                 // The widgets: Otto's thread, the walkie-talkie, or an approval put off with Later.
                 if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval"].contains(door) { Doors.open(door); return }
-                // A pairing link from the Camera's QR banner, AirDrop or a message: onboarding takes it; once
-                // set up, the main screen asks before it changes which Mac this is.
+                // A pairing link from the Camera's QR banner, AirDrop or a message. Anyone can make one, so it is
+                // only held here: onboarding and the main screen each ask, naming the Mac, before any of it is used.
                 if let link = PairingLink(url.absoluteString) { PairInbox.shared.link = link; return }
                 // A bare otto:// (what the Mac's Bark alerts open): Otto's own thread, where a waiting approval shows.
                 if url.scheme == "otto", (url.host ?? "").isEmpty, url.query() == nil { Doors.open("chat"); return }
@@ -94,36 +95,25 @@ private enum PipRootSwitch {
 private struct MainRoot: View {
     @State private var store = OttoStore.shared
     @Environment(\.scenePhase) private var phase
-    /// Nothing saved and no answer yet: stop waiting and open the empty chat, which takes a message and sends
-    /// it when the Mac is back. 5 s, the launch grace: a phone reaching the Mac through the tunnel can take a
-    /// few, and at that point the chat says whether it's still out of reach.
-    @State private var gaveUp = false
-    /// Up for one fade over a saved thread, which is read from disk at once and laid out underneath.
+    /// Up for one fade at launch. The thread is laid out underneath from the first frame: the saved one is read
+    /// from disk at once, and an empty one says it's still loading and takes a message meanwhile (EmptyChat).
+    /// Nothing here waits for the Mac.
     @State private var splashing = true
-
-    /// Something to show. A saved thread is on screen at once, whatever the Mac is doing. With none (the
-    /// first launch after pairing) the orb stays until the first history has come back or 5 s have passed,
-    /// so an empty "Say hi" never flashes ahead of a thread that was about to load.
-    private var ready: Bool { !store.messages.isEmpty || store.animated || gaveUp }
 
     var body: some View {
         // A ZStack, not a Group: a Group hands its modifiers to whichever child is showing, so the
         // splash timer, the overlay and store.start() were all restarted when the content swapped in.
         ZStack {
-            if !ready {
-                Color(.systemBackground).task { try? await Task.sleep(for: .seconds(5)); gaveUp = true }
+            // Up under the status bar: the header's scroll-edge blur then fades the thread out at the
+            // screen's edge. Stopped at the safe area, the blurred bubbles were cut off there in a band.
+            if PipRootSwitch.faces {
+                #if DEBUG
+                FaceGrid()
+                #endif
+            } else if store.pips.active {
+                PipRoot(store: store)
             } else {
-                // Up under the status bar: the header's scroll-edge blur then fades the thread out at the
-                // screen's edge. Stopped at the safe area, the blurred bubbles were cut off there in a band.
-                if PipRootSwitch.faces {
-                    #if DEBUG
-                    FaceGrid()
-                    #endif
-                } else if store.pips.active {
-                    PipRoot(store: store)
-                } else {
-                    ChatScreen(store: store).ignoresSafeArea(.keyboard).ignoresSafeArea(.container, edges: .top)
-                }
+                ChatScreen(store: store).ignoresSafeArea(.keyboard).ignoresSafeArea(.container, edges: .top)
             }
         }
             // Over the content, so it is already laid out underneath when the splash fades.
@@ -132,8 +122,6 @@ private struct MainRoot: View {
                 #if DEBUG
                 if CommandLine.arguments.contains("-holdSplash") { return }   // screenshots: the splash stays up
                 #endif
-                do { while !ready { try await Task.sleep(for: .milliseconds(100)) } }
-                catch { return }   // cancelled: leave the splash to whoever runs next
                 withAnimation(.easeOut(duration: 0.25)) { splashing = false }
             }
             // An approval shows over whatever is on screen (the Chats list, a pip's thread), not only Otto's own
@@ -143,12 +131,12 @@ private struct MainRoot: View {
             }
             // A pairing link opened once the app is set up: named and confirmed before it replaces the Mac. After an
             // approval's sheet, never at the same time: two presentations from one place and neither shows.
-            .alert("Connect Otto to \(PairInbox.shared.link?.host ?? "")?", isPresented: Binding(get: { PairInbox.shared.link != nil && store.shownApproval == nil }, set: { if !$0 { PairInbox.shared.link = nil } }),
+            .alert(PairInbox.shared.link?.question ?? "", isPresented: Binding(get: { PairInbox.shared.link != nil && store.shownApproval == nil }, set: { if !$0 { PairInbox.shared.link = nil } }),
                    presenting: PairInbox.shared.link) { link in
                 Button("Connect") { link.save() }
                 Button("Cancel", role: .cancel) {}
-            } message: { _ in
-                Text("This replaces the Mac Otto is paired with. It takes effect when you next quit and reopen the app.")
+            } message: { link in
+                Text("\(link.consequence) It replaces the Mac you’re paired with, from the next time you quit and reopen the app.")
             }
             .environment(store)
             // Notifications are asked for once, in onboarding, where "Not now" stays not now.
@@ -252,6 +240,9 @@ final class OttoStore {
     var animated = false
     /// Otto sleeps while the server is unreachable.
     var asleep = false
+    /// This phone has no network at all: then that's what's wrong, not the Mac.
+    var noNetwork = false
+    @ObservationIgnored private let network: NWPathMonitor = { let m = NWPathMonitor(); m.start(queue: .global(qos: .utility)); return m }()
     var connected = false
     /// The message a swipe picked to answer; the composer shows it until you send or cancel.
     var replyingTo: Message.ID?
@@ -423,6 +414,11 @@ final class OttoStore {
             // to answer before the face sleeps and the header says so; once it has been up, a drop shows at once.
             let out = !live && (seen > 0 || n > launchGrace)
             if out != asleep { asleep = out }
+            var cut = network.currentPath.status == .unsatisfied
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-noNetwork") { cut = true }   // the line that says so, in the simulator
+            #endif
+            if cut != noNetwork { noNetwork = cut }
             try? await Task.sleep(for: .seconds(1))
         }
     }
@@ -761,6 +757,16 @@ final class OttoStore {
                 if let m = messages.last(where: { !$0.buttons.isEmpty }), let b = m.buttons.first { tap(b, on: m.id) }
             }
         }
+        #if DEBUG
+        // `-callRow`: a call with Otto that ended a moment ago, as its line at the end of the thread.
+        if ProcessInfo.processInfo.arguments.contains("-callRow") {
+            logCall(CallRecord(seconds: 192, lines: [
+                .init(otto: false, text: "Hey, did the boiler man confirm for Tuesday?"),
+                .init(otto: true, text: "He did. Between nine and eleven, and he’ll ring the bell twice."),
+                .init(otto: false, text: "Good. Tell the landlord, and move the dentist to five."),
+                .init(otto: true, text: "The landlord has the draft from this morning; I’ll send it. The dentist has five on Tuesday, so that’s moved.")]))
+        }
+        #endif
         // `-scriptDemo`: a scripted session for the launch film; see scriptDemo().
         if ProcessInfo.processInfo.arguments.contains("-scriptDemo") { Task { await scriptDemo() } }
         // `-emptyThread`: Otto's thread with nothing in it, over whatever a fixture seeded.
@@ -848,9 +854,15 @@ final class OttoStore {
                 case .show(let a):
                     if !approvals.contains(where: { $0.id == a.id }) {
                         approvals.append(a); lapsedApproval = nil
-                        // In the background (keep-awake holds the socket) nobody sees a sheet: it's a banner, when the
-                        // Mac has said it leaves the alert to the app. Otherwise the Mac's own push covers it.
-                        if !foreground, backend.alertsApprovals { Notifier.shared.post(approval: a); alertedApprovals.insert(a.id) }
+                        // When the Mac leaves the alert to the app: in front, the sheet is the alert; in the background
+                        // (keep-awake holds the socket) it's a banner, if iOS will show one. Only then is the Mac told.
+                        // Untold (notifications off, the app frozen), it sends its own push, so one always arrives.
+                        if backend.alertsApprovals {
+                            Task {
+                                if foreground { await backend.alerted(approval: a.id) }
+                                else if await Notifier.shared.post(approval: a) { alertedApprovals.insert(a.id); await backend.alerted(approval: a.id) }
+                            }
+                        }
                     }
                 // A paid payment stays for its receipt even though the Mac has settled it.
                 case .done(let id):
@@ -1271,6 +1283,19 @@ final class OttoStore {
         for m in messages where m.pending == true && !(m.tap != nil && m.date < stale) { await deliver(m.id) }
     }
 
+    /// A call with Otto that just ended: one line in the thread, with what was said behind it (CallRecord).
+    func logCall(_ record: CallRecord) {
+        var line = Message(from: .terminal, text: "Call with Otto, \(record.length)", date: .now, serverID: "call|\(UUID().uuidString)")
+        line.call = record
+        messages.append(line)
+    }
+
+    /// Asks the Mac to end the turn Otto is on. It says so in the thread; the bubble goes when its typing does.
+    func stopTurn() async {
+        let ok = await backend.stopTurn()
+        UINotificationFeedbackGenerator().notificationOccurred(ok ? .success : .error)
+    }
+
     func hideApproval(_ id: String) { hiddenApprovals.insert(id) }
     func reopenApproval(_ id: String) { hiddenApprovals.remove(id) }
 
@@ -1282,7 +1307,7 @@ final class OttoStore {
         if keep { keptApprovals.insert(id) }   // before the send: the Mac's "done" can beat its reply
         let outcome = await backend.decide(approval: id, approve: approve, scope: scope)
         if outcome != .done { keptApprovals.remove(id) }
-        if outcome != .unknown { decidedApprovals.insert(id) }
+        if outcome == .done || outcome == .gone { decidedApprovals.insert(id) }
         if outcome == .gone || (outcome == .done && !keep) { approvals.removeAll { $0.id == id } }
         return outcome
     }
