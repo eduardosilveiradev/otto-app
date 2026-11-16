@@ -369,7 +369,9 @@ final class KeyView: UIView {
         case .ret: returnTitle
         case .page(let p): p == .letters ? "Letters" : p == .numbers ? "Numbers" : "More symbols"
         }
-        let textColor = returnAccent && def.kind == .ret ? style.onAccent.ui : style.text.ui
+        // The default style's accent is Otto's tangerine, which marks Otto (its key), never a button: there Return
+        // is the system's blue with white on it. A style or accent the owner picked colours Return as before.
+        let textColor = returnAccent && def.kind == .ret ? (style.followsSystem ? .white : style.onAccent.ui) : style.text.ui
         label.textColor = textColor
         icon.tintColor = shift == .locked && def.kind == .shift ? style.accent.ui : textColor
         paint()
@@ -378,7 +380,7 @@ final class KeyView: UIView {
 
     private func paint() {
         let base: UIColor
-        if def.kind == .ret, returnAccent { base = style.accent.ui }
+        if def.kind == .ret, returnAccent { base = style.followsSystem ? .systemBlue : style.accent.ui }
         else if def.kind == .shift, shift != .off { base = style.key.ui }
         else { base = isSpecial ? style.specialKey.ui : style.key.ui }
         // Pressed: letters lighten (the popup carries them), specials swap to the key colour, like iOS.

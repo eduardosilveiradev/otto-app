@@ -45,7 +45,7 @@ struct SettingsView: View {
                 Section { Text(note).foregroundStyle(.secondary) }
             }
         }
-        .navigationTitle("Settings")
+        .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)   // as every other card page: a large title sat on the first section's header
         .refreshable { await load() }
         .task { await load() }
     }

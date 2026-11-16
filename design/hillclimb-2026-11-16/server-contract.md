@@ -33,7 +33,9 @@ The app's answer gains one optional field:
 - `scope` is `"task"` or `"always"`, sent only on an approve and only when the frame offered it.
   Absent means once. A decline never carries one.
 - The op id is unchanged (`approval-<id>`), so a resend after a lost ack is still the same decision.
-  The app resends with the same scope, never a different one.
+  The app resends with the same scope, never a different one: it keeps an unacked decision (the
+  answer and its scope) on disk until the server stops listing the approval, so it holds across a
+  relaunch too, and it never resends on its own, only when the owner taps the same answer again.
 - On `task`, the server answers later approvals with the same `rule` (or, with no `rule`, the same
   `title`) from that turn or job itself, without raising them. On `always` it stores a rule (item 2)
   and does the same from then on. Either way the action is still journaled as today.
@@ -163,11 +165,14 @@ passes only when a phone says it has alerted, never on a socket merely being ope
 `raiseApproval` forces the push because the app never alerted for one.
 
 App side (`OttoStore`'s approval updates in `Otto/OttoApp.swift`, `Notifier.post(approval:)`):
-- In front, the approval's sheet is on screen, and the app sends `approval_alerted` at once.
+- In front, the app sends `approval_alerted` when the approval's sheet is on screen, not when the
+  frame arrives: with a call, the contact card or another sheet in its way the sheet waits, nothing
+  is sent, and the Bark push follows after the 5 seconds.
 - In the background (keep-awake holds the socket) it posts Otto's own notification, "Otto needs
   your OK" with what it asks, and sends `approval_alerted` only once iOS has taken the notification.
   With notifications switched off or never allowed it posts nothing and sends nothing, so the Bark
-  push follows. A tap opens the approval; the notification is removed when the approval is settled.
+  push follows. A tap opens the approval; the notification is removed when the approval is settled
+  (`approval_done`, or item 3's list no longer having it).
 
 Without it: no `alerts`, so the app posts nothing, sends nothing, and the forced Bark push is the
 only alert, as today. Never both.
@@ -210,7 +215,8 @@ it (hidden as it's typed unless shown), and there are Enter, Tab, Delete and scr
 back". The picture can be pinched in and dragged; a tap is sent as the point of the page it is on.
 Closing the screen hands back too. What's typed stays in the field until the server answers
 `{"ok":true}`; an input with no such answer is said under the picture, and for typing the app says
-to look at the page before typing it again.
+to look at the page before typing it again. Handing back, or closing the screen, first lets the
+inputs already made reach the page in order, takes no new ones, and only then sends the release.
 
 Without it: no `control`, so the page is view only and closes on a tap, as today.
 
@@ -226,8 +232,12 @@ Without it: no `notes`, no section.
 
 ## 10. Call keys in the pairing link
 
-`otto/apptokens.ts new` may add two query items to the `otto://pair` link it prints as a QR code,
-when the Mac has them: `vapiKey=<Vapi public key>&vapiAssistant=<assistant id>`.
+`otto/apptokens.ts new` adds two query items to the `otto://pair` link it prints as a QR code,
+`vapiKey=<Vapi public key>&vapiAssistant=<assistant id>`, when both `VAPI_PUBLIC_KEY` and
+`VAPI_ASSISTANT_ID` are set in the environment it runs with (the env file the server already reads
+`VAPI_SERVER_SECRET` from). With either missing it adds neither. Values are URL-encoded like the
+other items. The public key is the one Vapi's web SDK takes; it is not the server secret, which
+never goes in a link.
 
 App side (`PairingLink` in `Otto/Onboarding.swift`): pairing by scan, paste or a tapped link then
 also sets up calls inside the app. They can be typed in the contact card too ("Calls in the app").

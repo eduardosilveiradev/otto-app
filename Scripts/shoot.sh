@@ -172,6 +172,7 @@ shot sheet change-approval-detail 6 "A change whose detail is its lines, not a g
 shot sheet approval-scopes 6 "An ask the Mac will take a wider yes for: just this once is picked" $O -demoThread -approvalDemo scopes
 shot sheet approval-out-of-reach 6 "An ask while the Mac is out of reach: the buttons are off and a line says nothing can be sent yet" $O -demoThread -approvalDemo scopes -offline
 shot sheet schedule 7 "A schedule's page from its chip: when it runs, what Otto will do, and Change or Stop (asked for in the chat)" $O -scheduleThread -scheduleOpen
+shot sheet approval-over-card 8 "An approval raised while the contact card is up: its sheet shows over the card, not behind it" $O -details -approvalDemo scopes
 shot sheet approval-scopes-always 6 "Always picked: what it means in words, before Face ID" $O -demoThread -approvalDemo scopes -approvalScope always
 shot sheet approval-scopes-worst 6 "Worst case: the longest rule a server might name, at an accessibility text size" $O -demoThread -approvalDemo scopes-worst -approvalScope always -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
 shot sheet approval-draft 6 "An email Otto wants to send in your name: every recipient and every word" $O -demoThread -approvalDemo draft
@@ -263,7 +264,7 @@ elif [[ "permissions-notifications" =~ $FILTER ]]; then
     xcrun simctl launch "$DEV" $ID -onboarded YES -demoThread -pipsFixture -pipsScreen otto >/dev/null
     sleep 14
     f=permissions-notifications-$theme.png
-    xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1 && printf '%s\t%s\t%s\t%s\t%s\n' "$f" permissions notifications $theme "System notification permission alert on first launch" >> "$TSV.new"
+    xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1 && printf '%s\t%s\t%s\t%s\t%s\n' "$f" permissions notifications $theme "A fresh install opened straight into the thread: no system alert here, notifications are asked for in onboarding" >> "$TSV.new"
     echo $f
   done
 fi

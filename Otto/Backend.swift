@@ -208,6 +208,8 @@ struct CallRecord: Codable, Hashable {
     struct Line: Codable, Hashable { let otto: Bool; let text: String }
     var seconds: Int
     var lines: [Line] = []
+    /// It ended on an error once live, not on a hang-up. Optional: lines saved before this had none.
+    var dropped: Bool? = nil
     /// "3:12", or "1:02:07" past the hour.
     var length: String { Duration.seconds(seconds).formatted(.time(pattern: seconds >= 3600 ? .hourMinuteSecond : .minuteSecond)) }
 }

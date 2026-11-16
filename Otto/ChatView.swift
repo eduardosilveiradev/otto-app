@@ -62,6 +62,9 @@ struct ChatView: View {
     /// When the "hold for walkie-talkie" hint last showed; it comes back every two months.
     @AppStorage("walkieHintAt") private var walkieHintAt = 0.0
     @State private var walkieHint = false
+    /// "Hold to stop Otto", once ever, on the bubble that carries the menu.
+    @AppStorage("stopHintShown") private var stopHintShown = false
+    @State private var stopHint = false
     /// Asleep for longer than a dropped socket takes to come back (a second or two), so a blip never flashes a line.
     @State private var unreachable = false
     @Environment(\.openURL) private var openURL
@@ -123,6 +126,9 @@ struct ChatView: View {
     /// kept until it closes. Nil until they land. `/app/history` has no query, so this is as far back as search reaches.
     @State private var older: [Message]?
     @State private var olderFailed = false
+    /// The Mac sent as many as were asked for, so there may be older ones search can't see: the results say so.
+    @State private var olderCapped = false
+    private static let searchReach = 500
     @State private var fetching: Task<Void, Never>?
     private var searchWords: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var showingResults: Bool { ui.searching && !searchWords.isEmpty }
@@ -138,16 +144,17 @@ struct ChatView: View {
     }
     private func closeSearch(animated: Bool = true) {
         fetching?.cancel()
-        fetching = nil; older = nil; olderFailed = false; query = ""
+        fetching = nil; older = nil; olderFailed = false; olderCapped = false; query = ""
         let motion: Animation? = still ? .easeOut(duration: 0.2) : .snappy
         withAnimation(animated ? motion : nil) { ui.searching = false }
     }
     private func fetchOlder() {
         olderFailed = false
         fetching = Task {
-            let rows = await store.backend.history(background: false, limit: 500, since: nil)
+            let rows = await store.backend.history(background: false, limit: Self.searchReach, since: nil)
             guard !Task.isCancelled else { return }
             guard let rows else { olderFailed = true; return }
+            olderCapped = rows.count >= Self.searchReach
             let oldest = thread.messages.first?.date ?? .distantFuture
             older = rows.filter { $0.patch == nil && $0.date < oldest }
         }
@@ -257,6 +264,7 @@ struct ChatView: View {
         .overlay {
             if showingResults {
                 SearchResults(hits: hits, query: searchWords, loading: thread.isOtto && older == nil && !olderFailed, failed: olderFailed,
+                              reach: olderCapped ? (older?.count ?? 0) + thread.messages.count : nil,
                               bottomInset: ui.bottomInset,
                               who: { m in m.from == .me || m.from == .terminal ? "You" : row?.memberStates.first { $0.id == m.author }?.name ?? thread.name },
                               retry: fetchOlder, open: show, close: { closeSearch() })
@@ -344,6 +352,7 @@ struct ChatView: View {
                 .buttonStyle(.plain)
                 .font(size: 12, design: .monospaced, relativeTo: .caption).foregroundStyle(.secondary)
                 .accessibilityLabel("Otto: \(step)").accessibilityHint("Scrolls down to it")
+                .contextMenu { stopMenu }
                 .padding(.leading, 10).padding(.trailing, 62)
                 .padding(.bottom, ui.bottomInset - 8)
                 .transition(.opacity)
@@ -373,6 +382,14 @@ struct ChatView: View {
         .alert("Calling Otto", isPresented: Binding(get: { CallLauncher.shared.explain }, set: { CallLauncher.shared.explain = $0 })) {
             Button("OK", role: .cancel) {}
         } message: { Text("Add Otto’s phone number in details (tap Otto’s name).") }
+    }
+
+    /// Stop, for the bubble that shows what Otto is doing and for its line when scrolled away from it. Empty
+    /// (so no menu at all) unless this is Otto's thread and the Mac's hello said it can stop a turn.
+    @ViewBuilder private var stopMenu: some View {
+        if thread.isOtto, store.backend.canStop {
+            Button("Stop", systemImage: "stop.circle", role: .destructive) { Task { await store.stopTurn() } }
+        }
     }
 
     @ViewBuilder private var threadList: some View {
@@ -450,11 +467,27 @@ struct ChatView: View {
                     if thread.typing {
                         Typing(status: thread.typingStatus, todos: thread.typingTodos, connected: thread.connected).padding(.top, 10).id("typing")
                             // Touch and hold what Otto is doing to stop it: only with a Mac that can (its hello says so).
-                            .contextMenu {
-                                if thread.isOtto, store.backend.canStop {
-                                    Button("Stop", systemImage: "stop.circle", role: .destructive) { Task { await store.stopTurn() } }
-                                }
+                            .contextMenu { stopMenu }
+                            .accessibilityActions { stopMenu }
+                            // Said once, the first time Otto works on a Mac that can be stopped: a menu behind a
+                            // hold is otherwise found by nobody (the walkie-talkie's hint, for this bubble).
+                            .popover(isPresented: $stopHint, arrowEdge: .bottom) {
+                                Label("Hold to stop Otto", systemImage: "stop.circle")
+                                    .font(size: 14, weight: .medium, relativeTo: .subheadline)
+                                    .padding(.horizontal, 14).padding(.vertical, 10)
+                                    .presentationCompactAdaptation(.popover)
                             }
+                            .task {
+                                guard thread.isOtto, store.backend.canStop, !stopHintShown else { return }
+                                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                                stopHintShown = true; stopHint = true
+                                try? await Task.sleep(for: .seconds(5))
+                                stopHint = false
+                            }
+                            .alert("Couldn’t confirm Stop", isPresented: Bindable(store).stopUnconfirmed) {
+                                Button("Try Again") { Task { await store.stopTurn() } }
+                                Button("OK", role: .cancel) {}
+                            } message: { Text("Your Mac didn’t answer, so Otto may still be working.") }
                             .transition(still ? .opacity : .asymmetric(insertion: .scale(scale: 0.5, anchor: .bottomLeading).combined(with: .opacity),
                                                                        removal: .opacity))
                     }
@@ -1270,7 +1303,7 @@ private struct CallLine: View {
     #endif
     var body: some View {
         Button { open = true } label: {
-            (Text(Image(systemName: "phone.fill")) + Text(" Call with Otto · \(record.length)").fontWeight(.semibold)
+            (Text(Image(systemName: "phone.fill")) + Text(" Call with Otto · \(record.length)\(record.dropped == true ? " · dropped" : "")").fontWeight(.semibold)
              + Text(record.lines.isEmpty ? "" : " · Transcript").foregroundStyle(Color.actionInk))
                 .font(size: 11, relativeTo: .caption2)
                 .foregroundStyle(.secondary)
@@ -1283,7 +1316,7 @@ private struct CallLine: View {
         .buttonStyle(.plain)
         .disabled(record.lines.isEmpty)
         .padding(.top, afterStamp ? 2 : 10).padding(.bottom, 6)
-        .accessibilityLabel("Call with Otto, \(record.length)")
+        .accessibilityLabel("Call with Otto, \(record.length)\(record.dropped == true ? ", dropped" : "")")
         .accessibilityHint(record.lines.isEmpty ? "" : "Shows what was said")
         .sheet(isPresented: $open) {
             CallTranscript(lines: record.lines, title: "Call, \(date.formatted(date: .abbreviated, time: .shortened))")
@@ -1413,8 +1446,10 @@ private struct Row: View {
                 if !message.buttons.isEmpty {
                     // Side by side while they fit; a third button or a long label stacks them.
                     let buttons = ForEach(Array(message.buttons.enumerated()), id: \.element.id) { i, b in
+                        // 44pt to tap, laid out as drawn: the slop goes up and down only, so neighbours don't overlap.
                         let button = Button(Self.buttonTitle(b.label)) { press(b) }
                             .font(size: 15, weight: .semibold, relativeTo: .subheadline).buttonBorderShape(.capsule)
+                            .padding(.vertical, 6).contentShape(.rect).padding(.vertical, -6)
                         if i == 0 { button.buttonStyle(.borderedProminent).tint(.blue) } else { button.quietButton() }
                     }
                     ViewThatFits(in: .horizontal) {
@@ -1513,7 +1548,7 @@ private struct Row: View {
         if sideways == true { onSwiping(false) }
         sideways = nil
         guard swipe != 0 else { return }
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { swipe = 0 }
+        withAnimation(still ? .easeOut(duration: 0.15) : .spring(response: 0.35, dampingFraction: 0.8)) { swipe = 0 }
     }
     /// Otto's transport has tapbacks and quoted replies; the conversation API has neither.
     private var canAnswer: Bool { thread.isOtto && !message.isConversation }
@@ -2065,6 +2100,8 @@ private struct VoiceRow: View {
     let message: Message
     let mine: Bool
     @State private var duration: TimeInterval?
+    /// The clip couldn't be fetched from the Mac (not sample data, not one still on its way).
+    @State private var missing = false
     /// Peak per slice, 0…1, read from the audio itself. Flat until it's decoded.
     @State private var levels: [CGFloat]?
     private var player: AudioPlayer { .shared }
@@ -2117,6 +2154,9 @@ private struct VoiceRow: View {
                 // a bubble that grew, the pause button would move out from under the finger that pressed play.
                 let active = playing || held
                 ZStack(alignment: .trailing) {
+                    if missing, duration == nil {
+                        Text("Not downloaded").font(size: 14, weight: .medium, relativeTo: .subheadline).foregroundStyle(ink.opacity(0.7))
+                    }
                     if let duration {
                         Text(Duration.seconds(duration.rounded()).formatted(.time(pattern: .minuteSecond)))
                             .monospacedDigit().font(size: 14, weight: .medium, relativeTo: .subheadline)
@@ -2140,8 +2180,11 @@ private struct VoiceRow: View {
             }
         }
         .padding(.vertical, 2)
-        .task(id: key) {
-            guard duration == nil, let d = await load() else { return }
+        // Again on each connect: a clip that couldn't be fetched (says so where its length goes) is tried once the Mac is back.
+        .task(id: "\(key) \(store.connected)") {
+            guard duration == nil else { return }
+            guard let d = await load() else { missing = !waiting && !(store.backend is MockBackend); return }
+            missing = false
             duration = (try? AVAudioPlayer(data: d))?.duration
             let ext = message.audio.map { ($0.name as NSString).pathExtension } ?? "m4a"
             levels = await Task.detached { Self.levels(d, ext: ext.isEmpty ? "m4a" : ext) }.value
@@ -2671,7 +2714,8 @@ struct BrowserFullScreen: View {
             if b?.tile.held == true { confirmed = true } else if holding, confirmed { holding = false; confirmed = false }
         }
         // Closing never leaves Otto waiting on a page nobody holds.
-        .onDisappear { if holding { Task { [backend = store.backend] in _ = await backend.holdBrowser(false) } } }
+        // After what's still on its way to the page, in order, like Hand back: a release can't overtake a tap.
+        .onDisappear { if holding { Task { [backend = store.backend, queue] in await queue?.value; _ = await backend.holdBrowser(false) } } }
     }
 
     /// Typing, the keys a sign-in needs, a scroll each way, and the way out.
@@ -2724,7 +2768,7 @@ struct BrowserFullScreen: View {
 
     private func key(_ name: String, _ symbol: String, _ input: BrowserInput) -> some View {
         Button { send(input) } label: { Image(systemName: symbol).frame(width: 34, height: 34) }   // 44pt with the border's padding
-            .buttonStyle(.bordered).buttonBorderShape(.circle).tint(.white)
+            .buttonStyle(.bordered).buttonBorderShape(.circle).tint(.white).disabled(busy)
             .accessibilityLabel(name)
     }
 
@@ -2742,8 +2786,10 @@ struct BrowserFullScreen: View {
     /// One at a time, in the order they were made: each waits for the one before, so Enter can't overtake the
     /// typing it follows. A failure says so; for typing, it says to look first, since the text may have landed.
     private func send(_ input: BrowserInput, then done: @escaping (Bool) -> Void = { _ in }) {
+        guard holding, !busy else { done(false); return }   // handing back, or the Mac took it: nothing more goes
         queue = Task { [queue] in
             await queue?.value
+            guard holding else { done(false); return }   // the page went back while this waited its turn
             let ok = await store.backend.browserInput(input)
             if case .text = input, !ok { problem = "Your Mac didn’t confirm the typing. Look at the page before you type it again." }
             else { problem = ok ? nil : "Your Mac didn’t take that. Try again." }

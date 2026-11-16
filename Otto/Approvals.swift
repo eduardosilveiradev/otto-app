@@ -51,10 +51,10 @@ struct ApprovalRequest: Decodable, Identifiable, Hashable {
 }
 
 /// How long an approval lasts: this once, until the task Otto is on is done, or from now on.
-enum ApprovalScope: String, CaseIterable { case once, task, always }
+enum ApprovalScope: String, CaseIterable, Codable { case once, task, always }
 
 /// An answer as it was sent: on a lost ack only this same one may be sent again, with the same reach.
-struct ApprovalDecision: Equatable { var approve: Bool; var scope = ApprovalScope.once }
+struct ApprovalDecision: Equatable, Codable { var approve: Bool; var scope = ApprovalScope.once }
 
 extension ApprovalRequest {
     /// What it asks, in a few words: the payment's amount and payee, or the change's title.
@@ -359,6 +359,8 @@ struct ApprovalSheet: View {
             }
         }
         .interactiveDismissDisabled()
+        // On screen: now the Mac can be told the owner has been alerted (it holds its own push until then).
+        .onAppear { store.sawApproval(request.id) }
     }
 
     @ViewBuilder private func paymentRows(_ p: ApprovalRequest.Payment) -> some View {
@@ -796,5 +798,46 @@ struct PrintedReceipt: View {
                 }
             }
         }
+    }
+}
+
+/// Puts an approval's sheet over whatever is on top: the thread, the contact card, a call, the walkie-talkie, a
+/// picture, the page Otto has open. One presenter for all of them, from UIKit: a SwiftUI sheet can only come up
+/// from a view that isn't already presenting, so one raised while a cover was up waited behind it unseen (and two
+/// presentations asked for at once left neither on screen). Asked again every second by the store's tick, so a
+/// try that lands in the middle of another transition is simply made again.
+@MainActor final class ApprovalPresenter {
+    static let shared = ApprovalPresenter()
+    private weak var shown: UIViewController?
+    private var shownID: String?
+
+    func sync(_ store: OttoStore) {
+        let want = store.shownApproval
+        // Taken down from under us (the cover it sat on closed): forget it, and show it again if it's still wanted.
+        if let s = shown, s.presentingViewController == nil, !s.isBeingPresented { shown = nil }
+        if shown == nil { shownID = nil }
+        if let s = shown {
+            guard shownID != want?.id else { return }   // the right one is up
+            // Answered, put off with Later, or another one's turn: down it comes; the next call shows what's next.
+            guard s.presentedViewController == nil, !s.isBeingPresented, !s.isBeingDismissed else { return }
+            s.dismiss(animated: true)
+            shown = nil; shownID = nil
+            return
+        }
+        guard let want, let top = Self.top() else { return }
+        let host = UIHostingController(rootView: ApprovalSheet(request: want).environment(store))
+        host.isModalInPresentation = true   // closed only by its own buttons (Later hides it)
+        top.present(host, animated: true)
+        shown = host; shownID = want.id
+    }
+
+    /// The controller on top in the scene in front, or nil while that can't take a sheet: nothing in front, a
+    /// transition under way, or a system alert on top (the next call tries again).
+    private static func top() -> UIViewController? {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first { $0.activationState == .foregroundActive }
+        guard var top = scene?.keyWindow?.rootViewController else { return nil }
+        while let next = top.presentedViewController { top = next }
+        guard !top.isBeingPresented, !top.isBeingDismissed, top.transitionCoordinator == nil, !(top is UIAlertController) else { return nil }
+        return top
     }
 }

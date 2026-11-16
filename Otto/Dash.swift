@@ -191,7 +191,12 @@ struct Loaded<T: Decodable, Content: View>: View {
         case let code? where code >= 400: ("Otto hit an error", "exclamationmark.triangle", "Your Mac answered with an error (\(code)). Try again in a moment.", "Otto hit an error (\(code)).")
         default:
             if store.noNetwork { ("You’re offline", "wifi.slash", "Connect to Wi-Fi or mobile data.", "You’re offline.") }
-            else { ("Can’t reach your Mac", "wifi.slash", store.backend.isLive ? "Otto didn’t answer." : "This needs the Otto server.", "Couldn’t reach your Mac.") }
+            else {
+                ("Can’t reach your Mac", "wifi.slash",
+                 store.backend is MockBackend ? "This page needs your Mac. You’re looking at sample data."
+                 : store.backend.isLive ? "Otto didn’t answer. Try again in a moment." : "Check it’s awake and on Tailscale.",
+                 "Couldn’t reach your Mac.")
+            }
         }
     }
 
