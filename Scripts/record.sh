@@ -71,13 +71,13 @@ clip launch 6 $O -demoThread
 play_keyboard-todos() { ad press 'label="Message"'; sleep 2.5; }
 clip keyboard-todos 4 $O -demoThread -openTodos
 
-play_send-reply() { ad press 'label="Message"'; ad type "on my way"; ad press 'label="Send"'; sleep 3.5; }
+play_send-reply() { ad fill 'editable=true' "on my way"; ad press 'label="Send"'; sleep 3; }
 clip send-reply 6 $O -seedThread -quickReply
 
-play_switch-threads() { ad press 'label="Code, 8:12 AM, Merge or hold PR #214?"'; sleep 1.5; ad back; sleep 1.5; }
+play_switch-threads() { ad press 'label="Code, 8:12 AM, Merge or hold PR #214?"'; sleep 0.5; ad back; sleep 1.5; }
 clip switch-threads 6 $B -pipsFixture -pipsScreen conversations
 
-play_scroll-long() { ad scroll up 0.8 --no-post-gesture-stabilization; ad scroll up 0.8 --no-post-gesture-stabilization; ad scroll bottom; sleep 1; }
+play_scroll-long() { ad gesture pan 201 250 0 450 350; ad gesture pan 201 250 0 450 350; ad gesture pan 201 700 0 -500 350; sleep 1; }
 clip scroll-long 6 $O -longThread a
 
 play_details() { ad press 'role=button label="Otto"'; sleep 1.5; ad press 'label="Back"'; sleep 1.5; }
@@ -110,9 +110,9 @@ play_payment() {
 }
 clip payment 6 $O -demoThread -paymentDemo
 
-# -jobsTick: the running job goes up for review 12 s after launch, about 6 s into this recording.
-play_job-update() { sleep 9; }
-FROM=4.5 clip job-update 5 $O -jobsThread -jobsTick
+# -jobsTick: the running job goes up for review and back every three seconds.
+play_job-update() { sleep 6.5; }
+clip job-update 6 $O -jobsThread -jobsTick
 
 play_thinking() { sleep 4; }
 clip thinking 4 $O -demoThread -thinking -todos
