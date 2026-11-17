@@ -23,7 +23,8 @@ struct PipRoot: View {
     /// The list is laid out from the first move until a close has finished; closed, its faces stop.
     @State private var shown = false
 
-    final class Live { var x: CGFloat = 0, from: CGFloat = 0, dragging = false }
+    /// `moves`: bumped by every grab and settle, so an older settle's ending can't act after a newer one began.
+    final class Live { var x: CGFloat = 0, from: CGFloat = 0, dragging = false, moves = 0 }
 
     private enum Kind { case handoff, page }
     /// One `sheet` in the store, shown by whichever presentation suits it.
@@ -73,17 +74,26 @@ struct PipRoot: View {
             }
         }
         #if DEBUG
-        // `-drawerCheck`: grabs the card 0.12 s into its slide out. It must be picked up where it was on screen.
+        // `-drawerCheck`: grabs the card 0.2 s into its slide out, where it must be picked up as it was on screen,
+        // then 0.12 s into a slide home, where the list must stay laid out under the finger.
         .task {
             guard CommandLine.arguments.contains("-drawerCheck") else { return }
             try? await Task.sleep(for: .seconds(4))
             settle(true)
             var seen: [Int] = []
             for _ in 0..<8 { try? await Task.sleep(for: .milliseconds(25)); seen.append(Int(live.x)) }
-            print("DRAWERCHECK slide \(seen)")
+            print("DRAWERCHECK slide \(seen) reduceMotion=\(still)")
             began()
             let ok = live.x > 1 && live.x < out - 1 && x == live.x
-            print("DRAWERCHECK \(ok ? "PASS" : "FAIL") grabbed at \(Int(live.x)) of \(Int(out)), held at \(Int(x))")
+            // Under Reduce Motion the card fades instead, so there's no mid-slide to grab.
+            print("DRAWERCHECK \(still ? "n/a" : ok ? "PASS" : "FAIL") grabbed at \(Int(live.x)) of \(Int(out)), held at \(Int(x))")
+            ended(0, velocity: 0)
+            try? await Task.sleep(for: .seconds(1))
+            settle(false)
+            try? await Task.sleep(for: .milliseconds(120))
+            began()
+            try? await Task.sleep(for: .milliseconds(600))
+            print("DRAWERCHECK \(shown ? "PASS" : "FAIL") list \(shown ? "still" : "not") laid out under a grab at \(Int(live.x)) during a close")
             ended(0, velocity: 0)
         }
         #endif
@@ -149,6 +159,7 @@ struct PipRoot: View {
     private func began() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         shown = true
+        live.moves += 1
         live.from = live.x
         withTransaction(Transaction(animation: nil)) { x = live.x }
     }
@@ -173,12 +184,15 @@ struct PipRoot: View {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
         let to = open ? out : 0
+        live.moves += 1
+        let move = live.moves
         let done = {
+            guard move == live.moves else { return }   // grabbed or sent elsewhere since: that move finishes up
             if !pips.drawer { shown = false } else { UIAccessibility.post(notification: .screenChanged, argument: nil) }
         }
         if still {
             withAnimation(.easeOut(duration: 0.15)) { faded = true } completion: {
-                x = to
+                if move == live.moves { x = to }
                 withAnimation(.easeIn(duration: 0.15), { faded = false }, completion: done)
             }
             return
