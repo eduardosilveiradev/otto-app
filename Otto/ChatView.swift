@@ -962,17 +962,17 @@ struct Composer: View {
                             .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                             }
                         } else {
-                            // Messages' send: a 37×27 pill, 6.5pt in from the field's corner (measured off a screenshot).
+                            // A 32pt circle 4pt in from the field's right and bottom edges: concentric with its
+                            // 20pt corner (16 + 4), centred on a one-line field, pinned to the bottom as it grows.
                             Button(action: send) {
                                 Image(systemName: "arrow.up")
                                     .font(.system(size: 16, weight: .bold))
                                     .foregroundStyle(.white)
-                                    .frame(width: 37, height: 27)
-                                    .background(Color(red: 0.525, green: 0.553, blue: 0.592), in: .capsule)
-                                    // 44pt to tap, a little past the field; the pill stays where Messages draws it.
-                                    .padding(.horizontal, 3.5).padding(.vertical, 8.5).contentShape(.rect)
+                                    .frame(width: 32, height: 32)
+                                    .background(Color(red: 0.525, green: 0.553, blue: 0.592), in: .circle)
+                                    .padding(6).contentShape(.rect).padding(-6)   // 44pt to tap, laid out at 32
                             }
-                            .padding(.trailing, 3).padding(.bottom, -4)   // the pill centred in a one-line field (measured), like Messages
+                            .padding(4)   // all round: a 40pt row, so one line centres it rather than the field
                             .accessibilityLabel("Send")
                             .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                         }
@@ -3381,9 +3381,11 @@ final class KeyboardDock: UIViewController {
         let covered = max(0, view.bounds.maxY - composer.view.frame.minY - view.safeAreaInsets.bottom)
         guard abs(ui.bottomInset - covered) > 0.5 else { return }
         // Inside the keyboard's animation block this runs once, with the final frame; a
-        // drag-to-dismiss calls it every frame outside any block. ChatView animates the former.
+        // drag-to-dismiss calls it every frame outside any block. On the keyboard's curve, so what
+        // SwiftUI sizes from it (the fade behind the composer, in black or white) rises with the
+        // composer instead of jumping to the end at once, over the to-dos and the newest bubbles.
         ui.insetAnimated = UIView.inheritedAnimationDuration > 0
-        ui.bottomInset = covered
+        withAnimation(ui.insetAnimated ? ComposerUI.keyboard : nil) { ui.bottomInset = covered }
     }
 }
 
