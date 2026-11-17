@@ -1,6 +1,8 @@
 #!/bin/bash
 # Shoots Otto's iPhone screens and states from the DEBUG launch arguments, for a PR's review gallery
-# (otto-core's otto/gallery.ts builds the page from <out-dir>).
+# (otto-core's otto/gallery.ts builds the page from <out-dir>). The app launches once; each state's
+# arguments are then swapped in place (Otto/ReviewSwitch.swift). States that need a fresh process
+# (see COLD below) are launched cold instead. COLD_ALL=1 launches every state cold, as before.
 #
 #   Scripts/shoot.sh --list                  every screen-state name, nothing booted
 #   Scripts/shoot.sh <out-dir> [regex]       the states whose "screen-state" matches (default: all)
@@ -60,7 +62,14 @@ for rt in sorted((k for k in d if ".iOS-" in k), key=lambda k: [int(x) for x in 
   xcrun simctl launch "$DEV" $ID -onboarded YES -noNotificationPrompt >/dev/null; sleep 8; xcrun simctl terminate "$DEV" $ID >/dev/null 2>&1
   xcrun simctl status_bar "$DEV" override --time 9:41 --batteryLevel 100 --batteryState charged --cellularBars 4 --wifiBars 3 --dataNetwork wifi
   xcrun simctl privacy "$DEV" grant microphone $ID 2>/dev/null || true
+  DATA=$(xcrun simctl get_app_container "$DEV" $ID data)
 fi
+UP=0   # the app is running on the base state, ready to switch in place
+
+# A fresh process only where launch itself is the point or the state outlives a swap: a real (dead)
+# server's socket, a text size UIKit reads once at launch, the web call's audio session, and the voice
+# player's paused note, set when the player is first made.
+COLD=' -serverURL | -UIPreferredContentSizeCategoryName | -call | -voicePaused '
 
 clean() {
   local data; data=$(xcrun simctl get_app_container "$DEV" $ID data 2>/dev/null) || return 0
@@ -75,15 +84,29 @@ shot() {
   local screen=$1 state=$2 wait=$3 note=$4; shift 4
   [ $LIST = 1 ] && { echo "$screen-$state"; return 0; }
   [[ "$screen-$state" =~ $FILTER ]] || return 0
+  local cold=0; [[ -n "${COLD_ALL:-}" || " $* " =~ $COLD ]] && cold=1
   for theme in $THEMES; do
     xcrun simctl ui "$DEV" appearance $theme
-    xcrun simctl terminate "$DEV" $ID >/dev/null 2>&1
-    sleep 0.5
-    clean
-    # -wipeDefaults: the app's own saved settings live in its container, where `defaults delete` above doesn't
-    # reach; without it a draft or a pasted pairing link from one state shows up in the next.
-    xcrun simctl launch "$DEV" $ID -wipeDefaults "$@" >/dev/null
-    sleep "$wait"
+    if [ $cold = 1 ] || [ $UP = 0 ]; then
+      xcrun simctl terminate "$DEV" $ID >/dev/null 2>&1
+      sleep 0.5
+      clean
+      # -wipeDefaults: the app's own saved settings live in its container, where `defaults delete` above doesn't
+      # reach; without it a draft or a pasted pairing link from one state shows up in the next.
+      if [ $cold = 1 ]; then
+        xcrun simctl launch "$DEV" $ID -wipeDefaults "$@" >/dev/null; UP=0
+        sleep "$wait"
+      else
+        xcrun simctl launch "$DEV" $ID -wipeDefaults $O -demoThread >/dev/null; UP=1
+        sleep 6
+      fi
+    fi
+    if [ $cold = 0 ]; then
+      # In place: the arguments one per line, then the nudge. A launch's own few seconds aren't waited for.
+      printf '%s\n' -wipeDefaults "$@" > "$DATA/tmp/review-args"
+      xcrun simctl spawn "$DEV" notifyutil -p dev.otto.review
+      sleep "$(awk -v w="$wait" 'BEGIN { s = w - 3.5; print (s < 2.5 ? 2.5 : s) }')"
+    fi
     [[ " $* " == *" -pipsFixture "* ]] && sleep 1.5   # the list, then the thread it opens
     local f="$screen-$state-$theme.png"
     xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1
