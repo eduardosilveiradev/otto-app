@@ -160,6 +160,9 @@ shot sheet call-transcript 7 "The call's line tapped: what was said" $O -demoThr
 shot chat flight-banner 6 "Flight-day card under the header" $O -demoThread -mockGate
 shot chat call-banner 7 "Live call banner under the header" $O -demoThread -mockCalls
 shot composer focused 6 "Composer focused with text" $O -demoThread -kbdDemo "running 10 min late, start without me"
+shot composer empty 6 "Composer empty, keyboard up: the mic, no send button" $O -demoThread -kbdDemo ""
+shot composer one-line 6 "One line typed: the send circle centred in the field" $O -demoThread -kbdDemo "running 10 min late"
+shot composer four-lines 6 "Four lines typed: the send circle stays pinned to the bottom" $O -demoThread -kbdDemo "$(printf 'Pick up the dry cleaning\nCall the plumber back\nBook the boiler service\nRunning 10 min late')"
 shot composer long-draft 6 "Composer grown by a long draft" $O -demoThread -seedDraft
 shot composer attachments 6 "Two photos waiting in the composer" $O -demoThread -seedAttachments
 shot composer recording 6 "Recording a voice note" $O -demoThread -recordDemo
