@@ -26,7 +26,12 @@ struct PipRoot: View {
     @State private var below: CGFloat = 0
 
     /// `moves`: bumped by every grab and settle, so an older settle's ending can't act after a newer one began.
-    final class Live { var x: CGFloat = 0, from: CGFloat = 0, dragging = false, moves = 0 }
+    final class Live {
+        var x: CGFloat = 0, from: CGFloat = 0, dragging = false, moves = 0
+        /// The snap's tap: made ready when a drag starts, so it lands with the release rather than a beat after.
+        /// Silent on its own when System Haptics is off, so Reduce Motion's cross-fade keeps it too.
+        let snap = UIImpactFeedbackGenerator(style: .light)
+    }
 
     private enum Kind { case handoff, page }
     /// One `sheet` in the store, shown by whichever presentation suits it.
@@ -164,6 +169,7 @@ struct PipRoot: View {
     private func began() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         shown = true
+        live.snap.prepare()
         live.moves += 1
         live.from = live.x
         withTransaction(Transaction(animation: nil)) { x = live.x }
@@ -182,6 +188,9 @@ struct PipRoot: View {
 
     private func settle(_ open: Bool, velocity v: CGFloat = 0) {
         let pips = store.pips
+        // A tap when it snaps open or shut; not for a drag let go where it was, nor for a close that picking a
+        // thread already made (the drawer state changed first, and the row gave its own tick).
+        if open != pips.drawer { live.snap.impactOccurred() }
         target = open
         pips.drawer = open
         if open {
@@ -333,7 +342,7 @@ struct ConversationsView: View {
 
     /// Otto's face and name over the list. Also the way to Otto's thread, should the server not list it.
     private var top: some View {
-        Button { pips.open("app") } label: {
+        Button { UISelectionFeedbackGenerator().selectionChanged(); pips.open("app") } label: {
             HStack(spacing: 12) {
                 FaceView(look: pips.row("app")?.otto?.look ?? .otto, size: 40, live: true).frame(width: 40, height: 40)
                 Text("Otto").font(size: 28, weight: .semibold, relativeTo: .title).lineLimit(1)
@@ -463,7 +472,7 @@ private struct ConversationCell: View {
     private var selected: Bool { row.id == pips.current }
 
     var body: some View {
-        Button { pips.open(row.id, at: match) } label: {
+        Button { UISelectionFeedbackGenerator().selectionChanged(); pips.open(row.id, at: match) } label: {
             HStack(spacing: 12) {
                 picture
                 VStack(alignment: .leading, spacing: 0) {
