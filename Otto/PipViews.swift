@@ -7,9 +7,23 @@ private let sheetColour = UIColor.secondarySystemGroupedBackground
 
 // MARK: - Root
 
-/// Conversations, with one thread pushed over it.
+/// The open thread on a card, with the conversations under it. The bar's drawer button or a swipe from
+/// the left edge slides the card right until a sliver of it peeks at the edge; tapping or swiping that
+/// sliver back, or picking a conversation, slides it home.
 struct PipRoot: View {
     let store: OttoStore
+    @State private var width: CGFloat = 0
+    /// The card's offset, as set: where it is headed. `live.x` is where it is on screen this frame.
+    @State private var x: CGFloat = 0
+    @State private var live = Live()
+    /// What the last settle aimed at, so the store's own changes (a row tapped) settle once.
+    @State private var target = false
+    /// Reduce Motion: the card fades out and comes back where it's going, instead of sliding.
+    @State private var faded = false
+    /// The list is laid out from the first move until a close has finished; closed, its faces stop.
+    @State private var shown = false
+
+    final class Live { var x: CGFloat = 0, from: CGFloat = 0, dragging = false }
 
     private enum Kind { case handoff, page }
     /// One `sheet` in the store, shown by whichever presentation suits it.
@@ -23,20 +37,32 @@ struct PipRoot: View {
         }, set: { pips.sheet = $0 })
     }
 
+    /// Out, the card keeps about a fifth of the screen.
+    private var out: CGFloat { (width * 0.82).rounded() }
+    private var progress: CGFloat { out > 0 ? min(1, max(0, x / out)) : 0 }
+    /// Read live, not from the environment: the dock's closures keep the copy of this view they were made with.
+    private var still: Bool { UIAccessibility.isReduceMotionEnabled }
+
     var body: some View {
-        @Bindable var pips = store.pips
-        NavigationStack(path: $pips.path) {
-            ConversationsView(store: store)
-                .toolbar(.hidden, for: .navigationBar)
-                .navigationDestination(for: String.self) { id in
-                    ChatScreen(store: store, thread: id == "app" ? store : pips.thread(id), onBack: { pips.path = [] })
-                        .id(id)
-                        .background(EdgeSwipeBack())
-                        .ignoresSafeArea(.keyboard)
-                        .ignoresSafeArea(.container, edges: .top)
-                        .toolbar(.hidden, for: .navigationBar)
+        let pips = store.pips
+        ZStack(alignment: .leading) {
+            if shown || pips.drawer {
+                HStack(spacing: 0) {
+                    ConversationsView(store: store).frame(width: out)
+                    sliver
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityAddTraits(.isModal)
+                .accessibilityHidden(!pips.drawer)
+                .accessibilityAction(.escape) { settle(false) }
+            }
+            card
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
+            width = $0
+            if pips.drawer { x = out; target = true; shown = true }
+        }
+        .onChange(of: pips.drawer) { _, open in if open != target { settle(open) } }
         .sheet(item: pipBinding(.handoff)) { if case .handoff(let id) = $0 { HandoffSheet(store: store, id: id) } }
         // Edge to edge with its own close button, and no grabber: the mockup's a full page.
         .fullScreenCover(item: pipBinding(.page)) {
@@ -46,10 +72,138 @@ struct PipRoot: View {
             case .handoff: EmptyView()
             }
         }
+        #if DEBUG
+        // `-drawerCheck`: grabs the card 0.12 s into its slide out. It must be picked up where it was on screen.
+        .task {
+            guard CommandLine.arguments.contains("-drawerCheck") else { return }
+            try? await Task.sleep(for: .seconds(4))
+            settle(true)
+            var seen: [Int] = []
+            for _ in 0..<8 { try? await Task.sleep(for: .milliseconds(25)); seen.append(Int(live.x)) }
+            print("DRAWERCHECK slide \(seen)")
+            began()
+            let ok = live.x > 1 && live.x < out - 1 && x == live.x
+            print("DRAWERCHECK \(ok ? "PASS" : "FAIL") grabbed at \(Int(live.x)) of \(Int(out)), held at \(Int(x))")
+            ended(0, velocity: 0)
+        }
+        #endif
+    }
+
+    private var card: some View {
+        let pips = store.pips, id = pips.current
+        // Rounded only once it's moving: at rest it's the whole screen.
+        let corner = min(44, x / 2)
+        return ChatScreen(store: store, thread: id == "app" ? store : pips.thread(id), onDrawer: { settle(true) }, onPan: pan)
+            .id(id)
+            .ignoresSafeArea(.keyboard)
+            .ignoresSafeArea(.container, edges: .top)
+            // Down under the home indicator too, where the dock stops: the card's bottom corners are its own.
+            .background(Color(.systemBackground))
+            .overlay { Color.black.opacity(0.15 * progress).ignoresSafeArea().allowsHitTesting(false) }
+            .mask { RoundedRectangle(cornerRadius: corner, style: .continuous).ignoresSafeArea() }
+            .overlay {
+                RoundedRectangle(cornerRadius: corner, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5)
+                    .opacity(progress).ignoresSafeArea().allowsHitTesting(false)
+            }
+            .modifier(Slide(x: x, live: live))
+            .opacity(faded ? 0 : 1)
+            // Out, the card is a picture of the thread: the sliver under it takes the touches.
+            .allowsHitTesting(!pips.drawer)
+            .accessibilityHidden(pips.drawer)
+    }
+
+    /// The strip of the card left showing. It sits in the list's layer, under the card, so the
+    /// drawer and the way back are one modal region for VoiceOver.
+    private var sliver: some View {
+        let id = store.pips.current
+        let name = id == "app" ? "Otto" : store.pips.row(id)?.name ?? "the chat"
+        return Color.clear
+            .contentShape(.rect)
+            .onTapGesture { settle(false) }
+            .gesture(DragGesture(minimumDistance: 8, coordinateSpace: .global)
+                .onChanged { g in
+                    if !live.dragging { live.dragging = true; began() }
+                    moved(g.translation.width)
+                }
+                .onEnded { g in
+                    live.dragging = false
+                    ended(g.translation.width, velocity: g.velocity.width)
+                })
+            .accessibilityElement()
+            .accessibilityLabel(Text("Back to \(name)"))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { settle(false) }
+    }
+
+    private func pan(_ g: UIPanGestureRecognizer) {
+        let dx = g.translation(in: nil).x
+        switch g.state {
+        case .began: began(); moved(dx)
+        case .changed: moved(dx)
+        case .ended: ended(dx, velocity: g.velocity(in: nil).x)
+        default: settle(store.pips.drawer)   // taken away: back where it was
+        }
+    }
+
+    /// Picked up where it is on screen, mid-flight too, so a grab never makes it jump.
+    private func began() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        shown = true
+        live.from = live.x
+        withTransaction(Transaction(animation: nil)) { x = live.x }
+    }
+
+    private func moved(_ dx: CGFloat) {
+        guard !still else { return }   // Reduce Motion: nothing follows the finger; the release decides
+        x = min(out, max(0, live.from + dx))
+    }
+
+    private func ended(_ dx: CGFloat, velocity v: CGFloat) {
+        // Where a flick would carry it at a scroll view's deceleration, and the nearer end to that.
+        let projected = live.from + dx + v / 1000 * 0.998 / (1 - 0.998)
+        settle(projected > out / 2, velocity: v)
+    }
+
+    private func settle(_ open: Bool, velocity v: CGFloat = 0) {
+        let pips = store.pips
+        target = open
+        pips.drawer = open
+        if open {
+            shown = true
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        let to = open ? out : 0
+        let done = {
+            if !pips.drawer { shown = false } else { UIAccessibility.post(notification: .screenChanged, argument: nil) }
+        }
+        if still {
+            withAnimation(.easeOut(duration: 0.15)) { faded = true } completion: {
+                x = to
+                withAnimation(.easeIn(duration: 0.15), { faded = false }, completion: done)
+            }
+            return
+        }
+        // The finger's speed carries on into the spring, as a share of the distance left.
+        let gap = to - live.x
+        withAnimation(.interpolatingSpring(duration: 0.4, bounce: 0, initialVelocity: abs(gap) < 1 ? 0 : v / gap), { x = to }, completion: done)
     }
 }
 
-/// Marks a left-aligned message, so the back swipe can ask when it starts whether it's on the
+/// The card's slide, which also notes where the card is each frame of an animation.
+private struct Slide: GeometryEffect {
+    var x: CGFloat
+    let live: PipRoot.Live
+    var animatableData: CGFloat {
+        get { x }
+        set { x = newValue }
+    }
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        live.x = x
+        return ProjectionTransform(CGAffineTransform(translationX: x, y: 0))
+    }
+}
+
+/// Marks a left-aligned message, so the drawer's swipe can ask when it starts whether it's on the
 /// row's left fifth. Asked once per swipe, so scrolling pays nothing. Takes no touches.
 final class LeftRowMarkerView: UIView {
     private static let all = NSHashTable<LeftRowMarkerView>.weakObjects()
@@ -70,25 +224,6 @@ struct LeftRowMarker: UIViewRepresentable {
         return v
     }
     func updateUIView(_ v: LeftRowMarkerView, context: Context) {}
-}
-
-/// The hidden bar takes the edge swipe with it; this puts it back. Past the edge, back only starts
-/// on the left fifth of a left-aligned message: anywhere else a swipe across a row means "reply".
-private struct EdgeSwipeBack: UIViewControllerRepresentable {
-    final class Controller: UIViewController, UIGestureRecognizerDelegate {
-        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool { LeftRowMarkerView.startsBack(at: g.location(in: nil)) }
-
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            guard let nav = navigationController else { return }
-            nav.interactivePopGestureRecognizer?.delegate = nil
-            nav.interactivePopGestureRecognizer?.isEnabled = true
-            nav.interactiveContentPopGestureRecognizer?.delegate = self
-            nav.interactiveContentPopGestureRecognizer?.isEnabled = true
-        }
-    }
-    func makeUIViewController(context: Context) -> Controller { Controller() }
-    func updateUIViewController(_ c: Controller, context: Context) {}
 }
 
 // MARK: - Conversations
@@ -112,17 +247,19 @@ struct ConversationsView: View {
                     if results.isEmpty {
                         Text("No results").foregroundStyle(.secondary).padding(.top, 40)
                     }
-                    ForEach(Array(results.enumerated()), id: \.element.id) { i, r in
-                        ConversationCell(row: r.conversation, match: r.matches.last, divided: i > 0, store: store)
+                    ForEach(results) { r in
+                        ConversationCell(row: r.conversation, match: r.matches.last, store: store)
                     }
                 } else {
                     // Otto is a thread like the rest, pinned above them.
-                    if let otto = pips.row("app") { ConversationCell(row: otto, match: nil, divided: false, store: store, pinned: true) }
-                    ForEach(Array(pips.list.enumerated()), id: \.element.id) { i, row in
-                        ConversationCell(row: row, match: nil, divided: i > 0 || pips.row("app") != nil, store: store)
+                    if let otto = pips.row("app") { ConversationCell(row: otto, match: nil, store: store, pinned: true) }
+                    ForEach(pips.list) { row in
+                        ConversationCell(row: row, match: nil, store: store)
                     }
+                    newRow
                 }
             }
+            .padding(.top, 8)
         }
         .contentMargins(.bottom, 100, for: .scrollContent)
         .scrollDismissesKeyboard(.interactively)
@@ -131,7 +268,7 @@ struct ConversationsView: View {
                 ContentUnavailableView {
                     Text("No other conversations yet").font(.title2.bold())
                 } description: {
-                    Text("Tap Otto to open your thread. When a job needs its own pip or a group, Otto starts one and it shows up here.")
+                    Text("When a job needs its own pip or a group, Otto starts one and it shows up here.")
                 }
             }
         }
@@ -139,7 +276,6 @@ struct ConversationsView: View {
         .safeAreaBar(edge: .top, spacing: 0) { top }
         .scrollEdgeEffectStyle(.soft, for: .top)
         .overlay(alignment: .bottom) { dock }
-        .ignoresSafeArea(.container, edges: .top)
         .sheet(item: $new, onDismiss: {
             if let id = madeGroup { madeGroup = nil; pips.open(id) }
         }) {
@@ -163,41 +299,42 @@ struct ConversationsView: View {
         }
     }
 
-    /// A large title and the new button; Otto's own thread is the pinned first row. Until the server
-    /// lists that row, Otto stays up here, so the thread is never out of reach.
-    @ViewBuilder private var top: some View {
-        Group {
-            if pips.row("app") == nil {
-                Button { pips.open("app") } label: {
-                    HeaderTitle(name: "Otto") {
-                        FaceView(look: .otto, size: 68, live: true).frame(width: 68, height: 68)
-                    }
-                }
-                .tint(.primary)
-                .accessibilityLabel("Otto")
-                .frame(maxWidth: .infinity)
-            } else {
-                Text("Chats").font(size: 34, weight: .bold, relativeTo: .largeTitle)
-                    .accessibilityAddTraits(.isHeader)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 20).padding(.top, 34)
+    /// Otto's face and name over the list. Also the way to Otto's thread, should the server not list it.
+    private var top: some View {
+        Button { pips.open("app") } label: {
+            HStack(spacing: 12) {
+                FaceView(look: pips.row("app")?.otto?.look ?? .otto, size: 40, live: true).frame(width: 40, height: 40)
+                Text("Otto").font(size: 28, weight: .semibold, relativeTo: .title).lineLimit(1)
+                Spacer(minLength: 0)
             }
+            .padding(.leading, 20).padding(.trailing, 16)
+            .padding(.top, 6).padding(.bottom, 14)
+            .contentShape(.rect)
         }
-        .padding(.top, 55)
-        .padding(.bottom, 6)
-        .overlay(alignment: .topTrailing) {
-            Menu {
-                Button("New group", systemImage: "person.2") { new = .group }
-                Button("New pip", systemImage: "face.smiling") { new = .pip }
-            } label: {
-                Image(systemName: "plus").font(.system(size: 18, weight: .medium))
-                    .frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(), in: .circle)
+        .tint(.primary)
+        .accessibilityLabel("Otto")
+        .accessibilityAddTraits(.isHeader)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color(.separator)).frame(height: 0.5) }
+    }
+
+    /// Below the list: a pip of your own, or a group of them.
+    private var newRow: some View {
+        Menu {
+            Button("New group", systemImage: "person.2") { new = .group }
+            Button("New pip", systemImage: "face.smiling") { new = .pip }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "plus").font(size: 20, weight: .medium, relativeTo: .body)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 48, height: 48)
+                Text("New pip or group").font(size: 17, relativeTo: .body)
+                Spacer(minLength: 0)
             }
-            .tint(.primary)
-            .accessibilityLabel("New")
-            .padding(.trailing, 16).padding(.top, 82)
+            .padding(.leading, 28).padding(.trailing, 20)
+            .frame(minHeight: 64)
+            .contentShape(.rect)
         }
+        .tint(.primary)
     }
 
     private var dock: some View {
@@ -285,12 +422,13 @@ private struct ConversationCell: View {
     let row: ConversationRow
     /// A search hit: the matching message in place of the preview.
     let match: ConversationMessage?
-    let divided: Bool
     let store: OttoStore
     var pinned = false
     @Environment(\.dynamicTypeSize) private var type
 
     private var pips: PipStore { store.pips }
+    /// The thread on the card.
+    private var selected: Bool { row.id == pips.current }
 
     var body: some View {
         Button { pips.open(row.id, at: match) } label: {
@@ -311,29 +449,27 @@ private struct ConversationCell: View {
                     preview.font(size: 15, relativeTo: .subheadline).lineLimit(1).frame(minHeight: 20)
                 }
             }
-            .padding(.leading, 20).padding(.trailing, 16)
-            .padding(.vertical, type.isAccessibilitySize ? 8 : 0)   // off the separators once text outgrows 72pt
-            .frame(minHeight: 72)
+            .padding(.leading, 28).padding(.trailing, 20)
+            .padding(.vertical, type.isAccessibilitySize ? 8 : 0)   // off the next row once text outgrows 64pt
+            .frame(minHeight: 64)
             .contentShape(.rect)
         }
-        .buttonStyle(CellPress())
+        .buttonStyle(CellPress(selected: selected))
         .overlay(alignment: .leading) {
-            if row.unread > 0 { Circle().fill(Color.ottoInk).frame(width: 10, height: 10).padding(.leading, 6) }
-        }
-        .overlay(alignment: .top) {
-            if divided { Rectangle().fill(Color(.separator)).frame(height: 0.5).padding(.leading, 90) }
+            if row.unread > 0 { Circle().fill(Color.ottoInk).frame(width: 8, height: 8).padding(.leading, 14) }
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(row.unread > 0 ? "Unread" : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ViewBuilder private var picture: some View {
         if row.kind == "otto" {
-            FaceView(look: row.otto?.look ?? .otto, size: 58, live: true).frame(width: 58, height: 58)
+            FaceView(look: row.otto?.look ?? .otto, size: 48, live: true).frame(width: 48, height: 48)
         } else if row.isGroup {
-            GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 58)
+            GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 48)
         } else if let pip = row.pips.first {
-            FaceView(look: pip.look, size: 58).frame(width: 58, height: 58)
+            FaceView(look: pip.look, size: 48).frame(width: 48, height: 48)
         }
     }
 
@@ -362,10 +498,15 @@ private struct ConversationCell: View {
     }
 }
 
-/// A row dims as it's held, like a list row.
+/// The open conversation sits in a filled pill; a row held down gets the same pill, a shade lighter.
 private struct CellPress: ButtonStyle {
+    let selected: Bool
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.background(configuration.isPressed ? Color(.systemGray5) : .clear)
+        configuration.label.background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(selected ? Color(.secondarySystemFill) : configuration.isPressed ? Color(.quaternarySystemFill) : .clear)
+                .padding(.horizontal, 8)
+        }
     }
 }
 

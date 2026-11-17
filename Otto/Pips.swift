@@ -408,8 +408,13 @@ enum PipSheet: Identifiable, Hashable {
     private(set) var rows: [ConversationRow] = [] { didSet { saveRows() } }
     var details: [String: PipDetail] = [:]
     var handoffs: [String: PipHandoff] = [:]
-    /// The open thread, one deep: a thread opened from another replaces it.
-    var path: [String] = []
+    /// The thread on screen. The conversations slide out from under it, so there always is one: Otto's by default.
+    var current = "app"
+    /// The conversations drawer is out, with the thread pushed to the right edge. What lands in that
+    /// thread meanwhile stays unread until the drawer closes on it.
+    var drawer = false {
+        didSet { if oldValue, !drawer, let v = visible, (row(v)?.unread ?? 0) > 0 { markRead(v) } }
+    }
     var sheet: PipSheet?
     /// The conversation on screen, whose unread dot stays clear.
     @ObservationIgnored var visible: String?
@@ -470,14 +475,15 @@ enum PipSheet: Identifiable, Hashable {
     func open(_ id: String, at match: ConversationMessage? = nil) {
         sheet = nil
         self.match = match
-        path = [id]
+        current = id
+        drawer = false
     }
 
     // MARK: Sync
 
     func run() async {
         guard let store else { return }
-        await refresh(launching: true)
+        await refresh()
         await syncApp()
         for await e in store.backend.conversationEvents { handle(e) }
     }
@@ -486,7 +492,7 @@ enum PipSheet: Identifiable, Hashable {
     func reconnected() async {
         await refresh()
         await syncApp()
-        if let id = path.last, id != "app" { await thread(id).load() }
+        if current != "app" { await thread(current).load() }
         for t in threads.values { await t.resendPending() }
         switch sheet {
         case .handoff(let id)?: await loadHandoff(id)
@@ -496,15 +502,11 @@ enum PipSheet: Identifiable, Hashable {
         }
     }
 
-    /// `launching`: the splash is still up, so a list that's just arrived is simply where the app opens.
-    func refresh(launching: Bool = false) async {
+    func refresh() async {
         struct Page: Decodable { let conversations: [ConversationRow] }
         guard let r = await request("GET", "app/conversations"), r.status == 200,
               let page = try? JSONDecoder().decode(Page.self, from: r.data) else { return }
-        let wasActive = active
         rows = page.conversations
-        // The list arrived late, under someone already reading Otto's thread: they stay in it.
-        if !wasActive, active, path.isEmpty, !launching { path = ["app"] }
     }
 
     private func refreshSoon() {
@@ -531,7 +533,7 @@ enum PipSheet: Identifiable, Hashable {
             if store?.foreground == false { notify(m) }
             guard let i = rows.firstIndex(where: { $0.id == m.conversation_id }), m.kind == "text" || m.kind == "system" else { refreshSoon(); return }
             rows[i].lastMessage = ConversationPreview(sender: m.sender, text: m.text, ts: m.ts)
-            if visible == m.conversation_id { markRead(m.conversation_id) } else if m.sender != "user" { rows[i].unread += 1 }
+            if visible == m.conversation_id, !drawer { markRead(m.conversation_id) } else if m.sender != "user" { rows[i].unread += 1 }
         case .read(let id, let readAt):
             if let i = rows.firstIndex(where: { $0.id == id }) { rows[i].unread = 0; rows[i].readAt = readAt }
         case .changed: refreshSoon()
@@ -696,7 +698,7 @@ enum PipSheet: Identifiable, Hashable {
     func deletePip(_ id: String) async -> String? {
         let failure = await change("DELETE", "app/pips/\(Self.esc(id))")
         guard failure == nil else { return failure }
-        path.removeAll { row($0)?.kind == "pip" && row($0)?.pips.first?.id == id }
+        if row(current)?.kind == "pip", row(current)?.pips.first?.id == id { current = "app" }
         details[id] = nil
         await refresh()
         return nil
@@ -719,13 +721,14 @@ enum PipSheet: Identifiable, Hashable {
         await change("DELETE", "app/groups/\(Self.esc(id))/members/\(Self.esc(pip))") { _ = gotRow($0) }
     }
 
-    /// It's archived on the server and leaves the list; back to that list.
+    /// It's archived on the server and leaves the list; back to that list, over Otto's thread.
     func deleteGroup(_ id: String) async -> String? {
         let failure = await change("DELETE", "app/groups/\(Self.esc(id))")
         guard failure == nil else { return failure }
         rows.removeAll { $0.id == id }
         sheet = nil
-        path = []
+        if current == id { current = "app" }
+        drawer = true
         return nil
     }
 
