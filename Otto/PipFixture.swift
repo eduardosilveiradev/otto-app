@@ -4,7 +4,7 @@ import UserNotifications
 
 /// Every mockup state, for screenshots. `-pipsFixture` serves the mockup's made-up data through the
 /// real pips API seam, so decoding and the store run as they would against a server. `-pipsScreen`
-/// opens a section: conversations, otto, group, handoff, failed, otto-group, new-group, details, faces.
+/// opens a section: conversations, otto, group, handoff, failed, otto-group, new-group, details, faces, crowded, crowded-closed.
 /// Debug builds only.
 enum PipFixture {
     static var on: Bool { CommandLine.arguments.contains("-pipsFixture") }
@@ -71,6 +71,16 @@ enum PipFixture {
             row("porto-b", "group", "Porto weekend", [member("school", .asleep), member("planner", .rest), member("otto", .rest)], sender: "planner", text: "Trains are booked", ts: at(4, 12, 0)),
         ]
         if screen == "otto-only" { return r.filter { $0.kind == "otto" } }
+        if screen.hasPrefix("crowded") {
+            // The worst case for the drawer: a long name on the open thread, and more rows than fit.
+            r.append(row("long-b", "group", "Grandma’s ninetieth birthday weekend in the Douro valley", [member("planner", .working, "Holding three quintas until Friday noon"), member("stays", .rest), member("otto", .rest)],
+                         sender: "stays", text: "Two of the three have step-free rooms on the ground floor, and the third has a lift", ts: at(0, 9, 2), unread: 3))
+            let more = ["Tax return 2026", "Bike repair", "Kitchen quotes", "Book club", "Car insurance", "Visa renewal", "Garden", "Wedding gifts", "New router"]
+            let pairs = [["inbox", "code"], ["planner", "school"], ["fares", "stays"]]
+            for (i, name) in more.enumerated() {
+                r.append(row("more-\(i)", "group", name, pairs[i % 3].map { member($0, .rest) } + [member("otto", .rest)], sender: pairs[i % 3][0], text: "Nothing new since Monday", ts: at(i / 3 + 5, 10, i)))
+            }
+        }
         if screen != "conversations" { r.append(row("lisbon-a", "group", "Lisbon in March", lisbonMembers, sender: "stays", text: "Three places in Alfama", ts: at(0, 18, 22))) }
         return r
     }
@@ -365,6 +375,8 @@ enum PipFixture {
         let p = store.pips
         switch screen {
         case "otto", "otto-group": p.open("app")
+        case "crowded": p.open("long-b"); p.drawer = true
+        case "crowded-closed": p.open("long-b")
         case "handoff-you": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .handoff("h-you")
         case "handoff-you-failed": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .handoff("h-you-failed")
         case "handoff": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .handoff("h-pr")
@@ -391,10 +403,10 @@ enum PipFixture {
             let a = await p.deleteGroup("lisbon-a"), b = await p.deletePip("school")
             let n = await p.createPip(PipPatch(name: "Scout", job: "Finds things", instructions: "Look first", solid: .drum, colour: "#9656C4", tools: []))
             let g = await p.createGroup(name: "Weekend crew", members: ["code"]) { print("PIPTEST created \($0)") }
-            print("PIPTEST deleted \([a, b]) made \([n, g]) rows \(p.rows.map(\.name)) path \(p.path)")
-            p.path = []
+            print("PIPTEST deleted \([a, b]) made \([n, g]) rows \(p.rows.map(\.name)) current \(p.current)")
+            p.drawer = true
         case "details", "edit-pip", "edit-schedule", "pip-confirm": p.open("app"); try? await Task.sleep(for: .seconds(1.2)); p.sheet = .pip("planner")
-        default: break
+        default: p.drawer = true   // the list: conversations, otto-only, create-*
         }
     }
 }

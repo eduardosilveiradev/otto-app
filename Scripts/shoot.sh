@@ -84,7 +84,7 @@ shot() {
     # reach; without it a draft or a pasted pairing link from one state shows up in the next.
     xcrun simctl launch "$DEV" $ID -wipeDefaults "$@" >/dev/null
     sleep "$wait"
-    [[ " $* " == *" -pipsFixture "* ]] && sleep 1.5   # the list, then Otto's thread pushed over it
+    [[ " $* " == *" -pipsFixture "* ]] && sleep 1.5   # the list, then the thread it opens
     local f="$screen-$state-$theme.png"
     xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1
     # A launch that hadn't drawn yet is a black frame of about 72 KB (the sparest real screen is 100): wait as long again and retake it.
@@ -96,7 +96,7 @@ shot() {
 
 N=-noNotificationPrompt
 B="-onboarded YES $N"
-# Pips on, as in the real app: the conversations list at the root and Otto's thread pushed over it.
+# Pips on, as in the real app: Otto's thread, with the conversations in a drawer under it.
 O="$B -pipsFixture -pipsScreen otto"
 DEAD="-onboarded YES -serverURL http://127.0.0.1:9 -serverToken demo-token -pipsFixture -pipsScreen otto"
 
@@ -185,8 +185,8 @@ shot chat approval-waiting 6 "A payment put off with Later: waiting over the com
 shot chat approval-waiting-todos 6 "A change put off with Later takes the to-dos' place until it's answered" $O -demoThread -approvalDemo -approvalLater -openTodos
 shot chat approval-waiting-worst 6 "Worst case: a long payee and a five-figure total, at an accessibility text size" $O -demoThread -approvalWorst -approvalLater -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
 shot chat approval-waiting-two 6 "Two put off with Later: the pill shows the newest and says two are waiting" $O -demoThread -paymentDemo -approvalDemo -approvalLater
-shot pips approval-in-chats 7 "An approval raised while the Chats list is up: its sheet over the list" $B -pipsFixture -pipsScreen conversations -approvalDemo
-shot pips otto-needs-you 7 "Chats with an approval put off: Otto's row says it needs you" $B -pipsFixture -pipsScreen conversations -approvalDemo -approvalLater
+shot pips approval-in-chats 7 "An approval raised while the drawer is out: its sheet over it" $B -pipsFixture -pipsScreen conversations -approvalDemo
+shot pips otto-needs-you 7 "The drawer with an approval put off: Otto's row says it needs you" $B -pipsFixture -pipsScreen conversations -approvalDemo -approvalLater
 shot chat approval-lapsed 6 "It lapsed on the Mac before an answer: the pill says Expired until tapped away" $O -demoThread -paymentDemo -approvalLapsed
 shot sheet boarding-pass 11 "Flight-day boarding pass" $O -demoThread -mockGate -openGate
 shot sheet live-call 8 "A call Otto is placing, live transcript" $O -demoThread -mockCalls -openCall
@@ -235,7 +235,9 @@ shot loops error 12 "Can't reach your Mac (dead server)" $DEAD $N -details -scre
 
 # --- Pips and groups ---------------------------------------------------------------------
 P="$B -pipsFixture -pipsScreen"
-shot pips conversations 6 "Conversations list" $P conversations
+shot pips conversations 6 "The conversations drawer out, Otto's thread peeking at the right edge" $P conversations
+shot pips drawer-crowded 7 "Drawer worst case: more rows than fit, the open thread's name runs to two lines' worth" $P crowded
+shot pips drawer-crowded-closed 7 "The same long-named group's thread with the drawer in" $P crowded-closed
 shot pips otto-only 6 "Only Otto: the empty conversations hint" $P otto-only
 shot pips otto-thread 7 "Otto's thread with pips: handoff lines" $P otto
 shot pips otto-started-group 7 "Otto starts a group: group link bubble" $P otto-group
