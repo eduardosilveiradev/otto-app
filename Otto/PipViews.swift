@@ -477,6 +477,13 @@ private struct ConversationCell: View {
     private var selected: Bool { row.id == pips.current }
 
     var body: some View {
+        // Long press peeks at the thread; tapping the peek opens it, as "Open" does.
+        PeekRow(row: cell.environment(store), preview: ThreadPeek(row: row, store: store).environment(store)) {
+            UISelectionFeedbackGenerator().selectionChanged(); pips.open(row.id, at: match)
+        }
+    }
+
+    private var cell: some View {
         Button { UISelectionFeedbackGenerator().selectionChanged(); pips.open(row.id, at: match) } label: {
             HStack(spacing: 12) {
                 picture
@@ -545,6 +552,78 @@ private struct ConversationCell: View {
 }
 
 /// The open conversation sits in a filled pill; a row held down gets the same pill, a shade lighter.
+/// A drawer row with UIKit's long-press peek: SwiftUI's context menu can't open the thread when its preview
+/// is tapped, UIContextMenuInteraction can. The row is SwiftUI, hosted here; iOS gives the peek its own tap.
+private struct PeekRow<Row: View, Preview: View>: UIViewControllerRepresentable {
+    let row: Row
+    let preview: Preview
+    let open: () -> Void
+
+    func makeCoordinator() -> Peek { Peek() }
+    func makeUIViewController(context: Context) -> UIHostingController<Row> {
+        let host = UIHostingController(rootView: row)
+        host.view.backgroundColor = .clear
+        host.view.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
+        return host
+    }
+    func updateUIViewController(_ host: UIHostingController<Row>, context: Context) {
+        host.rootView = row
+        let preview = preview
+        context.coordinator.preview = {
+            let vc = UIHostingController(rootView: preview)
+            vc.sizingOptions = .preferredContentSize   // grows when a thread not loaded yet arrives
+            return vc
+        }
+        context.coordinator.open = open
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, uiViewController host: UIHostingController<Row>, context: Context) -> CGSize? {
+        host.sizeThatFits(in: CGSize(width: proposal.width ?? 400, height: .greatestFiniteMagnitude))
+    }
+
+    final class Peek: NSObject, UIContextMenuInteractionDelegate {
+        var preview: () -> UIViewController = { UIViewController() }
+        var open: () -> Void = {}
+        func contextMenuInteraction(_ i: UIContextMenuInteraction, configurationForMenuAtLocation _: CGPoint) -> UIContextMenuConfiguration? {
+            UIContextMenuConfiguration(identifier: nil, previewProvider: { [preview] in preview() }) { [open] _ in
+                UIMenu(children: [UIAction(title: "Open", image: UIImage(systemName: "arrow.up.forward.square")) { _ in open() }])
+            }
+        }
+        func contextMenuInteraction(_ i: UIContextMenuInteraction, willPerformPreviewActionForMenuWith _: UIContextMenuConfiguration, animator: any UIContextMenuInteractionCommitAnimating) {
+            animator.preferredCommitStyle = .dismiss
+            animator.addCompletion { [open] in open() }
+        }
+    }
+}
+
+/// The peek: the thread's last few messages, as they read in it. Read-only; loaded if it wasn't yet.
+private struct ThreadPeek: View {
+    let row: ConversationRow
+    let store: OttoStore
+    private var thread: any ChatThread { row.id == "app" ? store : store.pips.thread(row.id) }
+
+    var body: some View {
+        let recent = Array(thread.messages.filter { $0.from != .terminal }.suffix(6))
+        VStack(alignment: .leading, spacing: 6) {
+            Text(row.name).font(.headline).padding(.bottom, 4)
+            if recent.isEmpty { Text("No messages yet").foregroundStyle(.secondary) }
+            ForEach(recent) { m in
+                let mine = m.from == .me
+                Text(m.text.isEmpty ? "Attachment" : m.text)
+                    .font(.subheadline).lineLimit(4)
+                    .foregroundStyle(mine ? .white : .primary)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(mine ? Color.outgoingBubble : Color.incomingBubble, in: .rect(cornerRadius: 17, style: .continuous))
+                    .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+            }
+        }
+        .padding(16)
+        .frame(width: 320, alignment: .topLeading)
+        .frame(minHeight: 120, alignment: .top)
+        .background(Color(.systemBackground))
+        .task { if thread.messages.isEmpty, row.id != "app" { await store.pips.thread(row.id).load() } }
+    }
+}
+
 private struct CellPress: ButtonStyle {
     let selected: Bool
     func makeBody(configuration: Configuration) -> some View {
