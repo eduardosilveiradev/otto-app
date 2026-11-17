@@ -22,7 +22,7 @@ struct OpenWalkie: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        Doors.open("walkie")   // through the door that brings Otto's thread up first: the walkie's cover lives there, not on the Chats list
+        Doors.open("walkie")   // through the door that brings Otto's thread up first: the walkie's cover lives there, not on the drawer
         return .result()
     }
 }
