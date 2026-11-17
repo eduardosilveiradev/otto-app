@@ -1,6 +1,8 @@
 #!/bin/bash
 # Shoots Otto's iPhone screens and states from the DEBUG launch arguments, for a PR's review gallery
-# (otto-core's otto/gallery.ts builds the page from <out-dir>).
+# (otto-core's otto/gallery.ts builds the page from <out-dir>). The app launches once; each state's
+# arguments are then swapped in place (Otto/ReviewSwitch.swift). States that need a fresh process
+# (see COLD below) are launched cold instead. COLD_ALL=1 launches every state cold, as before.
 #
 #   Scripts/shoot.sh --list                  every screen-state name, nothing booted
 #   Scripts/shoot.sh <out-dir> [regex]       the states whose "screen-state" matches (default: all)
@@ -27,7 +29,8 @@ if [ $LIST = 0 ]; then
   done
   echo $$ > "$LOCK/pid"
 
-  DEV=${DEV:-$(xcrun simctl list devices booted | grep -m1 -oE '\(([0-9A-F-]{36})\) \(Booted\)' | cut -c2-37)}
+  # A booted iPhone, not another job's named check device (e.g. "drawer-check") booted alongside it.
+DEV=${DEV:-$(xcrun simctl list devices booted | grep -E '^ +iPhone' | grep -m1 -oE '\(([0-9A-F-]{36})\) \(Booted\)' | cut -c2-37)}
   BOOTED_HERE=0
   if [ -z "$DEV" ]; then
     # The newest iOS runtime's first iPhone.
@@ -60,7 +63,16 @@ for rt in sorted((k for k in d if ".iOS-" in k), key=lambda k: [int(x) for x in 
   xcrun simctl launch "$DEV" $ID -onboarded YES -noNotificationPrompt >/dev/null; sleep 8; xcrun simctl terminate "$DEV" $ID >/dev/null 2>&1
   xcrun simctl status_bar "$DEV" override --time 9:41 --batteryLevel 100 --batteryState charged --cellularBars 4 --wifiBars 3 --dataNetwork wifi
   xcrun simctl privacy "$DEV" grant microphone $ID 2>/dev/null || true
+  DATA=$(xcrun simctl get_app_container "$DEV" $ID data)
 fi
+UP=0   # the app is running on the base state, ready to switch in place
+
+# A fresh process only where launch itself is the point or the state outlives a swap: a real (dead)
+# server's socket, a text size UIKit reads once at launch, the web call's audio session, the voice
+# player's paused note (set when the player is first made), and approvals, whose UIKit sheet often
+# didn't come up after a swap.
+COLD=' -serverURL | -UIPreferredContentSizeCategoryName | -call | -voicePaused | -approvalDemo | -paymentDemo | -approvalWorst '
+running() { xcrun simctl spawn "$DEV" launchctl list 2>/dev/null | grep -q "UIKitApplication:$ID"; }
 
 clean() {
   local data; data=$(xcrun simctl get_app_container "$DEV" $ID data 2>/dev/null) || return 0
@@ -75,15 +87,33 @@ shot() {
   local screen=$1 state=$2 wait=$3 note=$4; shift 4
   [ $LIST = 1 ] && { echo "$screen-$state"; return 0; }
   [[ "$screen-$state" =~ $FILTER ]] || return 0
+  local cold=0; [[ -n "${COLD_ALL:-}" || " $* " =~ $COLD ]] && cold=1
   for theme in $THEMES; do
     xcrun simctl ui "$DEV" appearance $theme
-    xcrun simctl terminate "$DEV" $ID >/dev/null 2>&1
-    sleep 0.5
-    clean
-    # -wipeDefaults: the app's own saved settings live in its container, where `defaults delete` above doesn't
-    # reach; without it a draft or a pasted pairing link from one state shows up in the next.
-    xcrun simctl launch "$DEV" $ID -wipeDefaults "$@" >/dev/null
-    sleep "$wait"
+    [ $UP = 1 ] && ! running && UP=0   # gone since the last shot: relaunch before switching
+    if [ $cold = 1 ] || [ $UP = 0 ]; then
+      xcrun simctl terminate "$DEV" $ID >/dev/null 2>&1
+      sleep 0.5
+      clean
+      # -wipeDefaults: the app's own saved settings live in its container, where `defaults delete` above doesn't
+      # reach; without it a draft or a pasted pairing link from one state shows up in the next.
+      if [ $cold = 1 ]; then
+        xcrun simctl launch "$DEV" $ID -wipeDefaults "$@" >/dev/null; UP=0
+        sleep "$wait"
+      else
+        xcrun simctl launch "$DEV" $ID -wipeDefaults $O -demoThread >/dev/null; UP=1
+        sleep 6
+      fi
+    fi
+    if [ $cold = 0 ]; then
+      # In place: the arguments one per line, then the nudge. A launch's own few seconds aren't waited for.
+      # A reinstall (another job on the shared simulator) moves the container: stop rather than shoot its build.
+      printf '%s\n' -wipeDefaults "$@" 2>/dev/null > "$DATA/tmp/review-args" || { echo "Otto was reinstalled under this run: stopping" >&2; exit 1; }
+      xcrun simctl spawn "$DEV" notifyutil -p dev.otto.review
+      sleep "$(awk -v w="$wait" 'BEGIN { s = w - 3.5; print (s < 2.5 ? 2.5 : s) }')"
+      # The swap itself can crash a debug build (a UIKit assertion mid-transition): take this state cold.
+      if ! running; then UP=0; COLD_ALL=1 shot "$screen" "$state" "$wait" "$note" "$@"; return; fi
+    fi
     [[ " $* " == *" -pipsFixture "* ]] && sleep 1.5   # the list, then the thread it opens
     local f="$screen-$state-$theme.png"
     xcrun simctl io "$DEV" screenshot "$OUT/$f" >/dev/null 2>&1
@@ -232,6 +262,25 @@ shot calls error 6 "Can't reach your Mac (no callbot)" $O -details -screen Calls
 shot loops stale 6 "A refresh that failed: the page keeps what it had and says how old it is" $O -details -screen Loops -staleDash
 shot settings error 13 "Settings when the Mac doesn't answer" $DEAD $N -details -screen Settings
 shot loops error 12 "Can't reach your Mac (dead server)" $DEAD $N -details -screen Loops
+# One level deeper: -open names the row, sheet or question (Dash.swift's shotOpen), as if it had been tapped.
+shot memory summary 7 "What Otto knows about you: the summary page" $O -details -screen Memory -open memory-summary
+shot memory item 7 "A memory opened: what it says, where it came from, Correct and Forget" $O -details -screen Memory -open memory-item
+shot memory forget-confirm 8 "Forget tapped on a memory: the question before it goes" $O -details -screen Memory -open memory-item,memory-forget
+shot people person 7 "A person opened: their time, your notes, what memory says about them" $O -details -screen People -open person
+shot loops detail 7 "An open loop opened, with Done" $O -details -screen Loops -open loop
+shot trips past 7 "Past trips" $O -details -screen Trips -open past-trips
+shot schedules detail 7 "A schedule opened from the list" $O -details -screen Schedules -open schedule
+shot schedules off 7 "Done or paused schedules" $O -details -screen Schedules -open schedules-off
+shot activity job-detail 7 "A background job opened from Activity" $O -details -screen Activity -activityTab Jobs -open activity-job
+shot activity triggers-off 7 "Activity's done or paused triggers" $O -details -screen Activity -activityTab Triggers -open activity-off
+shot passport stamp 8 "A passport stamp opened" $O -details -screen Passport -open stamp
+shot calls sheet 8 "A call from the list opened: what was said" $O -details -screen Calls -mockCalls -open call
+shot sheet live-call-end 9 "Hang up tapped on a live call: the question first" $O -demoThread -mockCalls -openCall -open call-end
+shot sheet recorded-money 7 "A recorded chip opened: spending, with its one action" $O -scheduleThread -open recorded-money
+shot sheet recorded-memory 7 "A recorded chip opened: a memory" $O -scheduleThread -open recorded-memory
+shot sheet job-merge 8 "Merge tapped on a job up for review: the question first" $O -jobsThread -jobOpen demo-review -open job-merge
+shot chat stop-unconfirmed 6 "Stop sent and the Mac didn't answer" $O -demoThread -thinking -open stop-unconfirmed
+shot chat call-explain 6 "Call tapped with no way to call set up yet" $O -demoThread -open call-explain
 
 # --- Pips and groups ---------------------------------------------------------------------
 P="$B -pipsFixture -pipsScreen"

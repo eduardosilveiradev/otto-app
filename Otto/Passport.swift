@@ -64,7 +64,10 @@ struct PassportScreen: View {
         .background(PaperBackground())
         .navigationTitle("Passport")
         .navigationBarTitleDisplayMode(.inline)
-        .task { stamps = await store.backend.stamps()?.stamps ?? stamps ?? [] }
+        .task {
+            stamps = await store.backend.stamps()?.stamps ?? stamps ?? []
+            if shotOpen("stamp") { open = stamps?.first }
+        }
         .refreshable { if let s = await store.backend.stamps()?.stamps { stamps = s } }
         .sheet(item: $open) { StampDetail(stamp: $0) }
     }

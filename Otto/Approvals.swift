@@ -831,6 +831,9 @@ struct PrintedReceipt: View {
     private var shownID: String?
 
     func sync(_ store: OttoStore) {
+        #if DEBUG
+        guard store === OttoStore.shared else { return }   // one ReviewSwitch replaced
+        #endif
         let want = store.shownApproval
         // Taken down from under us (the cover it sat on closed): forget it, and show it again if it's still wanted.
         if let s = shown, s.presentingViewController == nil, !s.isBeingPresented { shown = nil }

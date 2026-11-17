@@ -67,7 +67,7 @@ struct ScheduleChip: View {
     let trigger: DashTrigger
     #if DEBUG
     /// `-scheduleOpen`: the chip's sheet already up and at full height, for screenshots.
-    private static let shot = CommandLine.arguments.contains("-scheduleOpen")
+    private static var shot: Bool { CommandLine.arguments.contains("-scheduleOpen") }
     #else
     private static let shot = false
     #endif
@@ -176,13 +176,17 @@ struct SchedulesScreen: View {
             if !mail.isEmpty { Section("Watching mail") { ForEach(mail) { row($0) } } }
             if !off.isEmpty {
                 Section {
-                    NavigationLink("Done or paused · \(off.count)") {
-                        List { ForEach(off) { row($0) } }.navigationTitle("Done or paused").navigationBarTitleDisplayMode(.inline)
-                    }
+                    NavigationLink("Done or paused · \(off.count)") { offPage(off) }
                 }
             }
         }
+        .shotPush("schedules-off") { offPage(off) }
+        .shotPush("schedule") { if let t = (once + repeating + mail).first { ScheduleDetail(id: t.id) } }
         .emptyState(t.triggers.isEmpty, "Nothing scheduled", systemImage: "calendar.badge.clock", "Ask Otto to remind you, or to check something on a schedule.")
+    }
+
+    private func offPage(_ off: [DashTrigger]) -> some View {
+        List { ForEach(off) { row($0) } }.navigationTitle("Done or paused").navigationBarTitleDisplayMode(.inline)
     }
 
     private func row(_ t: DashTrigger) -> some View {

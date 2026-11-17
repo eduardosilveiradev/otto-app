@@ -16,6 +16,7 @@ struct OttoApp: App {
         // `-wipeDefaults` (Scripts/shoot.sh, on every launch): start from no saved settings, so what one
         // screenshot's state left behind (a draft in the composer, a pasted pairing link) can't show in the next.
         if CommandLine.arguments.contains("-wipeDefaults"), let id = Bundle.main.bundleIdentifier { UserDefaults.standard.removePersistentDomain(forName: id) }
+        ReviewSwitch.install()   // shoot.sh's states, swapped in place
         #endif
         Notifier.shared.register()   // the background task must be registered before launch ends
         Dictation.shared.setUp()     // the keyboard's mic requests arrive any time
@@ -52,6 +53,9 @@ struct OttoApp: App {
             Group {
                 if onboarded { MainRoot() } else { OnboardingFlow { withAnimation { onboarded = true } } }
             }
+            #if DEBUG
+            .id(ReviewSwitch.shared.generation)   // a review state swapped in: a new screen tree on the new store
+            #endif
             .onOpenURL { url in
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
                 // The widgets: Otto's thread, the walkie-talkie, or an approval put off with Later.
@@ -92,7 +96,7 @@ struct OttoApp: App {
 
 private enum PipRootSwitch {
     #if DEBUG
-    static let faces = PipFixture.on && PipFixture.screen == "faces"
+    static var faces: Bool { PipFixture.on && PipFixture.screen == "faces" }
     #else
     static let faces = false
     #endif
@@ -189,7 +193,11 @@ private struct Connecting: View {
 final class OttoStore {
     /// One store for the app, so a background wake-up and a notification reply reach it too.
     /// Real server when Settings has a URL and token; mock data otherwise.
+    #if DEBUG
+    static var shared = OttoStore(backend: LiveBackend.fromDefaults() ?? MockBackend())   // ReviewSwitch makes a new one
+    #else
     static let shared = OttoStore(backend: LiveBackend.fromDefaults() ?? MockBackend())
+    #endif
 
     let backend: OttoBackend
     /// Pips and groups. Empty until the server says there's a second conversation.
@@ -429,6 +437,7 @@ final class OttoStore {
             n += 1
             var live = backend is MockBackend || backend.isLive
             #if DEBUG
+            if self !== OttoStore.shared { return }   // replaced by ReviewSwitch
             if ProcessInfo.processInfo.arguments.contains("-offline") { live = false; launchGrace = 0 }   // the disconnected UI, in the simulator
             #endif
             // A reconnect is when replies sent into a socket iOS had frozen go missing; catch up.
@@ -684,6 +693,19 @@ final class OttoStore {
             messages = [Message(from: .otto, text: "four jobs, none of them tidy.", jobs: ["worst-script", "worst-failed", "worst-unknown", "worst-input", "gone-from-the-mac"])]
         } else if ProcessInfo.processInfo.arguments.contains("-jobsThread") {
             jobs.set(CodeJob.demo)
+            // `-jobsTick`: the running job goes up for review and back every three seconds, for Scripts/record.sh.
+            if ProcessInfo.processInfo.arguments.contains("-jobsTick") {
+                Task {
+                    var next = CodeJob.demo
+                    next[0].state = "review"
+                    next[0].now = "**The second quote** covers the boiler and costs least."
+                    next[0].pr = .init(n: 215, title: "Insurance comparison", add: 40, del: 0, files: 1, mergeable: "MERGEABLE", base: "main", checks: "passing")
+                    for i in 0..<40 {
+                        try? await Task.sleep(for: .seconds(3))
+                        jobs.set(i.isMultiple(of: 2) ? next : CodeJob.demo)
+                    }
+                }
+            }
             messages = [Message(from: .otto, text: "the quieter route is up for review.", jobs: ["demo-review"]),
                         Message(from: .me, text: "can you compare the three insurance quotes", read: true),
                         Message(from: .otto, text: "on it. that one takes a while.", jobs: ["demo-running"]),
@@ -841,7 +863,19 @@ final class OttoStore {
         if ProcessInfo.processInfo.arguments.contains("-spinnerCheck") { OttoThinkingSpinnerCheck.run() }
         // `-approvalCheck`: the approval clock's rounding, and the forget message's name filter.
         if ProcessInfo.processInfo.arguments.contains("-approvalCheck") { ApprovalCheck.run() }
+        // `-focusAfter <s>`: the composer focused s seconds in, for Scripts/record.sh's keyboard clip (no tap to miss).
+        if let s = Double(UserDefaults.standard.string(forKey: "focusAfter") ?? "") {
+            Task { try? await Task.sleep(for: .seconds(s)); demoFocus = true }
+        }
         #endif
+        // `-open stop-unconfirmed` / `call-explain`: the thread's two alerts, once the thread is up (an alert asked for before it is never shown).
+        if shotOpen("stop-unconfirmed") || shotOpen("call-explain") {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                stopUnconfirmed = shotOpen("stop-unconfirmed")
+                CallLauncher.shared.explain = shotOpen("call-explain")
+            }
+        }
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
         if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift"
             if ProcessInfo.processInfo.arguments.contains("-todos") {

@@ -242,6 +242,30 @@ extension View {
     }
 }
 
+/// `-open name[,name…]`: the page, sheet or question opens as if it had been tapped, for Scripts/shoot.sh.
+func shotOpen(_ name: String) -> Bool {
+    UserDefaults.standard.string(forKey: "open")?.split(separator: ",").contains(Substring(name)) == true
+}
+
+extension View {
+    /// `-open <name>` pushes `destination` once, as if its row had been tapped; back works as usual.
+    func shotPush(_ name: String, @ViewBuilder _ destination: @escaping () -> some View) -> some View {
+        modifier(ShotPush(name: name, destination: destination))
+    }
+}
+
+private struct ShotPush<D: View>: ViewModifier {
+    let name: String
+    let destination: () -> D
+    @State private var on = false
+    @State private var done = false
+    func body(content: Content) -> some View {
+        content
+            .navigationDestination(isPresented: $on, destination: destination)
+            .onAppear { if !done, shotOpen(name) { done = true; on = true } }
+    }
+}
+
 extension View {
     /// Behind a sheet's bottom bar: the sheet's grey, faded in over the 24pt above it, so rows scrolled under
     /// dissolve instead of reading through the buttons (the thread composer's treatment).
