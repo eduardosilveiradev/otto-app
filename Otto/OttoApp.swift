@@ -684,6 +684,17 @@ final class OttoStore {
             messages = [Message(from: .otto, text: "four jobs, none of them tidy.", jobs: ["worst-script", "worst-failed", "worst-unknown", "worst-input", "gone-from-the-mac"])]
         } else if ProcessInfo.processInfo.arguments.contains("-jobsThread") {
             jobs.set(CodeJob.demo)
+            // `-jobsTick`: twelve seconds in, the running job goes up for review, for Scripts/record.sh.
+            if ProcessInfo.processInfo.arguments.contains("-jobsTick") {
+                Task {
+                    try? await Task.sleep(for: .seconds(12))
+                    var next = CodeJob.demo
+                    next[0].state = "review"
+                    next[0].now = "**The second quote** covers the boiler and costs least."
+                    next[0].pr = .init(n: 215, title: "Insurance comparison", add: 40, del: 0, files: 1, mergeable: "MERGEABLE", base: "main", checks: "passing")
+                    jobs.set(next)
+                }
+            }
             messages = [Message(from: .otto, text: "the quieter route is up for review.", jobs: ["demo-review"]),
                         Message(from: .me, text: "can you compare the three insurance quotes", read: true),
                         Message(from: .otto, text: "on it. that one takes a while.", jobs: ["demo-running"]),
@@ -842,6 +853,14 @@ final class OttoStore {
         // `-approvalCheck`: the approval clock's rounding, and the forget message's name filter.
         if ProcessInfo.processInfo.arguments.contains("-approvalCheck") { ApprovalCheck.run() }
         #endif
+        // `-open stop-unconfirmed` / `call-explain`: the thread's two alerts, once the thread is up (an alert asked for before it is never shown).
+        if shotOpen("stop-unconfirmed") || shotOpen("call-explain") {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                stopUnconfirmed = shotOpen("stop-unconfirmed")
+                CallLauncher.shared.explain = shotOpen("call-explain")
+            }
+        }
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
         if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift"
             if ProcessInfo.processInfo.arguments.contains("-todos") {

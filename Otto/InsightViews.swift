@@ -48,21 +48,24 @@ private struct LoopsList: View {
         }
         .emptyState(l.open.isEmpty && l.recent.isEmpty && l.plan.close.isEmpty && l.plan.propose.isEmpty && l.plan.avoidance.isEmpty,
                     "Nothing open", systemImage: "checklist", "Things you said you’d do show up here.")
+        .shotPush("loop") { if let r = l.open.first { detail(r, closed: false) } }
         .refreshable { await reload() }
     }
 
-    private func row(_ r: LoopRow, closed: Bool) -> some View {
-        NavigationLink {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(r.text).textSelection(.enabled)
-                    Text(meta(r)).font(.footnote).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading).padding()
+    private func detail(_ r: LoopRow, closed: Bool) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(r.text).textSelection(.enabled)
+                Text(meta(r)).font(.footnote).foregroundStyle(.secondary)
             }
-            .navigationTitle(closed ? "Closed loop" : "Open loop").navigationBarTitleDisplayMode(.inline)
-            .toolbar { Button(closed ? "Reopen" : "Done") { flip(r.id, done: !closed) } }
-        } label: {
+            .frame(maxWidth: .infinity, alignment: .leading).padding()
+        }
+        .navigationTitle(closed ? "Closed loop" : "Open loop").navigationBarTitleDisplayMode(.inline)
+        .toolbar { Button(closed ? "Reopen" : "Done") { flip(r.id, done: !closed) } }
+    }
+
+    private func row(_ r: LoopRow, closed: Bool) -> some View {
+        NavigationLink { detail(r, closed: closed) } label: {
             HStack(spacing: 12) {
                 Image(systemName: closed ? "checkmark.circle.fill" : "circle")   // Reminders' mark, bare
                     .font(.title3.weight(.light)).foregroundStyle(.secondary).frame(width: 26)
@@ -274,16 +277,19 @@ struct TripsScreen: View {
                 ForEach(upcoming) { trip($0, t) }
                 if !past.isEmpty {
                     Section {
-                        NavigationLink("Past trips · \(past.count)") {
-                            List { ForEach(past) { trip($0, t) } }.navigationTitle("Past trips").navigationBarTitleDisplayMode(.inline)
-                        }
+                        NavigationLink("Past trips · \(past.count)") { pastPage(past, t) }
                     }
                 }
             }
+            .shotPush("past-trips") { pastPage(past, t) }
             .emptyState(t.trips.isEmpty, "No trips", systemImage: "airplane", "Forward a booking confirmation to Otto.")
             .refreshable { await reload() }
         }
         .navigationTitle("Trips").navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func pastPage(_ past: [DashTrips.Trip], _ t: DashTrips) -> some View {
+        List { ForEach(past) { trip($0, t) } }.navigationTitle("Past trips").navigationBarTitleDisplayMode(.inline)
     }
 
     private func trip(_ trip: DashTrips.Trip, _ t: DashTrips) -> some View {

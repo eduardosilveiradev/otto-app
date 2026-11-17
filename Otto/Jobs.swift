@@ -296,6 +296,7 @@ struct JobSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20).padding(.top, 4).padding(.bottom, 24)
         }
+        .onAppear { if shotOpen("job-merge") { confirming = .merge } }
         .confirmationDialog(confirming == .merge ? "Merge PR #\(String(job.pr?.n ?? 0))?" : "Stop this job?", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), titleVisibility: .visible) {
             if confirming == .merge { Button("Merge pull request") { Task { await act(.merge) } } }
             else { Button("Stop job", role: .destructive) { Task { await act(.stop) } } }

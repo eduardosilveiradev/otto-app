@@ -61,6 +61,7 @@ struct RecordedChip: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(card.heading): \(card.title)")
+        .onAppear { if shotOpen("recorded-\(card.kind)") { open = true } }
         .sheet(isPresented: $open) {
             NavigationStack {
                 List {
