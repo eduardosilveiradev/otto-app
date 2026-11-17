@@ -103,7 +103,8 @@ shot() {
     fi
     if [ $cold = 0 ]; then
       # In place: the arguments one per line, then the nudge. A launch's own few seconds aren't waited for.
-      printf '%s\n' -wipeDefaults "$@" > "$DATA/tmp/review-args"
+      # A reinstall (another job on the shared simulator) moves the container: stop rather than shoot its build.
+      printf '%s\n' -wipeDefaults "$@" 2>/dev/null > "$DATA/tmp/review-args" || { echo "Otto was reinstalled under this run: stopping" >&2; exit 1; }
       xcrun simctl spawn "$DEV" notifyutil -p dev.otto.review
       sleep "$(awk -v w="$wait" 'BEGIN { s = w - 3.5; print (s < 2.5 ? 2.5 : s) }')"
     fi
