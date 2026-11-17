@@ -3009,6 +3009,8 @@ struct TodoPill: View {
             }
         }
         .padding(.horizontal, 12)
+        // Folding, the list fades inside the pill's own edge, not down over the text field below it.
+        .clipShape(.rect(cornerRadius: 17, style: .continuous))
         .glassEffect(.regular, in: .rect(cornerRadius: 17, style: .continuous))
         .sensoryFeedback(.selection, trigger: open)
     }
@@ -3306,13 +3308,15 @@ final class KeyboardDock: UIViewController, UIGestureRecognizerDelegate {
     private var composerHeight: NSLayoutConstraint!
     private var glowBottom: NSLayoutConstraint!
     private let onPan: ((UIPanGestureRecognizer) -> Void)?
+    /// When a smaller composer may take its height: see measureComposer.
+    private var shrinkAt: Date?
 
     init(store: OttoStore, thread chat: any ChatThread, onDrawer: (() -> Void)? = nil, onPan: ((UIPanGestureRecognizer) -> Void)? = nil) {
         let ui = ComposerUI()
         self.ui = ui
         self.onPan = onPan
         thread = UIHostingController(rootView: AnyView(ChatView(ui: ui, thread: chat, onDrawer: onDrawer).environment(store)))
-        composer = UIHostingController(rootView: AnyView(Composer(ui: ui, thread: chat).environment(store)))
+        composer = UIHostingController(rootView: AnyView(BottomAnchored { Composer(ui: ui, thread: chat) }.environment(store)))
         glow = UIHostingController(rootView: AnyView(ScreenGlow(ui: ui)))
         super.init(nibName: nil, bundle: nil)
     }
@@ -3392,7 +3396,19 @@ final class KeyboardDock: UIViewController, UIGestureRecognizerDelegate {
         guard view.bounds.width > 0 else { return }
         let h = composer.sizeThatFits(in: CGSize(width: view.bounds.width, height: .greatestFiniteMagnitude)).height
         ui.height = h
-        guard abs(h - composerHeight.constant) > 0.5 else { return }
+        guard abs(h - composerHeight.constant) > 0.5 else { shrinkAt = nil; return }
+        // Smaller: SwiftUI moves the content down over its own animation (the to-dos folding as the keyboard
+        // opens, a sent draft). Shrunk at once, the host dropped the field behind the keyboard for a few frames.
+        // It keeps its height until that's done; the content sits on its bottom edge (BottomAnchored), so the
+        // extra is empty space above.
+        if h < composerHeight.constant {
+            if shrinkAt == nil {
+                shrinkAt = .now + 0.25
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) { [weak self] in self?.measureComposer(animated: false) }
+            }
+            if let at = shrinkAt, Date.now < at { return }
+        }
+        shrinkAt = nil
         composerHeight.constant = h
         if animated { UIView.animate(withDuration: 0.2) { self.view.layoutIfNeeded() } }
     }
@@ -3413,6 +3429,19 @@ final class KeyboardDock: UIViewController, UIGestureRecognizerDelegate {
         // composer instead of jumping to the end at once, over the to-dos and the newest bubbles.
         ui.insetAnimated = UIView.inheritedAnimationDuration > 0
         withAnimation(ui.insetAnimated ? ComposerUI.keyboard : nil) { ui.bottomInset = covered }
+    }
+}
+
+/// The composer at its own height, on the bottom edge of whatever its host is: a host still taller than
+/// the content (KeyboardDock waits out SwiftUI's animation before shrinking it) leaves the field on the keyboard.
+private struct BottomAnchored: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        subviews.first?.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil)) ?? .zero
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let s = subviews.first else { return }
+        let h = s.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil)).height
+        s.place(at: CGPoint(x: bounds.minX, y: bounds.maxY), anchor: .bottomLeading, proposal: ProposedViewSize(width: bounds.width, height: h))
     }
 }
 

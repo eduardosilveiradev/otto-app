@@ -863,6 +863,10 @@ final class OttoStore {
         if ProcessInfo.processInfo.arguments.contains("-spinnerCheck") { OttoThinkingSpinnerCheck.run() }
         // `-approvalCheck`: the approval clock's rounding, and the forget message's name filter.
         if ProcessInfo.processInfo.arguments.contains("-approvalCheck") { ApprovalCheck.run() }
+        // `-focusAfter <s>`: the composer focused s seconds in, for Scripts/record.sh's keyboard clip (no tap to miss).
+        if let s = Double(UserDefaults.standard.string(forKey: "focusAfter") ?? "") {
+            Task { try? await Task.sleep(for: .seconds(s)); demoFocus = true }
+        }
         #endif
         // `-open stop-unconfirmed` / `call-explain`: the thread's two alerts, once the thread is up (an alert asked for before it is never shown).
         if shotOpen("stop-unconfirmed") || shotOpen("call-explain") {

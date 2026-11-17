@@ -24,7 +24,7 @@ now() { perl -MTime::HiRes=time -e 'printf "%.2f", time'; }
 # The clip starts just before the first tap lands, which is near the end of the first agent-device call
 # (it reads the screen first). Clips without taps start when recording does, or at FROM seconds.
 TAP=
-ad() { "${AD[@]}" "$@" >/dev/null 2>&1; [ -n "$TAP" ] || TAP=$(now); }
+ad() { "${AD[@]}" "$@" >/dev/null 2>&1 || "${AD[@]}" "$@" >/dev/null 2>&1; [ -n "$TAP" ] || TAP=$(now); }   # once more on a failure: a busy Mac drops the odd call
 clean() {
   local data; data=$(xcrun simctl get_app_container "$DEV" $ID data 2>/dev/null) || return 0
   rm -rf "$data/Library/Application Support/"* "$data/Library/Caches/"* 2>/dev/null
@@ -42,7 +42,7 @@ clip() {
     xcrun simctl launch "$DEV" $ID -wipeDefaults "$@" >/dev/null
     sleep 6
     # Attaches to the running app (launch arguments survive); clips that only watch skip it.
-    [[ $name =~ ^(thinking|job-update)$ ]] || ad open $ID --foreground --platform ios
+    [[ $name =~ ^(thinking|job-update|keyboard-todos)$ ]] || ad open $ID --foreground --platform ios
   fi
   local raw="$OUT/.$name.mov"
   xcrun simctl io "$DEV" recordVideo --codec=h264 --force "$raw" >/dev/null 2>&1 &
@@ -69,8 +69,9 @@ xcrun simctl spawn "$DEV" notifyutil -p com.apple.BiometricKit.enrollmentChanged
 play_launch() { xcrun simctl launch "$DEV" $ID -wipeDefaults "$@" >/dev/null; sleep 6; }
 clip launch 6 $O -demoThread
 
-play_keyboard-todos() { ad press 'label="Message"'; sleep 2.5; }
-clip keyboard-todos 4 $O -demoThread -openTodos
+# The composer focuses itself 5 s after the store starts (-focusAfter), early in this recording: no tap to miss.
+play_keyboard-todos() { sleep 6; }
+FROM=0 clip keyboard-todos 5 $O -demoThread -openTodos -todosOpen -focusAfter 5
 
 play_send-reply() { ad fill 'editable=true' "on my way"; ad press 'label="Send"'; sleep 3; }
 clip send-reply 6 $O -seedThread -quickReply
