@@ -12,7 +12,8 @@ OUT=${1:?usage: Scripts/record.sh <out-dir> [regex]}
 FILTER=${2:-.}
 ID=dev.otto.app
 AD=(npx -y agent-device@0.21.37)
-DEV=${DEV:-$(xcrun simctl list devices booted | grep -m1 -oE '\(([0-9A-F-]{36})\) \(Booted\)' | cut -c2-37)}
+# A booted iPhone, not another job's named check device (e.g. "drawer-check") booted alongside it.
+DEV=${DEV:-$(xcrun simctl list devices booted | grep -E '^ +iPhone' | grep -m1 -oE '\(([0-9A-F-]{36})\) \(Booted\)' | cut -c2-37)}
 [ -n "$DEV" ] || { echo "no booted simulator: boot one, or run Scripts/shoot.sh first" >&2; exit 1; }
 mkdir -p "$OUT"
 [ -n "${APP:-}" ] && xcrun simctl install "$DEV" "$APP"

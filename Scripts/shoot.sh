@@ -29,7 +29,8 @@ if [ $LIST = 0 ]; then
   done
   echo $$ > "$LOCK/pid"
 
-  DEV=${DEV:-$(xcrun simctl list devices booted | grep -m1 -oE '\(([0-9A-F-]{36})\) \(Booted\)' | cut -c2-37)}
+  # A booted iPhone, not another job's named check device (e.g. "drawer-check") booted alongside it.
+DEV=${DEV:-$(xcrun simctl list devices booted | grep -E '^ +iPhone' | grep -m1 -oE '\(([0-9A-F-]{36})\) \(Booted\)' | cut -c2-37)}
   BOOTED_HERE=0
   if [ -z "$DEV" ]; then
     # The newest iOS runtime's first iPhone.
