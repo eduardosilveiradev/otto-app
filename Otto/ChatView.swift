@@ -756,6 +756,9 @@ struct ChatView: View {
         return store.ottoTyping ? base.with(.working) : base
     }
 
+    /// Another conversation than the one on screen has messages not read yet.
+    private var unreadElsewhere: Bool { store.pips.rows.contains { $0.id != store.pips.current && $0.unread > 0 } }
+
     private var header: some View {
         ZStack(alignment: Alignment(horizontal: .center, vertical: .headerRow)) {
             HStack {
@@ -766,7 +769,12 @@ struct ChatView: View {
                             .glassEffect(.regular.interactive(), in: .circle)
                     }
                     .tint(.primary)
+                    // Unread somewhere other than here: the drawer rows' own dot, on the way to them.
+                    .overlay(alignment: .topTrailing) {
+                        if unreadElsewhere { Circle().fill(Color.ottoInk).frame(width: 8, height: 8).offset(x: -3, y: 3).allowsHitTesting(false) }
+                    }
                     .accessibilityLabel("Conversations")
+                    .accessibilityValue(unreadElsewhere ? "Unread messages" : "")
                 }
                 if let u = store.update, let link = Self.sideStoreInstall(u.ipa) {
                     // SideStore downloads, re-signs and installs; it asks before replacing the app.
@@ -1748,11 +1756,12 @@ private struct Row: View {
                 .contentShape(.contextMenuPreview, BubblePreview(mine: mine, tail: tail, badge: message.reaction != nil))
                 // The field's width and place at 0, the bubble at 1: on the bubble itself, so the
                 // stretch is field width over bubble width (the row is as wide as the screen).
-                .modifier(SendMorph(progress: morph, lift: lift))
+                .modifier(SendMorph(progress: morph, lift: lift, still: still))
                 .onAppear {
-                    guard fresh, !still else { return }   // Reduce Motion: the bubble is simply there, no flight from the field
+                    guard fresh else { return }   // just sent: history and incoming messages are simply there
                     morph = 0
-                    withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { morph = 1 }
+                    // Out of the field and into place, without overshoot; Reduce Motion fades it in where it lands.
+                    withAnimation(still ? .easeOut(duration: 0.2) : .spring(duration: 0.28, bounce: 0)) { morph = 1 }
                 }
                 // Double-tap: ❤️ straight away, no menu. Again takes it off. Otto's only (see palette).
                 // Not attached on yours, so a tap on a link there doesn't wait to see if it's a double.
@@ -2347,25 +2356,25 @@ extension View {
 }
 
 /// A sent bubble on its way out of the composer: at 0 it covers the text field (its width,
-/// 40pt tall, about 50pt lower) with the words blurred; at 1 it is the bubble. Measured off
-/// Messages on iOS 26: the field fills blue, narrows toward the send button, lifts and
-/// settles with a slight overshoot in about 0.45s.
+/// 40pt tall, about 50pt lower) with the words blurred; at 1 it is the bubble. It narrows toward
+/// the send button and rises into place on a 0.28 s spring with no bounce. Reduce Motion: it only fades in.
 struct SendMorph: ViewModifier, Animatable {
     var progress: Double
     /// From the row's bottom down to the text field's.
     var lift: CGFloat
+    var still = false
     var animatableData: Double { get { progress } set { progress = newValue } }
     func body(content: Content) -> some View {
-        let q = 1 - min(max(progress, 0), 1.2)
-        let lift = lift
-        content.visualEffect { c, g in
+        let q = 1 - min(max(progress, 0), 1)
+        let lift = lift, m = still ? 0 : q   // m: how far from the bubble it is drawn; nothing moves under Reduce Motion
+        content.opacity(still ? 1 - q : 1).visualEffect { c, g in
             let field = CGSize(width: max(g.size.width, UIScreen.main.bounds.width - 82), height: 40)
             return c
-                .scaleEffect(x: 1 + (field.width / max(g.size.width, 1) - 1) * q,
-                             y: 1 + (field.height / max(g.size.height, 1) - 1) * q,
+                .scaleEffect(x: 1 + (field.width / max(g.size.width, 1) - 1) * m,
+                             y: 1 + (field.height / max(g.size.height, 1) - 1) * m,
                              anchor: .bottomTrailing)
-                .offset(y: lift * q)
-                .blur(radius: 5 * max(q, 0))
+                .offset(y: lift * m)
+                .blur(radius: 5 * m)
         }
     }
 }
