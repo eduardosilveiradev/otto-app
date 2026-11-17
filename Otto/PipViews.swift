@@ -22,6 +22,8 @@ struct PipRoot: View {
     @State private var faded = false
     /// The list is laid out from the first move until a close has finished; closed, its faces stop.
     @State private var shown = false
+    /// The home indicator's strip under the card's frame, which its rounded edge reaches down over.
+    @State private var below: CGFloat = 0
 
     /// `moves`: bumped by every grab and settle, so an older settle's ending can't act after a newer one began.
     final class Live { var x: CGFloat = 0, from: CGFloat = 0, dragging = false, moves = 0 }
@@ -110,7 +112,10 @@ struct PipRoot: View {
             // Down under the home indicator too, where the dock stops: the card's bottom corners are its own.
             .background(Color(.systemBackground))
             .overlay { Color.black.opacity(0.15 * progress).ignoresSafeArea().allowsHitTesting(false) }
-            .mask { RoundedRectangle(cornerRadius: corner, style: .continuous).ignoresSafeArea() }
+            // A clip, not a mask: a SwiftUI mask over the dock's UIKit views hid the composer once the keyboard
+            // moved it (it stayed behind the keyboard); a clip follows it. Down past the frame to the screen's foot.
+            .clipShape(CardShape(corner: corner, below: below))
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { below = $0 }
             .overlay {
                 RoundedRectangle(cornerRadius: corner, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5)
                     .opacity(progress).ignoresSafeArea().allowsHitTesting(false)
@@ -204,6 +209,19 @@ struct PipRoot: View {
 }
 
 /// The card's slide, which also notes where the card is each frame of an animation.
+/// The card's outline: its frame stops at the home indicator, its rounded edge at the screen's foot.
+private struct CardShape: Shape {
+    var corner: CGFloat
+    var below: CGFloat
+    var animatableData: CGFloat {
+        get { corner }
+        set { corner = newValue }
+    }
+    func path(in r: CGRect) -> Path {
+        RoundedRectangle(cornerRadius: corner, style: .continuous).path(in: CGRect(x: r.minX, y: r.minY, width: r.width, height: r.height + below))
+    }
+}
+
 private struct Slide: GeometryEffect {
     var x: CGFloat
     let live: PipRoot.Live
