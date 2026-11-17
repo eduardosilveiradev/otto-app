@@ -16,6 +16,7 @@ struct OttoApp: App {
         // `-wipeDefaults` (Scripts/shoot.sh, on every launch): start from no saved settings, so what one
         // screenshot's state left behind (a draft in the composer, a pasted pairing link) can't show in the next.
         if CommandLine.arguments.contains("-wipeDefaults"), let id = Bundle.main.bundleIdentifier { UserDefaults.standard.removePersistentDomain(forName: id) }
+        ReviewSwitch.install()   // shoot.sh's states, swapped in place
         #endif
         Notifier.shared.register()   // the background task must be registered before launch ends
         Dictation.shared.setUp()     // the keyboard's mic requests arrive any time
@@ -52,6 +53,9 @@ struct OttoApp: App {
             Group {
                 if onboarded { MainRoot() } else { OnboardingFlow { withAnimation { onboarded = true } } }
             }
+            #if DEBUG
+            .id(ReviewSwitch.shared.generation)   // a review state swapped in: a new screen tree on the new store
+            #endif
             .onOpenURL { url in
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
                 // The widgets: Otto's thread, the walkie-talkie, or an approval put off with Later.
@@ -92,7 +96,7 @@ struct OttoApp: App {
 
 private enum PipRootSwitch {
     #if DEBUG
-    static let faces = PipFixture.on && PipFixture.screen == "faces"
+    static var faces: Bool { PipFixture.on && PipFixture.screen == "faces" }
     #else
     static let faces = false
     #endif
@@ -189,7 +193,11 @@ private struct Connecting: View {
 final class OttoStore {
     /// One store for the app, so a background wake-up and a notification reply reach it too.
     /// Real server when Settings has a URL and token; mock data otherwise.
+    #if DEBUG
+    static var shared = OttoStore(backend: LiveBackend.fromDefaults() ?? MockBackend())   // ReviewSwitch makes a new one
+    #else
     static let shared = OttoStore(backend: LiveBackend.fromDefaults() ?? MockBackend())
+    #endif
 
     let backend: OttoBackend
     /// Pips and groups. Empty until the server says there's a second conversation.
@@ -429,6 +437,7 @@ final class OttoStore {
             n += 1
             var live = backend is MockBackend || backend.isLive
             #if DEBUG
+            if self !== OttoStore.shared { return }   // replaced by ReviewSwitch
             if ProcessInfo.processInfo.arguments.contains("-offline") { live = false; launchGrace = 0 }   // the disconnected UI, in the simulator
             #endif
             // A reconnect is when replies sent into a socket iOS had frozen go missing; catch up.

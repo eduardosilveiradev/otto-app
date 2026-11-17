@@ -67,7 +67,7 @@ struct ScheduleChip: View {
     let trigger: DashTrigger
     #if DEBUG
     /// `-scheduleOpen`: the chip's sheet already up and at full height, for screenshots.
-    private static let shot = CommandLine.arguments.contains("-scheduleOpen")
+    private static var shot: Bool { CommandLine.arguments.contains("-scheduleOpen") }
     #else
     private static let shot = false
     #endif
