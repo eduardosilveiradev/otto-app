@@ -90,28 +90,7 @@ struct ActivityScreen: View {
                 let pill = Pill(text: job.state, tint: job.state == "failed" ? .red : .secondary)
                 let meta = Text([ago(job.createdAt), job.costUsd.map { $0.formatted(.currency(code: "USD")) }].compactMap { $0 }.joined(separator: " · "))
                     .font(.footnote).foregroundStyle(.secondary)
-                NavigationLink {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(job.task).font(.title3.weight(.semibold))
-                            HStack(spacing: 8) { pill; meta }
-                            if let r = job.result { MarkdownText(text: r).textSelection(.enabled).padding(.top, 8) }
-                            if let e = job.error {
-                                Label { Text(e).textSelection(.enabled) } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red) }
-                                    .padding(.top, 8)
-                            }
-                            if job.result == nil && job.error == nil, job.state == "queued" || job.state == "running" {
-                                HStack(spacing: 8) {
-                                    if job.state == "running" { ProgressView().controlSize(.small) }
-                                    Text(job.state == "running" ? "Still running." : "Waiting to start.")
-                                }
-                                .foregroundStyle(.secondary).padding(.top, 8)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading).padding()
-                    }
-                    .navigationTitle("Job").navigationBarTitleDisplayMode(.inline)
-                } label: {
+                NavigationLink { jobPage(job) } label: {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(alignment: .firstTextBaseline) {
                             Text(job.task).lineLimit(2)
@@ -123,7 +102,34 @@ struct ActivityScreen: View {
                 }
             }
         }
+        .shotPush("activity-job") { if let job = j.jobs.max(by: { $0.createdAt < $1.createdAt }) { jobPage(job) } }
         .emptyState(j.jobs.isEmpty, "No background jobs", systemImage: "gearshape.2", "Longer tasks Otto runs on your Mac show up here.")
+    }
+
+    private func jobPage(_ job: JobRow) -> some View {
+        let pill = Pill(text: job.state, tint: job.state == "failed" ? .red : .secondary)
+        let meta = Text([ago(job.createdAt), job.costUsd.map { $0.formatted(.currency(code: "USD")) }].compactMap { $0 }.joined(separator: " · "))
+            .font(.footnote).foregroundStyle(.secondary)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(job.task).font(.title3.weight(.semibold))
+                HStack(spacing: 8) { pill; meta }
+                if let r = job.result { MarkdownText(text: r).textSelection(.enabled).padding(.top, 8) }
+                if let e = job.error {
+                    Label { Text(e).textSelection(.enabled) } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red) }
+                        .padding(.top, 8)
+                }
+                if job.result == nil && job.error == nil, job.state == "queued" || job.state == "running" {
+                    HStack(spacing: 8) {
+                        if job.state == "running" { ProgressView().controlSize(.small) }
+                        Text(job.state == "running" ? "Still running." : "Waiting to start.")
+                    }
+                    .foregroundStyle(.secondary).padding(.top, 8)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).padding()
+        }
+        .navigationTitle("Job").navigationBarTitleDisplayMode(.inline)
     }
 
     private func triggers(_ t: Triggers) -> some View {
@@ -136,12 +142,15 @@ struct ActivityScreen: View {
             }
             if !off.isEmpty {
                 Section {
-                    NavigationLink("Done or paused · \(off.count)") {
-                        List { ForEach(off) { trig($0) } }.navigationTitle("Done or paused").navigationBarTitleDisplayMode(.inline)
-                    }
+                    NavigationLink("Done or paused · \(off.count)") { offPage(off) }
                 }
             }
         }
+        .shotPush("activity-off") { offPage(off) }
+    }
+
+    private func offPage(_ off: [DashTrigger]) -> some View {
+        List { ForEach(off) { trig($0) } }.navigationTitle("Done or paused").navigationBarTitleDisplayMode(.inline)
     }
 
     private func trig(_ t: DashTrigger) -> some View {

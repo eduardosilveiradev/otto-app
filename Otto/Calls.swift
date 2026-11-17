@@ -158,6 +158,7 @@ struct CallSheet: View {
         .task(id: call.live) { await follow() }
         .onChange(of: call.live) { if !call.live { listener.stop() } }
         .onDisappear { listener.stop() }
+        .onAppear { if shotOpen("call-end") { confirmEnd = true } }
         .confirmationDialog("End the call?", isPresented: $confirmEnd, titleVisibility: .visible) {
             Button("Hang Up", role: .destructive) { Task { await send("end") } }
         }
@@ -319,6 +320,7 @@ struct CallsScreen: View {
                     .tint(.primary)
                 }
             }
+            .onAppear { if shotOpen("call") { open = r.calls.first { !$0.live } ?? r.calls.first } }
             .emptyState(r.calls.isEmpty, "No recent calls", systemImage: "phone",
                         "Calls from the last two hours. Ask Otto to call somewhere and it shows up here while it rings.")
             .refreshable { await reload() }

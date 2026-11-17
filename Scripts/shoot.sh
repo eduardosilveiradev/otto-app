@@ -232,6 +232,25 @@ shot calls error 6 "Can't reach your Mac (no callbot)" $O -details -screen Calls
 shot loops stale 6 "A refresh that failed: the page keeps what it had and says how old it is" $O -details -screen Loops -staleDash
 shot settings error 13 "Settings when the Mac doesn't answer" $DEAD $N -details -screen Settings
 shot loops error 12 "Can't reach your Mac (dead server)" $DEAD $N -details -screen Loops
+# One level deeper: -open names the row, sheet or question (Dash.swift's shotOpen), as if it had been tapped.
+shot memory summary 7 "What Otto knows about you: the summary page" $O -details -screen Memory -open memory-summary
+shot memory item 7 "A memory opened: what it says, where it came from, Correct and Forget" $O -details -screen Memory -open memory-item
+shot memory forget-confirm 8 "Forget tapped on a memory: the question before it goes" $O -details -screen Memory -open memory-item,memory-forget
+shot people person 7 "A person opened: their time, your notes, what memory says about them" $O -details -screen People -open person
+shot loops detail 7 "An open loop opened, with Done" $O -details -screen Loops -open loop
+shot trips past 7 "Past trips" $O -details -screen Trips -open past-trips
+shot schedules detail 7 "A schedule opened from the list" $O -details -screen Schedules -open schedule
+shot schedules off 7 "Done or paused schedules" $O -details -screen Schedules -open schedules-off
+shot activity job-detail 7 "A background job opened from Activity" $O -details -screen Activity -activityTab Jobs -open activity-job
+shot activity triggers-off 7 "Activity's done or paused triggers" $O -details -screen Activity -activityTab Triggers -open activity-off
+shot passport stamp 8 "A passport stamp opened" $O -details -screen Passport -open stamp
+shot calls sheet 8 "A call from the list opened: what was said" $O -details -screen Calls -mockCalls -open call
+shot sheet live-call-end 9 "Hang up tapped on a live call: the question first" $O -demoThread -mockCalls -openCall -open call-end
+shot sheet recorded-money 7 "A recorded chip opened: spending, with its one action" $O -scheduleThread -open recorded-money
+shot sheet recorded-memory 7 "A recorded chip opened: a memory" $O -scheduleThread -open recorded-memory
+shot sheet job-merge 8 "Merge tapped on a job up for review: the question first" $O -jobsThread -jobOpen demo-review -open job-merge
+shot chat stop-unconfirmed 6 "Stop sent and the Mac didn't answer" $O -demoThread -thinking -open stop-unconfirmed
+shot chat call-explain 6 "Call tapped with no way to call set up yet" $O -demoThread -open call-explain
 
 # --- Pips and groups ---------------------------------------------------------------------
 P="$B -pipsFixture -pipsScreen"

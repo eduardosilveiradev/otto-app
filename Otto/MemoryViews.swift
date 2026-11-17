@@ -41,6 +41,11 @@ private struct MemoryList: View {
         }.map { m.items[$0] }
     }
 
+    private var summaryPage: some View {
+        ScrollView { MarkdownText(text: m.summary.text).padding() }
+            .navigationTitle("Summary").navigationBarTitleDisplayMode(.inline)
+    }
+
     var body: some View {
         let items = shown
         List {
@@ -50,10 +55,7 @@ private struct MemoryList: View {
                 Section { Text("Otto is rewriting what it knows about you without what you just forgot. It’s back here when that’s done.").foregroundStyle(.secondary) }
             } else if query.isEmpty && cluster == nil && !needsLook && source == "all" && !m.items.isEmpty && !m.summary.text.isEmpty {
                 Section {
-                    NavigationLink {
-                        ScrollView { MarkdownText(text: m.summary.text).padding() }
-                            .navigationTitle("Summary").navigationBarTitleDisplayMode(.inline)
-                    } label: {
+                    NavigationLink { summaryPage } label: {
                         Label { Text("What Otto knows about you") } icon: { RowIcon(symbol: "text.alignleft") }
                     }
                 } footer: { Text(m.summary.note) }
@@ -81,6 +83,8 @@ private struct MemoryList: View {
             }
         }
         .overlay { if items.isEmpty { empty } }
+        .shotPush("memory-summary") { summaryPage }
+        .shotPush("memory-item") { if let it = items.first { MemoryDetailScreen(item: it, direct: m.canForget == true) } }
         .searchable(if: !m.items.isEmpty, text: $query, prompt: "Search memory")   // nothing kept yet: nothing to search
         .onSubmit(of: .search) { Task { await search() } }
         .onChange(of: query) { searchFailed = false; if query.isEmpty { rankedIn = nil } }
@@ -220,6 +224,7 @@ struct MemoryDetailScreen: View {
             }
         }
         // The words say which of the two will happen: gone now, or asked for in the chat.
+        .task { if shotOpen("memory-forget") { try? await Task.sleep(for: .seconds(1)); forgetting = true } }
         .confirmationDialog(direct ? "Forget this?" : "Ask Otto to forget this?", isPresented: $forgetting, titleVisibility: .visible) {
             Button(direct ? "Forget" : "Ask Otto to forget it", role: .destructive) {
                 // Asked to forget: what this phone kept of the Mac's pages goes now, whichever way the asking travels
@@ -280,6 +285,7 @@ struct PeopleScreen: View {
                     }
                 }
             }
+            .shotPush("person") { if let c = cards.first { PersonScreen(card: c) } }
             .emptyState(p.cards.isEmpty, "Nobody yet", systemImage: "person.2", "Tell Otto who someone is and they show up here.")
             .searchable(if: !p.cards.isEmpty, text: $query, prompt: "Search people")
             .refreshable { await reload() }
