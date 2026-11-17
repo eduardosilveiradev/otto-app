@@ -67,9 +67,11 @@ fi
 UP=0   # the app is running on the base state, ready to switch in place
 
 # A fresh process only where launch itself is the point or the state outlives a swap: a real (dead)
-# server's socket, a text size UIKit reads once at launch, the web call's audio session, and the voice
-# player's paused note, set when the player is first made.
-COLD=' -serverURL | -UIPreferredContentSizeCategoryName | -call | -voicePaused '
+# server's socket, a text size UIKit reads once at launch, the web call's audio session, the voice
+# player's paused note (set when the player is first made), and approvals, whose UIKit sheet often
+# didn't come up after a swap.
+COLD=' -serverURL | -UIPreferredContentSizeCategoryName | -call | -voicePaused | -approvalDemo | -paymentDemo | -approvalWorst '
+running() { xcrun simctl spawn "$DEV" launchctl list 2>/dev/null | grep -q "UIKitApplication:$ID"; }
 
 clean() {
   local data; data=$(xcrun simctl get_app_container "$DEV" $ID data 2>/dev/null) || return 0
@@ -87,6 +89,7 @@ shot() {
   local cold=0; [[ -n "${COLD_ALL:-}" || " $* " =~ $COLD ]] && cold=1
   for theme in $THEMES; do
     xcrun simctl ui "$DEV" appearance $theme
+    [ $UP = 1 ] && ! running && UP=0   # gone since the last shot: relaunch before switching
     if [ $cold = 1 ] || [ $UP = 0 ]; then
       xcrun simctl terminate "$DEV" $ID >/dev/null 2>&1
       sleep 0.5
@@ -107,6 +110,8 @@ shot() {
       printf '%s\n' -wipeDefaults "$@" 2>/dev/null > "$DATA/tmp/review-args" || { echo "Otto was reinstalled under this run: stopping" >&2; exit 1; }
       xcrun simctl spawn "$DEV" notifyutil -p dev.otto.review
       sleep "$(awk -v w="$wait" 'BEGIN { s = w - 3.5; print (s < 2.5 ? 2.5 : s) }')"
+      # The swap itself can crash a debug build (a UIKit assertion mid-transition): take this state cold.
+      if ! running; then UP=0; COLD_ALL=1 shot "$screen" "$state" "$wait" "$note" "$@"; return; fi
     fi
     [[ " $* " == *" -pipsFixture "* ]] && sleep 1.5   # the list, then the thread it opens
     local f="$screen-$state-$theme.png"
