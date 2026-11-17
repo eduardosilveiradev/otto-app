@@ -59,6 +59,11 @@ struct PipRoot: View {
                     ConversationsView(store: store).frame(width: out)
                     sliver
                 }
+                // The list comes up to meet the hand: 94% and faded with the card home, full size out. Read off the
+                // card's own x, so it follows the finger and rides the card's spring. Scale and opacity only, to
+                // stay cheap; no scale under Reduce Motion.
+                .scaleEffect(still ? 1 : 0.94 + 0.06 * progress, anchor: .leading)
+                .opacity(0.6 + 0.4 * progress)
                 .accessibilityElement(children: .contain)
                 .accessibilityAddTraits(.isModal)
                 .accessibilityHidden(!pips.drawer)
