@@ -186,7 +186,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             Task { @MainActor in OttoStore.shared.pips.open(open); done() }
             return
         }
-        // One of Otto's own messages: its thread, wherever the app was left (a pip's thread, the Chats list, a card page).
+        // One of Otto's own messages: its thread, wherever the app was left (a pip's thread, the drawer, a card page).
         if conversation == nil, response.actionIdentifier == UNNotificationDefaultActionIdentifier {
             Task { @MainActor in Doors.open("chat"); done() }
             return

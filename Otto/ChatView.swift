@@ -72,8 +72,8 @@ struct ChatView: View {
     /// Shared with the composer, which lives in its own hosting controller (see KeyboardDock).
     let ui: ComposerUI
     let thread: any ChatThread
-    /// Back to the conversations; nil when Otto's is the only thread there is.
-    var onBack: (() -> Void)? = nil
+    /// Slides the conversations out; nil when Otto's is the only thread there is.
+    var onDrawer: (() -> Void)? = nil
     private var focused: Bool { ui.focused }
     private var pipsOn: Bool { store.pips.active }
     private var row: ConversationRow? { store.pips.row(thread.conversationID) }
@@ -759,9 +759,9 @@ struct ChatView: View {
     private var header: some View {
         ZStack(alignment: Alignment(horizontal: .center, vertical: .headerRow)) {
             HStack {
-                if let onBack {
-                    Button(action: onBack) {
-                        Image(systemName: "chevron.left").font(.system(size: 18, weight: .medium))
+                if let onDrawer {
+                    Button(action: onDrawer) {
+                        Image(systemName: "line.3.horizontal").font(.system(size: 18, weight: .medium))
                             .frame(width: 44, height: 44)
                             .glassEffect(.regular.interactive(), in: .circle)
                     }
@@ -1906,10 +1906,10 @@ private struct Row: View {
                     let t = g.translation
                     // Locked on the first move, so a drag that drifts diagonally keeps doing one thing.
                     if sideways == nil {
-                        // The left fifth of a left-aligned row is the back swipe's (see LeftRowMarker).
+                        // The left fifth of a left-aligned row is the drawer swipe's (see LeftRowMarker).
                         // And only on the message: the empty side of the row is the thread's, not a reply.
                         let x0 = g.startLocation.x
-                        let onBubble = !mine || x0 >= rowWidth - bubbleWidth - 8   // Otto's side keeps the whole row: a short bubble sits inside the back swipe's fifth
+                        let onBubble = !mine || x0 >= rowWidth - bubbleWidth - 8   // Otto's side keeps the whole row: a short bubble sits inside the drawer swipe's fifth
                         sideways = t.width > 0 && t.width > abs(t.height) * 1.5 && onBubble && (mine || x0 >= rowWidth / 5)
                         if sideways == true { onSwiping(true) }
                     }
@@ -3288,25 +3288,30 @@ struct ChatScreen: UIViewControllerRepresentable {
     let store: OttoStore
     /// Otto's own when nil.
     var thread: (any ChatThread)? = nil
-    var onBack: (() -> Void)? = nil
+    var onDrawer: (() -> Void)? = nil
+    /// The swipe that pulls the drawer out, from the left edge (or a left-aligned message's left fifth).
+    /// Read once, when the dock is made: reach changing state through what it captures, not by value.
+    var onPan: ((UIPanGestureRecognizer) -> Void)? = nil
     func makeUIViewController(context: Context) -> KeyboardDock {
-        KeyboardDock(store: store, thread: thread ?? store, onBack: onBack)
+        KeyboardDock(store: store, thread: thread ?? store, onDrawer: onDrawer, onPan: onPan)
     }
     func updateUIViewController(_ vc: KeyboardDock, context: Context) {}
 }
 
-final class KeyboardDock: UIViewController {
+final class KeyboardDock: UIViewController, UIGestureRecognizerDelegate {
     private let thread: UIHostingController<AnyView>
     private let composer: UIHostingController<AnyView>
     private let glow: UIHostingController<AnyView>
     private let ui: ComposerUI
     private var composerHeight: NSLayoutConstraint!
     private var glowBottom: NSLayoutConstraint!
+    private let onPan: ((UIPanGestureRecognizer) -> Void)?
 
-    init(store: OttoStore, thread chat: any ChatThread, onBack: (() -> Void)? = nil) {
+    init(store: OttoStore, thread chat: any ChatThread, onDrawer: (() -> Void)? = nil, onPan: ((UIPanGestureRecognizer) -> Void)? = nil) {
         let ui = ComposerUI()
         self.ui = ui
-        thread = UIHostingController(rootView: AnyView(ChatView(ui: ui, thread: chat, onBack: onBack).environment(store)))
+        self.onPan = onPan
+        thread = UIHostingController(rootView: AnyView(ChatView(ui: ui, thread: chat, onDrawer: onDrawer).environment(store)))
         composer = UIHostingController(rootView: AnyView(Composer(ui: ui, thread: chat).environment(store)))
         glow = UIHostingController(rootView: AnyView(ScreenGlow(ui: ui)))
         super.init(nibName: nil, bundle: nil)
@@ -3335,6 +3340,11 @@ final class KeyboardDock: UIViewController {
             host.didMove(toParent: self)
         }
         glow.view.isUserInteractionEnabled = false   // touches go through to the thread
+        if onPan != nil {
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(panned))
+            pan.delegate = self
+            view.addGestureRecognizer(pan)
+        }
         glow.safeAreaRegions = []                    // down to the real screen edge
         // Measured at the real width (intrinsic size measures unconstrained, so a long
         // draft never wrapped and the box stayed one line tall).
@@ -3357,6 +3367,23 @@ final class KeyboardDock: UIViewController {
             composer.view.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
             composerHeight,
         ])
+    }
+
+    @objc private func panned(_ g: UIPanGestureRecognizer) { onPan?(g) }
+
+    /// Rightward, and from the screen's left edge or the left fifth of a left-aligned message: anywhere
+    /// else a swipe across a row means "reply" (see LeftRowMarker).
+    func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+        guard let pan = g as? UIPanGestureRecognizer else { return true }
+        let v = pan.velocity(in: nil), start = pan.location(in: nil).x - pan.translation(in: nil).x
+        guard v.x > abs(v.y) else { return false }
+        return start < 24 || LeftRowMarkerView.startsBack(at: CGPoint(x: start, y: pan.location(in: nil).y))
+    }
+
+    /// The thread's scrolling waits the moment it takes this to decide. Only scrolling: long presses
+    /// (a message's menu) must not wait on a pan that never moves.
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+        other.view is UIScrollView && other is UIPanGestureRecognizer
     }
 
     /// The thread scrolls under the composer (the glass needs something behind it), so
