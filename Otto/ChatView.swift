@@ -972,7 +972,7 @@ struct Composer: View {
                                     .background(Color(red: 0.525, green: 0.553, blue: 0.592), in: .circle)
                                     .padding(6).contentShape(.rect).padding(-6)   // 44pt to tap, laid out at 32
                             }
-                            .padding([.trailing, .bottom], 4)
+                            .padding(4)   // all round: a 40pt row, so one line centres it rather than the field
                             .accessibilityLabel("Send")
                             .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                         }
