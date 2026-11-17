@@ -684,15 +684,17 @@ final class OttoStore {
             messages = [Message(from: .otto, text: "four jobs, none of them tidy.", jobs: ["worst-script", "worst-failed", "worst-unknown", "worst-input", "gone-from-the-mac"])]
         } else if ProcessInfo.processInfo.arguments.contains("-jobsThread") {
             jobs.set(CodeJob.demo)
-            // `-jobsTick`: twelve seconds in, the running job goes up for review, for Scripts/record.sh.
+            // `-jobsTick`: the running job goes up for review and back every three seconds, for Scripts/record.sh.
             if ProcessInfo.processInfo.arguments.contains("-jobsTick") {
                 Task {
-                    try? await Task.sleep(for: .seconds(12))
                     var next = CodeJob.demo
                     next[0].state = "review"
                     next[0].now = "**The second quote** covers the boiler and costs least."
                     next[0].pr = .init(n: 215, title: "Insurance comparison", add: 40, del: 0, files: 1, mergeable: "MERGEABLE", base: "main", checks: "passing")
-                    jobs.set(next)
+                    for i in 0..<40 {
+                        try? await Task.sleep(for: .seconds(3))
+                        jobs.set(i.isMultiple(of: 2) ? next : CodeJob.demo)
+                    }
                 }
             }
             messages = [Message(from: .otto, text: "the quieter route is up for review.", jobs: ["demo-review"]),
