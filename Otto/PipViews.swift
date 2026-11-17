@@ -22,9 +22,16 @@ struct PipRoot: View {
     @State private var faded = false
     /// The list is laid out from the first move until a close has finished; closed, its faces stop.
     @State private var shown = false
+    /// The home indicator's strip under the card's frame, which its rounded edge reaches down over.
+    @State private var below: CGFloat = 0
 
     /// `moves`: bumped by every grab and settle, so an older settle's ending can't act after a newer one began.
-    final class Live { var x: CGFloat = 0, from: CGFloat = 0, dragging = false, moves = 0 }
+    final class Live {
+        var x: CGFloat = 0, from: CGFloat = 0, dragging = false, moves = 0
+        /// The snap's tap: made ready when a drag starts, so it lands with the release rather than a beat after.
+        /// Silent on its own when System Haptics is off, so Reduce Motion's cross-fade keeps it too.
+        let snap = UIImpactFeedbackGenerator(style: .light)
+    }
 
     private enum Kind { case handoff, page }
     /// One `sheet` in the store, shown by whichever presentation suits it.
@@ -52,6 +59,11 @@ struct PipRoot: View {
                     ConversationsView(store: store).frame(width: out)
                     sliver
                 }
+                // The list comes up to meet the hand: 94% and faded with the card home, full size out. Read off the
+                // card's own x, so it follows the finger and rides the card's spring. Scale and opacity only, to
+                // stay cheap; no scale under Reduce Motion.
+                .scaleEffect(still ? 1 : 0.94 + 0.06 * progress, anchor: .leading)
+                .opacity(0.6 + 0.4 * progress)
                 .accessibilityElement(children: .contain)
                 .accessibilityAddTraits(.isModal)
                 .accessibilityHidden(!pips.drawer)
@@ -110,7 +122,10 @@ struct PipRoot: View {
             // Down under the home indicator too, where the dock stops: the card's bottom corners are its own.
             .background(Color(.systemBackground))
             .overlay { Color.black.opacity(0.15 * progress).ignoresSafeArea().allowsHitTesting(false) }
-            .mask { RoundedRectangle(cornerRadius: corner, style: .continuous).ignoresSafeArea() }
+            // A clip, not a mask: a SwiftUI mask over the dock's UIKit views hid the composer once the keyboard
+            // moved it (it stayed behind the keyboard); a clip follows it. Down past the frame to the screen's foot.
+            .clipShape(CardShape(corner: corner, below: below))
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { below = $0 }
             .overlay {
                 RoundedRectangle(cornerRadius: corner, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5)
                     .opacity(progress).ignoresSafeArea().allowsHitTesting(false)
@@ -159,6 +174,7 @@ struct PipRoot: View {
     private func began() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         shown = true
+        live.snap.prepare()
         live.moves += 1
         live.from = live.x
         withTransaction(Transaction(animation: nil)) { x = live.x }
@@ -177,6 +193,9 @@ struct PipRoot: View {
 
     private func settle(_ open: Bool, velocity v: CGFloat = 0) {
         let pips = store.pips
+        // A tap when it snaps open or shut; not for a drag let go where it was, nor for a close that picking a
+        // thread already made (the drawer state changed first, and the row gave its own tick).
+        if open != pips.drawer { live.snap.impactOccurred() }
         target = open
         pips.drawer = open
         if open {
@@ -204,6 +223,19 @@ struct PipRoot: View {
 }
 
 /// The card's slide, which also notes where the card is each frame of an animation.
+/// The card's outline: its frame stops at the home indicator, its rounded edge at the screen's foot.
+private struct CardShape: Shape {
+    var corner: CGFloat
+    var below: CGFloat
+    var animatableData: CGFloat {
+        get { corner }
+        set { corner = newValue }
+    }
+    func path(in r: CGRect) -> Path {
+        RoundedRectangle(cornerRadius: corner, style: .continuous).path(in: CGRect(x: r.minX, y: r.minY, width: r.width, height: r.height + below))
+    }
+}
+
 private struct Slide: GeometryEffect {
     var x: CGFloat
     let live: PipRoot.Live
@@ -315,7 +347,7 @@ struct ConversationsView: View {
 
     /// Otto's face and name over the list. Also the way to Otto's thread, should the server not list it.
     private var top: some View {
-        Button { pips.open("app") } label: {
+        Button { UISelectionFeedbackGenerator().selectionChanged(); pips.open("app") } label: {
             HStack(spacing: 12) {
                 FaceView(look: pips.row("app")?.otto?.look ?? .otto, size: 40, live: true).frame(width: 40, height: 40)
                 Text("Otto").font(size: 28, weight: .semibold, relativeTo: .title).lineLimit(1)
@@ -445,7 +477,7 @@ private struct ConversationCell: View {
     private var selected: Bool { row.id == pips.current }
 
     var body: some View {
-        Button { pips.open(row.id, at: match) } label: {
+        Button { UISelectionFeedbackGenerator().selectionChanged(); pips.open(row.id, at: match) } label: {
             HStack(spacing: 12) {
                 picture
                 VStack(alignment: .leading, spacing: 0) {
