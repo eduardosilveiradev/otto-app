@@ -323,7 +323,12 @@ enum FaceCache {
     func onScreen(_ on: Bool) {
         blinkTimer?.cancel()
         link?.invalidate(); link = nil
-        guard on else { back?.cancel(); return }
+        guard on else {
+            // Gone mid-glance: it comes back looking ahead, not still turned aside.
+            back?.cancel()
+            if let look = lastLook { let home = Pose(u: FaceUniforms(look)); from = home; to = home }
+            return
+        }
         draw()
         guard lively else { return }
         blinkTimer = Task { [weak self] in
