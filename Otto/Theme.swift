@@ -34,6 +34,9 @@ struct Press: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let down = configuration.isPressed && enabled
         configuration.label
+            // The whole label takes the tap, as the default style's does: a face in it is a UIKit view that
+            // doesn't hit-test, and without this a tap on Otto's face in the header went nowhere.
+            .contentShape(.rect)
             .opacity(enabled ? (down && still ? 0.6 : 1) : 0.4)
             .scaleEffect(down && !still ? 0.96 : 1)
             .animation(.spring(duration: 0.2, bounce: 0), value: down)
