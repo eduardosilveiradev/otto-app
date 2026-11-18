@@ -246,7 +246,7 @@ enum FaceCache {
     /// (access.json `quietHours`) isn't on the app's wire, so read it from there once it is.
     static var drowsy: Bool {
         #if DEBUG
-        if let forced = UserDefaults.standard.object(forKey: "drowsy") as? Bool { return forced }   // `-drowsy YES|NO`
+        if UserDefaults.standard.object(forKey: "drowsy") != nil { return UserDefaults.standard.bool(forKey: "drowsy") }   // `-drowsy YES|NO`
         if CommandLine.arguments.contains("-wipeDefaults") { return false }   // shoot.sh: never the clock
         #endif
         let h = Calendar.current.component(.hour, from: .now)
@@ -304,8 +304,8 @@ enum FaceCache {
         guard let look = lastLook, look.state == .rest, to?.u.arc == 0 else { return }
         var u = FaceUniforms(look)
         let side: Float = Bool.random() ? 1 : -1
-        u.eo += SIMD2(0.06 * side, .random(in: -0.02...0.03))
-        u.pose += SIMD3(.random(in: -0.04...0.04), 0.14 * side, 0)
+        u.eo += SIMD2(0.13 * side, .random(in: -0.03...0.04))
+        u.pose += SIMD3(.random(in: -0.06...0.06), 0.3 * side, 0)
         glimpse(u, hold: .random(in: 0.8...1.4))
     }
 
@@ -391,6 +391,7 @@ enum FaceCache {
         }
         let blinking = blink >= 0 && blink < 1
         v.b = max(close, v.arc == 0 ? max(drowse, blinking ? sin(.pi * blink) : 0) : 0)
+        if drowse > 0 { v.pose += SIMD3(0.08, 0, -0.06) }   // drowsy: the head droops a little, toward asleep's tilt
         return (Pose(u: v, close: close), p < 1 || blinking)
     }
 
@@ -556,7 +557,7 @@ final class FaceUIView: UIView {
         let drowsy = LiveFaceLayer.drowsy && shown.look.state == .rest
         if let l = liveLayer {
             l.calm = calm
-            l.drowse = drowsy ? 0.32 : 0   // a look, not motion: under Reduce Motion too
+            l.drowse = drowsy ? 0.55 : 0   // a look, not motion: under Reduce Motion too
             if l.lively != lively { l.lively = lively; l.onScreen(window != nil) }
         }
         guard !calm else { return }
