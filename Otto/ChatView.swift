@@ -737,20 +737,20 @@ struct ChatView: View {
             .liftedTitle()
         } else if let row, row.kind == "pip", let pip = row.pips.first {
             Button { store.pips.sheet = .pip(pip.id) } label: {
-                HeaderTitle(name: row.name, status: offline) { FaceView(look: pip.look, size: 68, live: true, hops: hops, joys: joys).frame(width: 68, height: 68) }
+                HeaderTitle(name: row.name, status: offline) { FaceView(look: pip.look, size: 68, live: true, joys: joys).frame(width: 68, height: 68).hop(hops: hops, joys: joys, size: 68, roomAbove: false) }
             }
             .buttonStyle(.press)
             .liftedTitle()
         } else if pipsOn {
             Button { showDetails = true } label: {
-                HeaderTitle(name: "Otto", status: offline) { FaceView(look: ottoLook, size: 68, live: true, hops: hops, joys: joys).frame(width: 68, height: 68) }
+                HeaderTitle(name: "Otto", status: offline) { FaceView(look: ottoLook, size: 68, live: true, joys: joys).frame(width: 68, height: 68).hop(hops: hops, joys: joys, size: 68, roomAbove: false) }
             }
             .buttonStyle(.press)
             .liftedTitle()
             .matchedTransitionSource(id: "card", in: card)
         } else {
             Button { showDetails = true } label: {
-                HeaderTitle(name: "Otto", status: offline) { OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, hops: hops, joys: joys) }
+                HeaderTitle(name: "Otto", status: offline) { OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, hops: hops, joys: joys, roomAbove: false) }
             }
             .buttonStyle(.press)
             .matchedTransitionSource(id: "card", in: card)

@@ -12,12 +12,15 @@ struct OttoAvatar: View {
     var joys = 0
     /// On its own, not inside a button: a tap makes it hop and smile, with a light tap back.
     var pokeable = false
+    /// Off where something just above clips it (the header bar): the beat pops in place instead of hopping.
+    var roomAbove = true
     @State private var pokes = 0
 
     var body: some View {
         // Small faces play cached frames; large ones render live, for the eye transitions.
-        FaceView(look: .otto.with(asleep ? .asleep : thinking ? .working : .rest), size: size, live: size > 32, hops: hops, joys: joys + pokes)
+        FaceView(look: .otto.with(asleep ? .asleep : thinking ? .working : .rest), size: size, live: size > 32, joys: joys + pokes)
             .frame(width: size, height: size)
+            .hop(hops: hops, joys: joys + pokes, size: size, roomAbove: roomAbove)
             .contentShape(.circle)
             // Off (`.subviews`) inside a button, which keeps the tap.
             .gesture(TapGesture().onEnded { pokes += 1 }, including: pokeable ? .all : .subviews)

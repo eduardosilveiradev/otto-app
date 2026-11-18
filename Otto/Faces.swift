@@ -460,8 +460,8 @@ final class FaceUIView: UIView {
     private var calm: Bool { UIAccessibility.isReduceMotionEnabled }
     /// Idle life (breathing, blinks, glances, drift) on top of what says its state; off in Low Power Mode too.
     private var lively: Bool { !calm && !ProcessInfo.processInfo.isLowPowerModeEnabled }
-    /// The hops and joys asked for so far: a change is a beat. Nil until the first, which is only where it starts.
-    private var beats: (hops: Int, joys: Int)?
+    /// The joys asked for so far: a change is a beat. Nil until the first, which is only where it starts.
+    private var beats: Int?
     /// In front and not faded out (the header's face under the contact card is there at no opacity).
     private var visible: Bool {
         guard window != nil, UIApplication.shared.applicationState == .active else { return false }
@@ -601,25 +601,10 @@ final class FaceUIView: UIView {
         imageLayer.add(looped(a, phase), forKey: "blink")
     }
 
-    /// A change in what's asked for is a beat: joy (a smile and a big hop) over a hop (a reply landed).
-    func beat(hops: Int, joys: Int) {
-        defer { beats = (hops, joys) }
-        guard let last = beats else { return }
-        if joys != last.joys { liveLayer?.cheer(); hop(0.15) } else if hops != last.hops { hop(0.1) }
-    }
-
-    /// Up off where it sits and down, a smaller second bounce after, like something light landing. On top of
-    /// whatever else it's doing, and over in about half a second. Not under Reduce Motion: the smile alone says it.
-    private func hop(_ height: CGFloat) {
-        guard !calm, let size = shown?.size else { return }
-        let a = CAKeyframeAnimation(keyPath: "transform.translation.y")
-        a.values = [0, -size * height, 0, -size * height * 0.25, 0]
-        a.keyTimes = [0, 0.32, 0.62, 0.8, 1]
-        let out = CAMediaTimingFunction(name: .easeOut), down = CAMediaTimingFunction(name: .easeIn)
-        a.timingFunctions = [out, down, out, down]
-        a.duration = 0.55
-        a.isAdditive = true
-        wiggleLayer.add(a, forKey: "hop")
+    /// A new joy is a beat: the eyes close into smiles. (The hop that goes with it is SwiftUI's, `.hop`.)
+    func beat(joys: Int) {
+        defer { beats = joys }
+        if let last = beats, joys != last { liveLayer?.cheer() }
     }
 
     private func looped<A: CAAnimation>(_ a: A, _ offset: Double) -> A {
@@ -748,17 +733,51 @@ struct FaceView: UIViewRepresentable {
     var drift = false
     var ringed = false
     var ring: UIColor = .systemBackground
-    /// Counters: bump one for a hop (a reply landed) or a beat of joy (a job merged, a poke).
-    var hops = 0
+    /// Bump for a beat of joy (a job merged, a poke): the eyes smile. Pair it with `.hop`.
     var joys = 0
 
     func makeUIView(context: Context) -> FaceUIView { FaceUIView() }
     func updateUIView(_ v: FaceUIView, context: Context) {
         v.ring = ring
         v.configure(look: look, size: size, live: live, drift: drift, ringed: ringed)
-        v.beat(hops: hops, joys: joys)   // after: a new look restarts the loops, and the hop goes on top
+        v.beat(joys: joys)
     }
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: FaceUIView, context: Context) -> CGSize? { CGSize(width: size, height: size) }
+}
+
+extension View {
+    /// A happy beat, once for each new hop (a reply landed) and bigger for each new joy (a job merged, a poke): up off
+    /// where it sits and down, with a smaller second bounce, like something light landing, over in about half a
+    /// second. Where there's no room above (the thread's header bar clips at the face's top edge) it pops in place
+    /// instead, growing from that top edge. Not under Reduce Motion, where the smile alone says it.
+    func hop(hops: Int, joys: Int = 0, size: CGFloat, roomAbove: Bool = true) -> some View {
+        modifier(Hop(hops: hops, joys: joys, size: size, lift: roomAbove))
+    }
+}
+
+private struct Hop: ViewModifier {
+    let hops: Int, joys: Int, size: CGFloat, lift: Bool
+    @Environment(\.accessibilityReduceMotion) private var still
+
+    func body(content: Content) -> some View {
+        content
+            .keyframeAnimator(initialValue: CGFloat(0), trigger: still ? 0 : hops) { v, k in beat(v, k) } keyframes: { _ in bounce(0.1) }
+            .keyframeAnimator(initialValue: CGFloat(0), trigger: still ? 0 : joys) { v, k in beat(v, k) } keyframes: { _ in bounce(0.15) }
+    }
+
+    /// `k` is the share of the face's size: that far up, or that much bigger at 60% of it.
+    private func beat(_ v: some View, _ k: CGFloat) -> some View {
+        v.offset(y: lift ? -k * size : 0).scaleEffect(lift ? 1 : 1 + k * 0.6, anchor: .top)
+    }
+
+    private func bounce(_ h: CGFloat) -> KeyframeTrack<CGFloat, CGFloat, some KeyframeTrackContent<CGFloat>> {
+        KeyframeTrack {
+            CubicKeyframe(h, duration: 0.18)
+            CubicKeyframe(0, duration: 0.16)
+            CubicKeyframe(h * 0.25, duration: 0.1)
+            CubicKeyframe(0, duration: 0.11)
+        }
+    }
 }
 
 /// A group's picture: faces blobbed in a loose cluster, never a row, Otto largest and on top.
