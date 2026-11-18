@@ -732,11 +732,36 @@ enum PipSheet: Identifiable, Hashable {
         return nil
     }
 
+    /// The drawer's search, done here first: a conversation's name, last line and most recent messages, any case
+    /// or accents. The Mac's search (older history) adds what it finds; it can't be the only one, as it answers
+    /// 400 to every query while Otto's thread holds a message without text (a photo), and then nothing ever matched.
     func search(_ q: String) async -> [ConversationSearchResult] {
+        let recent = { [store, threads] (id: String) -> [ConversationMessage] in
+            let ms = id == "app" ? store?.messages ?? [] : threads[id]?.messages ?? []
+            return ms.suffix(50).filter { !$0.text.isEmpty && $0.from != .terminal }.map {
+                ConversationMessage(id: $0.wireID, conversation_id: id, sender: $0.from == .me ? "user" : "otto", kind: "text", text: $0.text, ts: $0.date.ISO8601Format())
+            }
+        }
+        let here = Self.filter(q, rows: (row("app").map { [$0] } ?? []) + list, recent: recent)
         struct Page: Decodable { let results: [ConversationSearchResult] }
         guard let r = await request("GET", "app/conversations/search", query: [URLQueryItem(name: "q", value: String(q.prefix(200)))]), r.status == 200,
-              let page = try? JSONDecoder().decode(Page.self, from: r.data) else { return [] }
-        return page.results
+              let page = try? JSONDecoder().decode(Page.self, from: r.data) else { return here }
+        let have = Set(here.map(\.id))
+        return here + page.results.filter { !have.contains($0.id) }
+    }
+
+    /// What search compares: no case, accents or width, so "alfama" finds "Alfáma" and "CAFE" finds "café".
+    nonisolated static func fold(_ s: String) -> String { s.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil) }
+
+    /// The rows, in the order given, whose name, last line or recent messages hold `q`; each with the messages that do.
+    nonisolated static func filter(_ q: String, rows: [ConversationRow], recent: (String) -> [ConversationMessage]) -> [ConversationSearchResult] {
+        let needle = fold(q.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !needle.isEmpty else { return [] }
+        return rows.compactMap { r in
+            let hits = recent(r.id).filter { fold($0.text).contains(needle) }
+            guard !hits.isEmpty || fold(r.name).contains(needle) || r.lastMessage.map({ fold($0.text).contains(needle) }) == true else { return nil }
+            return ConversationSearchResult(conversation: r, matches: hits)
+        }
     }
 }
 
@@ -759,3 +784,36 @@ extension OttoStore {
         for i in messages.indices where messages[i].groupLink?.id == g.id { messages[i].groupLink = g }
     }
 }
+
+#if DEBUG
+/// `-searchCheck`: the drawer's search filter, printed as SEARCHCHECK PASS or FAIL lines.
+enum PipSearchCheck {
+    static func run() {
+        func row(_ id: String, _ name: String, last: String? = nil) -> ConversationRow {
+            ConversationRow(id: id, kind: "pip", name: name, members: [], lastMessage: last.map { ConversationPreview(sender: "otto", text: $0, ts: "2026-11-17T09:00:00Z") },
+                            unread: 0, memberStates: [], activity: [])
+        }
+        func msg(_ id: String, _ text: String) -> ConversationMessage { ConversationMessage(id: "m-" + text, conversation_id: id, sender: "otto", kind: "text", text: text, ts: "2026-11-17T09:00:00Z") }
+        let rows = [row("lisbon", "Lisbon in March"), row("cafe", "Linden Café"), row("code", "Code", last: "Merge or hold PR #214?"), row("quiet", "Inbox")]
+        let recent: (String) -> [ConversationMessage] = { id in
+            id == "lisbon" ? [msg(id, "Three places in Alfáma under €120"), msg(id, "Morning flights are cheapest")] : []
+        }
+        func ids(_ q: String) -> [String] { PipStore.filter(q, rows: rows, recent: recent).map(\.id) }
+        let cases: [(String, [String], String)] = [
+            ("LISBON", ["lisbon"], "a title, any case"),
+            ("alfama", ["lisbon"], "a recent message, without its accent"),
+            ("cafe", ["cafe"], "a title's accent ignored"),
+            ("pr #214", ["code"], "the row's last line"),
+            ("  morning ", ["lisbon"], "spaces around the query"),
+            ("unicorno", [], "nothing matches"),
+            ("", [], "an empty query lists nothing"),
+        ]
+        for (q, want, what) in cases {
+            let got = ids(q)
+            print("SEARCHCHECK \(got == want ? "PASS" : "FAIL") \(what): \"\(q)\" -> \(got)")
+        }
+        let hit = PipStore.filter("alfama", rows: rows, recent: recent).first?.matches.map(\.text) ?? []
+        print("SEARCHCHECK \(hit == ["Three places in Alfáma under €120"] ? "PASS" : "FAIL") the matching message comes back for the row's preview: \(hit)")
+    }
+}
+#endif

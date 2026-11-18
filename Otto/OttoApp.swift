@@ -841,6 +841,8 @@ final class OttoStore {
         if ProcessInfo.processInfo.arguments.contains("-spinnerCheck") { OttoThinkingSpinnerCheck.run() }
         // `-approvalCheck`: the approval clock's rounding, and the forget message's name filter.
         if ProcessInfo.processInfo.arguments.contains("-approvalCheck") { ApprovalCheck.run() }
+        // `-searchCheck`: the drawer's search filter (Pips.swift).
+        if ProcessInfo.processInfo.arguments.contains("-searchCheck") { PipSearchCheck.run() }
         #endif
         // `-thinking`: Otto stuck mid-reply, for the typing avatar.
         if ProcessInfo.processInfo.arguments.contains("-thinking") { ottoTyping = true; ottoStatus = UserDefaults.standard.string(forKey: "thinkingStatus") ?? "Reading ChatView.swift"
