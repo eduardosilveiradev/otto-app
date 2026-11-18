@@ -1799,11 +1799,12 @@ private struct Row: View {
                     if mine, message.failed == true {
                         Image(systemName: "exclamationmark.circle.fill").font(.system(size: 20)).foregroundStyle(.red)
                             .offset(x: 30).accessibilityHidden(true)
-                            .transition(still ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
+                            .transition(still ? .opacity.animation(.easeOut(duration: 0.2)) : .scale(scale: 0.4).combined(with: .opacity))
                     }
                 }
                 .padding(.trailing, mine && message.failed == true ? 30 : 0)
-                .animation(.spring(duration: 0.35, bounce: 0), value: message.failed)
+                // Under Reduce Motion the bubble steps aside at once and only the mark fades in.
+                .animation(still ? nil : .spring(duration: 0.35, bounce: 0), value: message.failed)
             }
             if let g = message.groupLink { GroupLinkBubble(group: g) { store.pips.open(g.id) } }
             if !mine, let card = message.card, !card.shown.isEmpty {

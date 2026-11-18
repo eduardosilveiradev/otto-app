@@ -163,7 +163,7 @@ private struct CardsPane: View {
         let queue = run.queue ?? Array(cards.indices)
         VStack(spacing: 20) {
             Text("\(run.known.count) of \(cards.count) known").font(.footnote).foregroundStyle(.secondary).monospacedDigit()
-                .contentTransition(.numericText(value: Double(run.known.count)))
+                .contentTransition(still ? .opacity : .numericText(value: Double(run.known.count)))
             if let i = queue.first {
                 let c = cards[i]
                 Text(run.flipped ? c.back : c.front)

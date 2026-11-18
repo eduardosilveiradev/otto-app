@@ -557,7 +557,8 @@ final class FaceUIView: UIView {
 
     @objc private func restart() {
         guard let shown else { return }
-        for l in [driftLayer, wiggleLayer, bodyLayer] { l.removeAllAnimations() }
+        // Not the hop: a reply lands as the face goes from working to rest, often in a later update than the hop's.
+        driftLayer.removeAllAnimations(); bodyLayer.removeAllAnimations(); wiggleLayer.removeAnimation(forKey: "wiggle")
         animateBlink()
         let drowsy = LiveFaceLayer.drowsy && shown.look.state == .rest
         if let l = liveLayer {
