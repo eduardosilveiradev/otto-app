@@ -63,6 +63,9 @@ struct PipRoot: View {
                 // card's own x, so it follows the finger and rides the card's spring. Scale and opacity only, to
                 // stay cheap; no scale under Reduce Motion.
                 .scaleEffect(still ? 1 : 0.94 + 0.06 * progress, anchor: .leading)
+                // Down to the screen's foot from outside the scale: inside it, the search bar couldn't leave the
+                // home indicator's strip until the scale reached 1, and dropped 34pt the moment the drawer landed.
+                .ignoresSafeArea(.container, edges: .bottom)
                 .opacity(0.6 + 0.4 * progress)
                 .accessibilityElement(children: .contain)
                 .accessibilityAddTraits(.isModal)
@@ -279,6 +282,9 @@ struct ConversationsView: View {
     @State private var query = ""
     @State private var results: [ConversationSearchResult]?
     @FocusState private var searching: Bool
+    /// The keyboard is up under the search bar: taller than the home indicator's strip, which mid-open the drawer's scale
+    /// still reports here.
+    @State private var keyboard = false
     private enum New: Identifiable { case pip, group; var id: Self { self } }
     @State private var new: New?
     @State private var madeGroup: String?
@@ -405,10 +411,12 @@ struct ConversationsView: View {
             .frame(height: 48)
             .glassEffect(.regular.interactive(), in: .capsule)
             .padding(.horizontal, searching ? 15 : 28)
-            .padding(.bottom, searching ? 8 : 28)
+            // Closer only over a keyboard: focused with none (a hardware one), it stays where it was.
+            .padding(.bottom, keyboard ? 8 : 28)
             .animation(.snappy, value: searching)
         }
         .ignoresSafeArea(.container, edges: .bottom)
+        .onGeometryChange(for: Bool.self) { $0.safeAreaInsets.bottom > 100 } action: { keyboard = $0 }
     }
 }
 
