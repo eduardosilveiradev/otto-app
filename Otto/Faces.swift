@@ -604,7 +604,7 @@ final class FaceUIView: UIView {
     func beat(hops: Int, joys: Int) {
         defer { beats = (hops, joys) }
         guard let last = beats else { return }
-        if joys != last.joys { liveLayer?.cheer(); hop(0.11) } else if hops != last.hops { hop(0.06) }
+        if joys != last.joys { liveLayer?.cheer(); hop(0.15) } else if hops != last.hops { hop(0.1) }
     }
 
     /// Up off where it sits and down, a smaller second bounce after, like something light landing. On top of
