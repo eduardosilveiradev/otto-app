@@ -59,7 +59,7 @@ struct RecordedChip: View {
             .padding(10)
             .background(Color.chip, in: .rect(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityLabel("\(card.heading): \(card.title)")
         .sheet(isPresented: $open) {
             NavigationStack {
