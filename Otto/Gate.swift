@@ -443,7 +443,7 @@ struct BoardingPass: View {
             .shadow(color: .black.opacity(action == .show ? 0 : (scheme == .dark ? 0.4 : 0.2)), radius: 1, y: 1)
             .animation(.spring(response: 0.3, dampingFraction: 0.85), value: action)
         }
-        .buttonStyle(PressStyle())
+        .buttonStyle(.press)
         .accessibilityLabel(action == .show ? "Show boarding pass" : action == .adding ? "Adding boarding pass" : "Add boarding pass from Photos")
     }
 
@@ -518,14 +518,6 @@ private struct Spinner: View {
             .opacity(spin && still ? 0.35 : 1)
             .animation(still ? .easeInOut(duration: 0.8).repeatForever() : .linear(duration: 0.8).repeatForever(autoreverses: false), value: spin)
             .onAppear { spin = true }
-    }
-}
-
-private struct PressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(configuration.isPressed ? nil : .spring(response: 0.15), value: configuration.isPressed)
     }
 }
 

@@ -114,6 +114,9 @@ struct ChatView: View {
     private func sentFromHere(_ old: Message.ID?, _ new: Message.ID?) -> Bool { thread.messages.last { $0.id == new }?.pending == true }
     /// The message a tapped quote jumped to, lit up for a moment.
     @State private var flashed: Message.ID?
+    /// Beats for the header's face: a reply landed, a job merged (see Beats).
+    @State private var hops = 0
+    @State private var joys = 0
     /// A row is being swiped to reply: the thread holds still under it, like Messages.
     @State private var swiping = false
     /// At the very bottom (within 4pt), and whether the reader was when the swipe began.
@@ -298,6 +301,7 @@ struct ChatView: View {
             await live.seen(date)
         }
         .modifier(ThreadSeen(pips: store.pips, thread: thread) { await jumpToMatch() })
+        .modifier(Beats(thread: thread, jobs: store.jobs, hops: $hops, joys: $joys))
         .task(id: store.connected) { if thread.isOtto { await gate.run(store.backend) } }
         .sheet(isPresented: $showGate) { GateSheet(watch: gate) }
         // `-openGate`: open the boarding pass as soon as there is one, for screenshots.
@@ -326,8 +330,10 @@ struct ChatView: View {
         .overlay(alignment: .bottomTrailing) {
             if scrolledUp && !showingResults {
                 Button { move { $0.scrollTo(edge: .bottom) } } label: {
+                    // Nods down when something new lands below you.
                     Image(systemName: "chevron.down")
                         .font(.system(size: 16, weight: .semibold))
+                        .symbolEffect(.bounce.down, value: still ? 0 : messages.count)
                         .frame(width: 40, height: 40)
                         .glassEffect(.regular.interactive(), in: .circle)
                         .padding(2).contentShape(.rect).padding(-2)   // 44pt to tap, drawn at 40
@@ -468,7 +474,7 @@ struct ChatView: View {
                     // Right over the orb: what Otto is doing in Chrome, while it does it.
                     if let browser {
                         Button { browserOpen = true } label: { BrowserTileView(browser: browser) }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.press)
                             .accessibilityLabel(browser.tile.caption)
                             .accessibilityHint("Shows the page full screen")
                             .padding(.top, 10).id("browser")
@@ -721,27 +727,32 @@ struct ChatView: View {
     }
 
     /// With only Otto, today's picture. With pips, everyone is a solid, Otto included.
+    /// The face and name give a little under the finger before the card opens (Press).
     @ViewBuilder private var title: some View {
         if let row, row.isGroup {
             Button { store.pips.sheet = .group(row.id) } label: {
                 HeaderTitle(name: row.name, status: offline) { GroupFace(id: row.id, members: row.pips.map(\.look), otto: row.otto?.look, size: 68) }
             }
+            .buttonStyle(.press)
             .liftedTitle()
         } else if let row, row.kind == "pip", let pip = row.pips.first {
             Button { store.pips.sheet = .pip(pip.id) } label: {
-                HeaderTitle(name: row.name, status: offline) { FaceView(look: pip.look, size: 68, live: true).frame(width: 68, height: 68) }
+                HeaderTitle(name: row.name, status: offline) { FaceView(look: pip.look, size: 68, live: true, hops: hops, joys: joys).frame(width: 68, height: 68) }
             }
+            .buttonStyle(.press)
             .liftedTitle()
         } else if pipsOn {
             Button { showDetails = true } label: {
-                HeaderTitle(name: "Otto", status: offline) { FaceView(look: ottoLook, size: 68, live: true).frame(width: 68, height: 68) }
+                HeaderTitle(name: "Otto", status: offline) { FaceView(look: ottoLook, size: 68, live: true, hops: hops, joys: joys).frame(width: 68, height: 68) }
             }
+            .buttonStyle(.press)
             .liftedTitle()
             .matchedTransitionSource(id: "card", in: card)
         } else {
             Button { showDetails = true } label: {
-                HeaderTitle(name: "Otto", status: offline) { OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep) }
+                HeaderTitle(name: "Otto", status: offline) { OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, hops: hops, joys: joys) }
             }
+            .buttonStyle(.press)
             .matchedTransitionSource(id: "card", in: card)
         }
     }
@@ -770,9 +781,14 @@ struct ChatView: View {
                     }
                     .tint(.primary)
                     // Unread somewhere other than here: the drawer rows' own dot, on the way to them.
+                    // It grows out of the button's corner when news comes in elsewhere, and shrinks back when read.
                     .overlay(alignment: .topTrailing) {
-                        if unreadElsewhere { Circle().fill(Color.ottoInk).frame(width: 8, height: 8).offset(x: -3, y: 3).allowsHitTesting(false) }
+                        if unreadElsewhere {
+                            Circle().fill(Color.ottoInk).frame(width: 8, height: 8).offset(x: -3, y: 3).allowsHitTesting(false)
+                                .transition(still ? .opacity : .scale(scale: 0.3, anchor: .topTrailing).combined(with: .opacity))
+                        }
                     }
+                    .animation(.spring(duration: 0.3, bounce: 0), value: unreadElsewhere)
                     .accessibilityLabel("Conversations")
                     .accessibilityValue(unreadElsewhere ? "Unread messages" : "")
                 }
@@ -980,6 +996,7 @@ struct Composer: View {
                                     .background(Color(red: 0.525, green: 0.553, blue: 0.592), in: .circle)
                                     .padding(6).contentShape(.rect).padding(-6)   // 44pt to tap, laid out at 32
                             }
+                            .buttonStyle(.press)
                             .padding(4)   // all round: a 40pt row, so one line centres it rather than the field
                             .accessibilityLabel("Send")
                             .transition(still ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
@@ -1351,7 +1368,7 @@ private struct CallLine: View {
                 // 44pt to tap around a line of small type.
                 .padding(.vertical, 15).contentShape(.rect).padding(.vertical, -15)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .disabled(record.lines.isEmpty)
         .padding(.top, afterStamp ? 2 : 10).padding(.bottom, 6)
         .accessibilityLabel("Call with Otto, \(record.length)\(record.dropped == true ? ", dropped" : "")")
@@ -1592,8 +1609,8 @@ private struct Row: View {
         }
     }
 
-    /// Yours, from the menu, a double-tap or VoiceOver. One tap of haptic here, and none when
-    /// Otto's lands, the way Messages only buzzes for what you did.
+    /// Yours, from the menu, a double-tap or VoiceOver. One tap of haptic here; Otto's reply landing
+    /// has its own softer one, once per reply, on the thread (Beats).
     private func settle() {
         if sideways == true { onSwiping(false) }
         sideways = nil
@@ -1693,7 +1710,7 @@ private struct Row: View {
                                     in: .rect(cornerRadius: 14, style: .continuous))
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 // Not `disabled`, which would dim the stub below a quote's own grey.
                 .allowsHitTesting(quote != nil)
                 .accessibilityRemoveTraits(quote == nil ? .isButton : [])
@@ -1777,13 +1794,16 @@ private struct Row: View {
                     Button("OK", role: .cancel) {}
                 } message: { Text($0) }
                 // Messages' mark for a send that didn't make it, beside the bubble; the line under it has the retry.
+                // It grows in beside the bubble as the bubble steps aside for it (a fade under Reduce Motion).
                 .overlay(alignment: .trailing) {
                     if mine, message.failed == true {
                         Image(systemName: "exclamationmark.circle.fill").font(.system(size: 20)).foregroundStyle(.red)
                             .offset(x: 30).accessibilityHidden(true)
+                            .transition(still ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
                     }
                 }
                 .padding(.trailing, mine && message.failed == true ? 30 : 0)
+                .animation(.spring(duration: 0.35, bounce: 0), value: message.failed)
             }
             if let g = message.groupLink { GroupLinkBubble(group: g) { store.pips.open(g.id) } }
             if !mine, let card = message.card, !card.shown.isEmpty {
@@ -1941,8 +1961,37 @@ private struct Row: View {
         // Gone mid-swipe (paged out, replaced): don't leave the thread unable to scroll.
         .onDisappear { if sideways == true { onSwiping(false) } }
         .sensoryFeedback(.impact(weight: .light), trigger: flicked)
+        // A send that didn't make it, felt as it's marked (history that loads already failed isn't news).
+        .sensoryFeedback(.error, trigger: message.failed == true) { _, new in new }
         .sensoryFeedback(.impact(weight: .light), trigger: swipe >= Self.replyAt) { _, new in new }
         .sensoryFeedback(.impact(weight: .light), trigger: reacted)
+    }
+}
+
+/// A reply landing and a job merging, as beats for the header's face and a tap you feel. A reply buzzes once,
+/// softly; a catch-up that lands several at once, the first history, or a second bubble right behind the
+/// first are no news.
+private struct Beats: ViewModifier {
+    let thread: any ChatThread
+    let jobs: JobStore
+    @Binding var hops: Int
+    @Binding var joys: Int
+    @State private var lastHop = Date.distantPast
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: thread.messages.count) { old, new in
+                guard thread.animated, new == old + 1, thread.messages.last?.from == .otto,
+                      Date.now.timeIntervalSince(lastHop) > 0.8 else { return }
+                lastHop = .now
+                hops += 1
+            }
+            // Only a job seen before as something else: the first list, full of old merges, is no news either.
+            .onChange(of: jobs.byID) { old, new in
+                if new.contains(where: { id, job in job.state == "merged" && old[id].map { $0.state != "merged" } == true }) { joys += 1 }
+            }
+            .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.6), trigger: hops)
+            .sensoryFeedback(.success, trigger: joys)
     }
 }
 
@@ -2186,7 +2235,7 @@ private struct VoiceRow: View {
                     .padding(9).contentShape(.rect).padding(-9)
             }
             .accessibilityLabel(playing ? "Pause voice message" : failed ? "Couldn’t play. Try again" : held ? "Resume voice message" : "Play voice message")
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .disabled(waiting)
             // Reduce Motion: the waiting bar holds still at half strength instead of breathing.
             TimelineView(.animation(paused: !playing && (!waiting || still))) { tl in
@@ -2232,7 +2281,7 @@ private struct VoiceRow: View {
                         Button { player.nextRate() } label: {
                             speed.padding(.vertical, 10).padding(.horizontal, 4).contentShape(.rect).padding(.vertical, -10).padding(.horizontal, -4)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                         .accessibilityLabel("Playback speed")
                         .accessibilityValue("\(player.rate.formatted()) times")
                         .transition(.opacity)
@@ -2989,8 +3038,10 @@ struct TodoPill: View {
         VStack(alignment: .leading, spacing: 8) {
             Button { withAnimation(.snappy(duration: 0.22)) { open.toggle() } } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "checklist")
+                    // The list nods and the number rolls when a to-do comes or goes.
+                    Image(systemName: "checklist").symbolEffect(.bounce, value: still ? 0 : items.count)
                     Text(label).monospacedDigit()
+                        .contentTransition(still ? .opacity : .numericText(value: Double(items.count)))
                     Image(systemName: "chevron.down")
                         .font(size: 10, weight: .semibold, relativeTo: .caption2)
                         .rotationEffect(.degrees(open && !still ? 180 : 0))
@@ -3018,7 +3069,7 @@ struct TodoPill: View {
             }
         }
         .padding(.horizontal, 12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 17, style: .continuous))
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 17, style: .continuous))
         .sensoryFeedback(.selection, trigger: open)
     }
 }
@@ -3040,6 +3091,7 @@ private struct EmptyChat: View {
     var body: some View {
         VStack(spacing: 10) {
             Text(title).font(.title2.weight(.semibold))
+                .contentTransition(.opacity)
             Text(line)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -3047,7 +3099,9 @@ private struct EmptyChat: View {
                 .frame(maxWidth: 260)
                 .contentTransition(.opacity)
         }
+        // Getting your conversation → Say hi (or Waiting for your Mac): the words cross-fade, nothing moves.
         .animation(.easeInOut, value: asleep)
+        .animation(.easeInOut, value: loading)
         .allowsHitTesting(false)
     }
 }
