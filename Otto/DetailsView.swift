@@ -51,7 +51,7 @@ struct DetailsView: View {
                 Group {
                 Section {
                     VStack(spacing: 8) {
-                        OttoAvatar(size: 78, asleep: store.asleep)
+                        OttoAvatar(size: 78, asleep: store.asleep, pokeable: true)   // a tap: a hop and a smile, nothing else
                         Text("Otto").font(.title2.weight(.semibold))
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in

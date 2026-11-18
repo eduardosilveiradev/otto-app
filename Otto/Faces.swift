@@ -231,8 +231,31 @@ enum FaceCache {
     /// Fewer samples in motion; a slower GPU trades edges for frame rate. Full quality once settled.
     private var motionSamples: Int32 = 2
     private var blinkTimer: Task<Void, Never>?
+    /// The way back from a look that doesn't last: a glance, a beat of joy.
+    private var back: Task<Void, Never>?
     private static let tweenTime: CFTimeInterval = 0.34, blinkTime: CFTimeInterval = 0.24
     var calm = false
+    /// Idle life (blinks, glances): off under Reduce Motion and Low Power Mode.
+    var lively = true
+    /// Whether anyone can see it right now (the app in front, nothing fading it out); idle life waits for that.
+    var seen: () -> Bool = { true }
+    /// Quiet hours: the lids rest this far down (0–1) between blinks.
+    var drowse: Float = 0 { didSet { if drowse != oldValue { draw() } } }
+
+    /// Quiet hours, when a resting face is drowsy. ponytail: a fixed 23:00–07:00 local window; the server's own
+    /// (access.json `quietHours`) isn't on the app's wire, so read it from there once it is.
+    static var drowsy: Bool {
+        #if DEBUG
+        if let forced = UserDefaults.standard.object(forKey: "drowsy") as? Bool { return forced }   // `-drowsy YES|NO`
+        if CommandLine.arguments.contains("-wipeDefaults") { return false }   // shoot.sh: never the clock
+        #endif
+        let h = Calendar.current.component(.hour, from: .now)
+        return h >= 23 || h < 7
+    }
+    #if DEBUG
+    /// `-faceBeat glance|cheer`: that, every idle beat, for recordings.
+    private static let beat = UserDefaults.standard.string(forKey: "faceBeat")
+    #endif
 
     override init() { super.init(); setUp() }
     override init(layer: Any) { super.init(layer: layer); setUp() }
@@ -250,7 +273,13 @@ enum FaceCache {
         lastLook = look
         let target = Pose(u: FaceUniforms(look))
         guard to != nil else { from = target; to = target; draw(); return }
-        var carried = pose(at: CACurrentMediaTime()).0   // carry on from what's on screen
+        back?.cancel()   // a real change of state wins over a passing look
+        tween(to: target)
+    }
+
+    /// From what's on screen now to `target`, so an interrupted move carries on rather than jumping.
+    private func tween(to target: Pose) {
+        var carried = pose(at: CACurrentMediaTime()).0
         carried.u.shape = carried.u.morph > 0.5 ? carried.u.shape2 : carried.u.shape
         from = carried
         to = target
@@ -259,19 +288,57 @@ enum FaceCache {
         if calm { draw() }
     }
 
-    /// Draws one settled frame, and keeps a blink coming while it's on screen.
+    /// A look held for `hold` seconds, then back to the face's own.
+    private func glimpse(_ u: FaceUniforms, hold: Double) {
+        tween(to: Pose(u: u))
+        back?.cancel()
+        back = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(hold))
+            guard !Task.isCancelled, let self, let look = self.lastLook else { return }
+            self.tween(to: Pose(u: FaceUniforms(look)))
+        }
+    }
+
+    /// Eyes and head turn a little to one side, as if something caught its eye, and come back.
+    func glance() {
+        guard let look = lastLook, look.state == .rest, to?.u.arc == 0 else { return }
+        var u = FaceUniforms(look)
+        let side: Float = Bool.random() ? 1 : -1
+        u.eo += SIMD2(0.06 * side, .random(in: -0.02...0.03))
+        u.pose += SIMD3(.random(in: -0.04...0.04), 0.14 * side, 0)
+        glimpse(u, hold: .random(in: 0.8...1.4))
+    }
+
+    /// A beat of joy: the eyes close into smiles and the chin lifts, then it's itself again.
+    func cheer() {
+        guard let look = lastLook, look.state != .asleep, look.state != .failed else { return }
+        var u = FaceUniforms(look)
+        let happy = FaceUniforms(look.with(.gpt))
+        u.e0 = happy.e0; u.e1 = happy.e1; u.er = happy.er; u.arc = happy.arc
+        u.pose.x -= 0.06
+        glimpse(u, hold: 0.9)
+    }
+
+    /// Draws one settled frame, and keeps a blink (now and then a glance) coming while it's on screen.
     func onScreen(_ on: Bool) {
         blinkTimer?.cancel()
         link?.invalidate(); link = nil
-        guard on else { return }
+        guard on else { back?.cancel(); return }
         draw()
-        guard !calm else { return }
+        guard lively else { return }
         blinkTimer = Task { [weak self] in
+            var n = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(Double.random(in: 2.6...5.4)))
-                guard !Task.isCancelled, let self, self.lastLook?.state != .needs, self.to?.u.arc == 0 else { continue }
-                self.blinkAt = CACurrentMediaTime()
-                self.run()
+                let drowsy = (self?.drowse ?? 0) > 0
+                try? await Task.sleep(for: .seconds(Double.random(in: 2.6...5.4) * (drowsy ? 1.6 : 1)))
+                guard let self else { return }
+                guard !Task.isCancelled, self.seen(), self.lastLook?.state != .needs, self.to?.u.arc == 0 else { continue }
+                n += 1
+                #if DEBUG
+                if let beat = Self.beat { if beat == "cheer" { self.cheer() } else { self.glance() }; continue }
+                #endif
+                // Mostly a blink; about one beat in six a look to one side, never while drowsy.
+                if !drowsy, n % 3 == 0, Bool.random() { self.glance() } else { self.blinkAt = CACurrentMediaTime(); self.run() }
             }
         }
     }
@@ -323,7 +390,7 @@ enum FaceCache {
             v.bend = !isArc ? 1 : out ? from.u.bend * (1 - q) : q
         }
         let blinking = blink >= 0 && blink < 1
-        v.b = max(close, blinking && v.arc == 0 ? sin(.pi * blink) : 0)
+        v.b = max(close, v.arc == 0 ? max(drowse, blinking ? sin(.pi * blink) : 0) : 0)
         return (Pose(u: v, close: close), p < 1 || blinking)
     }
 
@@ -380,11 +447,22 @@ final class FaceUIView: UIView {
         NotificationCenter.default.addObserver(self, selector: #selector(restart), name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(restart), name: UIApplication.willEnterForegroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(retryBlank), name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(powerChanged), name: .NSProcessInfoPowerStateDidChange, object: nil)
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (v: FaceUIView, _: UITraitCollection) in v.buildBadge(); v.paint() }
     }
     required init?(coder: NSCoder) { fatalError() }
-
     private var calm: Bool { UIAccessibility.isReduceMotionEnabled }
+    /// Idle life (breathing, blinks, glances, drift) on top of what says its state; off in Low Power Mode too.
+    private var lively: Bool { !calm && !ProcessInfo.processInfo.isLowPowerModeEnabled }
+    /// The hops and joys asked for so far: a change is a beat. Nil until the first, which is only where it starts.
+    private var beats: (hops: Int, joys: Int)?
+    /// In front and not faded out (the header's face under the contact card is there at no opacity).
+    private var visible: Bool {
+        guard window != nil, UIApplication.shared.applicationState == .active else { return false }
+        var v: UIView? = self
+        while let u = v { if u.isHidden || u.alpha < 0.01 { return false }; v = u.superview }
+        return true
+    }
     private var scale: CGFloat { window?.screen.scale ?? traitCollection.displayScale }
 
     func configure(look: FaceLook, size: CGFloat, live: Bool, drift: Bool, ringed: Bool) {
@@ -413,6 +491,8 @@ final class FaceUIView: UIView {
         }()
         imageLayer.isHidden = true
         l.calm = calm
+        l.lively = lively
+        l.seen = { [weak self] in self?.visible ?? false }
         l.frame = CGRect(x: 0, y: 0, width: size, height: size)
         l.contentsScale = scale
         l.drawableSize = CGSize(width: size * scale, height: size * scale)
@@ -426,6 +506,9 @@ final class FaceUIView: UIView {
         liveLayer = nil
         imageLayer.isHidden = false
     }
+
+    /// Low Power Mode on or off; posted on any thread.
+    @objc nonisolated private func powerChanged() { Task { @MainActor in self.restart() } }
 
     /// A face asked for while the app was in the background couldn't be drawn; now it can.
     @objc private func retryBlank() {
@@ -470,9 +553,20 @@ final class FaceUIView: UIView {
         guard let shown else { return }
         for l in [driftLayer, wiggleLayer, bodyLayer] { l.removeAllAnimations() }
         animateBlink()
+        let drowsy = LiveFaceLayer.drowsy && shown.look.state == .rest
+        if let l = liveLayer {
+            l.calm = calm
+            l.drowse = drowsy ? 0.32 : 0   // a look, not motion: under Reduce Motion too
+            if l.lively != lively { l.lively = lively; l.onScreen(window != nil) }
+        }
         guard !calm else { return }
-        if shown.drift { driftLayer.add(alternating("transform.translation", to: CGSize(width: 1.5, height: -2), 5, phase), forKey: "drift") }
+        if shown.drift && lively { driftLayer.add(alternating("transform.translation", to: CGSize(width: 1.5, height: -2), 5, phase), forKey: "drift") }
         switch shown.look.state {
+        // A face big enough to be the one you look at breathes while it rests, slower when drowsy.
+        case .rest where lively && shown.size >= 56:
+            let a = CABasicAnimation(keyPath: "transform.scale")
+            a.toValue = 1.016; a.duration = drowsy ? 2.6 : 1.9; a.autoreverses = true
+            bodyLayer.add(looped(a, phase), forKey: "breathe")
         case .working: bodyLayer.add(alternating("transform.translation.y", to: -shown.size * 0.03, 0.7, phase), forKey: "bob")
         case .asleep:
             let a = CABasicAnimation(keyPath: "transform.scale")
@@ -491,13 +585,34 @@ final class FaceUIView: UIView {
 
     private func animateBlink() {
         imageLayer.removeAnimation(forKey: "blink")
-        guard let f = frames, f.blink.count == 3, !calm, shown?.live == false else { return }
+        guard let f = frames, f.blink.count == 3, lively, shown?.live == false else { return }
         let a = CAKeyframeAnimation(keyPath: "contents")
         a.values = [f.rest, f.blink[0], f.blink[1], f.blink[2], f.blink[1], f.blink[0], f.rest]
         a.keyTimes = [0, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 1]
         a.calculationMode = .discrete
         a.duration = 5.2
         imageLayer.add(looped(a, phase), forKey: "blink")
+    }
+
+    /// A change in what's asked for is a beat: joy (a smile and a big hop) over a hop (a reply landed).
+    func beat(hops: Int, joys: Int) {
+        defer { beats = (hops, joys) }
+        guard let last = beats else { return }
+        if joys != last.joys { liveLayer?.cheer(); hop(0.11) } else if hops != last.hops { hop(0.06) }
+    }
+
+    /// Up off where it sits and down, a smaller second bounce after, like something light landing. On top of
+    /// whatever else it's doing, and over in about half a second. Not under Reduce Motion: the smile alone says it.
+    private func hop(_ height: CGFloat) {
+        guard !calm, let size = shown?.size else { return }
+        let a = CAKeyframeAnimation(keyPath: "transform.translation.y")
+        a.values = [0, -size * height, 0, -size * height * 0.25, 0]
+        a.keyTimes = [0, 0.32, 0.62, 0.8, 1]
+        let out = CAMediaTimingFunction(name: .easeOut), down = CAMediaTimingFunction(name: .easeIn)
+        a.timingFunctions = [out, down, out, down]
+        a.duration = 0.55
+        a.isAdditive = true
+        wiggleLayer.add(a, forKey: "hop")
     }
 
     private func looped<A: CAAnimation>(_ a: A, _ offset: Double) -> A {
@@ -626,11 +741,15 @@ struct FaceView: UIViewRepresentable {
     var drift = false
     var ringed = false
     var ring: UIColor = .systemBackground
+    /// Counters: bump one for a hop (a reply landed) or a beat of joy (a job merged, a poke).
+    var hops = 0
+    var joys = 0
 
     func makeUIView(context: Context) -> FaceUIView { FaceUIView() }
     func updateUIView(_ v: FaceUIView, context: Context) {
         v.ring = ring
         v.configure(look: look, size: size, live: live, drift: drift, ringed: ringed)
+        v.beat(hops: hops, joys: joys)   // after: a new look restarts the loops, and the hop goes on top
     }
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: FaceUIView, context: Context) -> CGSize? { CGSize(width: size, height: size) }
 }
