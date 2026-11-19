@@ -136,16 +136,27 @@ final class JobStore {
 /// Where a job stands, at the right of its card's top line.
 struct JobStateMark: View {
     let job: CodeJob
+    @Environment(\.accessibilityReduceMotion) private var still
     var body: some View {
-        if job.needsYou { NeedsMark() } else {
-            HStack(spacing: 5) {
-                if job.state == "running" { ProgressView().controlSize(.mini) }
-                else if job.state == "done" || job.state == "merged" { Image(systemName: "checkmark").font(size: 11, weight: .semibold, relativeTo: .caption) }
-                Text(job.stateLabel).font(size: 13, relativeTo: .footnote)
+        Group {
+            if job.needsYou { NeedsMark().transition(.opacity) } else {
+                HStack(spacing: 5) {
+                    if job.state == "running" { ProgressView().controlSize(.mini).transition(.opacity) }
+                    // Done or merged: the check draws itself in as the word changes.
+                    else if job.state == "done" || job.state == "merged" {
+                        Image(systemName: "checkmark").font(size: 11, weight: .semibold, relativeTo: .caption)
+                            .transition(still ? AnyTransition.opacity : AnyTransition(.symbolEffect(.drawOn)))
+                    }
+                    Text(job.stateLabel).font(size: 13, relativeTo: .footnote)
+                        .contentTransition(.interpolate)
+                }
+                .foregroundStyle(job.state == "failed" ? Color.redInk : Color.secondary)
+                .accessibilityElement(children: .combine)
             }
-            .foregroundStyle(job.state == "failed" ? Color.redInk : Color.secondary)
-            .accessibilityElement(children: .combine)
         }
+        // A job moves on while you watch (running, up for review, merged): the mark changes in place, no bounce.
+        .animation(.spring(duration: 0.35, bounce: 0), value: job.state)
+        .animation(.spring(duration: 0.35, bounce: 0), value: job.needsYou)
     }
 }
 
@@ -156,6 +167,8 @@ struct JobCard: View {
     @Environment(OttoStore.self) private var store
     @State private var open = false
     @State private var answering = false
+    /// The card grows into its sheet and shrinks back into place (the contact card's zoom).
+    @Namespace private var zoom
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -183,7 +196,7 @@ struct JobCard: View {
                 .padding([.horizontal, .top], 14)
                 .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityHint("Opens the job")
 
             if job.needsYou, let answers = job.question?.answers, !answers.isEmpty {
@@ -203,11 +216,12 @@ struct JobCard: View {
                 Text(more > 0 ? "Open job · ^[\(more) more answer](inflect: true)" : "Open job").font(size: 15, relativeTo: .subheadline).foregroundStyle(Color.actionInk)
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .padding(.horizontal, 14)
         }
         .ottoCard()
-        .sheet(isPresented: $open) { JobSheet(id: job.id).environment(store) }
+        .matchedTransitionSource(id: job.id, in: zoom)
+        .sheet(isPresented: $open) { JobSheet(id: job.id).environment(store).navigationTransition(.zoom(sourceID: job.id, in: zoom)) }
         #if DEBUG
         // `-jobOpen <id>` opens that job's sheet, for screenshots.
         .onAppear { if UserDefaults.standard.string(forKey: "jobOpen") == job.id { open = true } }
@@ -242,6 +256,9 @@ struct JobSheet: View {
     @State private var busy: JobVerb?
     @State private var failed: String?
     @State private var confirming: JobVerb?
+    /// Felt: an answer or a steer gone, an action the Mac refused. A merge's own success is felt on the thread (Beats).
+    @State private var answered = 0
+    @State private var refused = 0
 
     private var job: CodeJob? { store.jobs.byID[id] }
 
@@ -258,6 +275,8 @@ struct JobSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .sensoryFeedback(.impact(weight: .light), trigger: answered)
+        .sensoryFeedback(.error, trigger: refused)
         .task { await store.refreshJobs() }
     }
 
@@ -268,12 +287,14 @@ struct JobSheet: View {
                     Text(job.title.isEmpty ? String(localized: "Coding job") : job.title)
                         .font(.title3.weight(.semibold)).accessibilityAddTraits(.isHeader)
                     HStack(alignment: .firstTextBaseline, spacing: 8) {   // the pill starts the line when the text beside it wraps
-                        if job.needsYou { NeedsMark() } else { Pill(text: job.stateLabel, tint: job.state == "failed" ? .red : .secondary) }
+                        if job.needsYou { NeedsMark().transition(.opacity) } else { Pill(text: job.stateLabel, tint: job.state == "failed" ? .red : .secondary).transition(.opacity) }
                         TimelineView(.periodic(from: .now, by: 30)) { tl in
                             Text([job.project, job.meta(now: tl.date)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
+                    // It moves on while the sheet is open: the pill cross-fades to where it stands now.
+                    .animation(.spring(duration: 0.35, bounce: 0), value: job.state)
                 }
 
                 if job.needsYou, let q = job.question { question(job, q) }
@@ -291,7 +312,7 @@ struct JobSheet: View {
 
                 if job.working { steer(job) }
 
-                if let failed { Text(failed).font(.footnote).foregroundStyle(Color.redInk) }
+                if let failed { Text(failed).font(.footnote).foregroundStyle(Color.redInk).transition(.opacity) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20).padding(.top, 4).padding(.bottom, 24)
@@ -411,7 +432,7 @@ struct JobSheet: View {
         if verb == .answer || verb == .steer { guard let words, !words.isEmpty else { return } }
         busy = verb; failed = nil
         defer { busy = nil }
-        if let why = await store.jobAction(verb, id: id, text: words) { failed = why } else if verb == .answer || verb == .steer { text = "" }
+        if let why = await store.jobAction(verb, id: id, text: words) { failed = why; refused += 1 } else if verb == .answer || verb == .steer { text = ""; answered += 1 }
     }
 }
 

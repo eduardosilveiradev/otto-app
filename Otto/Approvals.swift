@@ -212,7 +212,7 @@ struct ApprovalPill: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 17, style: .continuous))
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 17, style: .continuous))   // the glass answers the touch
         .accessibilityLabel(lapsed ? "Expired before you answered: \(request.ask)" : waiting > 1 ? "\(waiting) waiting on you. The newest: \(request.ask)" : "Waiting on you: \(request.ask)")
         .accessibilityValue(lapsed ? "" : request.minutesLeft(at: .now).map { "\($0) minutes left" } ?? "")
         .accessibilityHint(lapsed ? "Dismisses it" : "Opens it to approve or decline")

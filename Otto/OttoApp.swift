@@ -684,6 +684,10 @@ final class OttoStore {
             messages = [Message(from: .otto, text: "four jobs, none of them tidy.", jobs: ["worst-script", "worst-failed", "worst-unknown", "worst-input", "gone-from-the-mac"])]
         } else if ProcessInfo.processInfo.arguments.contains("-jobsThread") {
             jobs.set(CodeJob.demo)
+            // `-jobsMerge`: the running one (on screen) merges 8 s in, for recordings of that moment.
+            if ProcessInfo.processInfo.arguments.contains("-jobsMerge") {
+                Task { try? await Task.sleep(for: .seconds(8)); if var j = jobs.byID["demo-running"] { j.state = "merged"; jobs.put(j) } }
+            }
             messages = [Message(from: .otto, text: "the quieter route is up for review.", jobs: ["demo-review"]),
                         Message(from: .me, text: "can you compare the three insurance quotes", read: true),
                         Message(from: .otto, text: "on it. that one takes a while.", jobs: ["demo-running"]),

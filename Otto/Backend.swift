@@ -458,7 +458,12 @@ final class MockBackend: OttoBackend {
 
     func send(_ text: String, id: String, replyTo: String?, shared: Bool) async -> Bool {
         Task {
+            #if DEBUG
+            // `-quickReply`: the answer lands 1.5 s on, for recordings of a reply arriving.
+            try? await Task.sleep(for: .seconds(ProcessInfo.processInfo.arguments.contains("-quickReply") ? 1.5 : 60))
+            #else
             try? await Task.sleep(for: .seconds(60))
+            #endif
             out.yield(Message(from: .otto, text: "(mock) got it — \"\(text)\". the real me isn’t plugged in yet."))
         }
         return true

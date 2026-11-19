@@ -89,7 +89,7 @@ struct ScheduleChip: View {
             .padding(10)
             .background(Color.chip, in: .rect(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityLabel("Scheduled: \(trigger.gist)")
         .sheet(isPresented: $open) {
             NavigationStack {
