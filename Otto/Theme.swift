@@ -12,7 +12,7 @@ struct OttoAvatar: View {
     var joys = 0
     /// On its own, not inside a button: a tap makes it hop and smile, with a light tap back.
     var pokeable = false
-    /// Off where something just above clips it (the header bar): the beat pops in place instead of hopping.
+    /// Off where there's no room above it (the header, right under the status bar): the beat pops in place instead of hopping.
     var roomAbove = true
     @State private var pokes = 0
 
