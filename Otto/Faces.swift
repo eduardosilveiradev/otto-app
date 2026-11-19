@@ -748,7 +748,7 @@ struct FaceView: UIViewRepresentable {
 extension View {
     /// A happy beat, once for each new hop (a reply landed) and bigger for each new joy (a job merged, a poke): up off
     /// where it sits and down, with a smaller second bounce, like something light landing, over in about half a
-    /// second. Where there's no room above (the thread's header bar clips at the face's top edge) it pops in place
+    /// second. Where there's no room above (the thread's header, right under the status bar) it pops in place
     /// instead, growing from that top edge. Not under Reduce Motion, where the smile alone says it.
     func hop(hops: Int, joys: Int = 0, size: CGFloat, roomAbove: Bool = true) -> some View {
         modifier(Hop(hops: hops, joys: joys, size: size, lift: roomAbove))

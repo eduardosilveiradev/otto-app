@@ -24,6 +24,8 @@ struct PipRoot: View {
     @State private var shown = false
     /// The home indicator's strip under the card's frame, which its rounded edge reaches down over.
     @State private var below: CGFloat = 0
+    /// The status bar's strip over it, which the card's clip reaches up over too.
+    @State private var above: CGFloat = 0
 
     /// `moves`: bumped by every grab and settle, so an older settle's ending can't act after a newer one began.
     final class Live {
@@ -126,9 +128,10 @@ struct PipRoot: View {
             .background(Color(.systemBackground))
             .overlay { Color.black.opacity(0.15 * progress).ignoresSafeArea().allowsHitTesting(false) }
             // A clip, not a mask: a SwiftUI mask over the dock's UIKit views hid the composer once the keyboard
-            // moved it (it stayed behind the keyboard); a clip follows it. Down past the frame to the screen's foot.
-            .clipShape(CardShape(corner: corner, below: below))
-            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { below = $0 }
+            // moved it (it stayed behind the keyboard); a clip follows it. Past the frame to the screen's foot, and
+            // to its top: the frame stops at the safe area, and the header's face and its typing dots sit 7pt above it.
+            .clipShape(CardShape(corner: corner, above: above, below: below))
+            .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { above = $0.top; below = $0.bottom }
             .overlay {
                 RoundedRectangle(cornerRadius: corner, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5)
                     .opacity(progress).ignoresSafeArea().allowsHitTesting(false)
@@ -229,13 +232,14 @@ struct PipRoot: View {
 /// The card's outline: its frame stops at the home indicator, its rounded edge at the screen's foot.
 private struct CardShape: Shape {
     var corner: CGFloat
+    var above: CGFloat
     var below: CGFloat
     var animatableData: CGFloat {
         get { corner }
         set { corner = newValue }
     }
     func path(in r: CGRect) -> Path {
-        RoundedRectangle(cornerRadius: corner, style: .continuous).path(in: CGRect(x: r.minX, y: r.minY, width: r.width, height: r.height + below))
+        RoundedRectangle(cornerRadius: corner, style: .continuous).path(in: CGRect(x: r.minX, y: r.minY - above, width: r.width, height: r.height + above + below))
     }
 }
 
