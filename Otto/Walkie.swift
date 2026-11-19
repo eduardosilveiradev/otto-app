@@ -107,7 +107,7 @@ struct WalkieView: View {
                         (Text(undelivered ? "Not delivered · " : "No answer yet · ").foregroundStyle(Color.redInk)
                          + Text(undelivered ? "Try again" : "Check the chat").foregroundStyle(Color.actionInk)).hitSlop()
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                 } else {
                     Text(reply.map { $0.text.isEmpty ? "…" : $0.text } ?? " ")   // one instruction at a time: the caption says it
                         .foregroundStyle(reply == nil ? .secondary : .primary)

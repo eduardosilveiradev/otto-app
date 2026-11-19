@@ -231,7 +231,8 @@ private struct HelloPage: View {
     var body: some View {
         Page(title: "Hi, I’m Otto.",
              line: "One chat that keeps track of the rest: your mail, your calendar, what you said you’d do, and what you asked me to remember.") {
-            OttoAvatar(size: 148, asleep: !awake)
+            // Asleep, a tap wakes it; awake, a tap makes it hop and smile.
+            OttoAvatar(size: 148, asleep: !awake, pokeable: awake)
                 .onTapGesture { withAnimation(.spring) { awake = true } }
                 .task { try? await Task.sleep(for: .seconds(1.2)); withAnimation(.spring) { awake = true } }
         } footer: {
@@ -526,11 +527,14 @@ private struct AwakePage: View {
 private struct DonePage: View {
     let finish: () -> Void
     @AppStorage("serverURL") private var server = ""
+    @State private var cheered = 0
     var body: some View {
         Page(title: "All set",
              line: server.isEmpty ? "You’re on sample data. Pair with your Mac any time from my contact card."
                                   : "Say hi whenever. I’ll be here.") {
-            OttoAvatar(size: 148)
+            // Set up at last: a beat of joy as the page lands (once; the user's taps can have more).
+            OttoAvatar(size: 148, joys: cheered, pokeable: true)
+                .task { try? await Task.sleep(for: .seconds(0.5)); cheered = 1 }
         } footer: {
             Primary(label: "Say hi", action: finish)
         }

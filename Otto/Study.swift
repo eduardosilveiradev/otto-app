@@ -42,6 +42,8 @@ struct StudyBubble: View {
     @State private var failed = false
     @State private var tries = 0
     @State private var open = false
+    /// The bubble grows into the set and shrinks back into place (the contact card's zoom).
+    @Namespace private var zoom
 
     var body: some View {
         Button { if set == nil { tries += 1 } else { open = true } } label: {
@@ -68,7 +70,8 @@ struct StudyBubble: View {
             .ottoCard()
             .contentShape(.rect)
         }
-        .tint(.primary)
+        .buttonStyle(.press)
+        .matchedTransitionSource(id: file.id, in: zoom)
         .disabled(set == nil && !failed)
         .task(id: "\(file.id) \(tries)") {
             guard set == nil else { return }
@@ -83,7 +86,7 @@ struct StudyBubble: View {
             } catch { failed = !Task.isCancelled }
         }
         .onChange(of: store.connected) { if store.connected && failed { tries += 1 } }
-        .fullScreenCover(isPresented: $open) { if let set { StudyView(set: set) } }
+        .fullScreenCover(isPresented: $open) { if let set { StudyView(set: set).navigationTransition(.zoom(sourceID: file.id, in: zoom)) } }
     }
 
     private func count(_ s: StudySet) -> String {
@@ -154,11 +157,13 @@ private struct CardsPane: View {
     @Binding var run: CardsRun
     /// Reduce Motion: the card cross-fades to its other side instead of turning over.
     @Environment(\.accessibilityReduceMotion) private var still
+    @State private var finished = 0
 
     var body: some View {
         let queue = run.queue ?? Array(cards.indices)
         VStack(spacing: 20) {
             Text("\(run.known.count) of \(cards.count) known").font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                .contentTransition(still ? .opacity : .numericText(value: Double(run.known.count)))
             if let i = queue.first {
                 let c = cards[i]
                 Text(run.flipped ? c.back : c.front)
@@ -176,6 +181,11 @@ private struct CardsPane: View {
                     .accessibilityHint(run.flipped ? "Shows the question" : "Shows the answer")
                     .accessibilityAction { run.flipped.toggle() }
                     .padding(.horizontal)
+                    // The next card comes in from the right and the one done with goes left, like a pile being
+                    // worked through; under Reduce Motion they cross-fade.
+                    .id(queue.count * 1000 + i)
+                    .transition(still ? .opacity : .asymmetric(insertion: .offset(x: 40).combined(with: .opacity),
+                                                              removal: .offset(x: -40).combined(with: .opacity)))
                 if run.flipped {
                     HStack(spacing: 12) {
                         Button { next(queue, knew: false) } label: { Text("Again").frame(maxWidth: .infinity) }.quietButton()
@@ -187,12 +197,16 @@ private struct CardsPane: View {
                     Text("Tap to flip").font(.subheadline).foregroundStyle(.secondary).frame(height: 50)
                 }
             } else {
-                ContentUnavailableView("All known", systemImage: "checkmark.circle",
-                                       description: Text(run.missed.isEmpty ? "First try." : "\(run.missed.count) took more than one go."))
+                // The check bounces once as the pile runs out.
+                ContentUnavailableView {
+                    Label("All known", systemImage: "checkmark.circle").symbolEffect(.bounce, value: finished)
+                } description: { Text(run.missed.isEmpty ? "First try." : "\(run.missed.count) took more than one go.") }
+                .onAppear { finished += 1 }
                 Button("Start over") { run = CardsRun() }
             }
         }
         .padding(.bottom)
+        .symbolEffectsRemoved(still)
         .sensoryFeedback(.selection, trigger: run.seen)
     }
 
@@ -219,44 +233,93 @@ struct QuizRun {
 private struct QuizPane: View {
     let quiz: [StudySet.Question]
     @Binding var run: QuizRun
+    @Environment(\.accessibilityReduceMotion) private var still
+    @State private var finished = 0
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if run.at < quiz.count {
-                    let q = quiz[run.at], picked = run.answered[run.at]
-                    Text("\(run.at + 1) of \(quiz.count)").font(.footnote).foregroundStyle(.secondary).monospacedDigit()
-                    Text(q.q).font(size: 22, weight: .semibold, relativeTo: .title2)
-                    ForEach(q.options.indices, id: \.self) { o in
-                        Button { if picked == nil { withAnimation(.snappy) { run.answered[run.at] = o } } } label: {
-                            HStack {
-                                Text(q.options[o])
-                                Spacer(minLength: 8)
-                                if picked != nil, o == q.answer { Image(systemName: "checkmark.circle").foregroundStyle(Color.greenInk) }
-                                else if o == picked { Image(systemName: "xmark.circle").foregroundStyle(Color.redInk) }
-                            }
-                            .padding(.horizontal, 16).padding(.vertical, 13)
-                            .background(fill(o, q, picked), in: .rect(cornerRadius: 16, style: .continuous))
-                        }
-                        .tint(.primary)
-                        .accessibilityValue(picked == nil ? "" : o == q.answer ? "Correct" : o == picked ? "Wrong" : "")
-                    }
-                    if let picked {
-                        if let why = q.why { Text(why).font(.callout).foregroundStyle(.secondary) }
-                        Button { withAnimation(.snappy) { run.at += 1 } } label: {
-                            Text(run.at + 1 < quiz.count ? "Next" : "See score").font(.headline).frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).controlSize(.large)
-                            .padding(.top, 6)
-                            .sensoryFeedback(picked == q.answer ? .success : .error, trigger: picked)
-                    }
-                } else {
-                    let right = run.answered.filter { quiz[$0.key].answer == $0.value }.count
-                    ContentUnavailableView("\(right) / \(quiz.count)", systemImage: right == quiz.count ? "star.fill" : "checklist",
-                                           description: Text("Done sends the result to Otto."))
-                    Button("Try again") { run = QuizRun() }.frame(maxWidth: .infinity)
+            // A ZStack, so the question going and the next coming overlap instead of stacking.
+            ZStack(alignment: .topLeading) {
+                Group {
+                    if run.at < quiz.count { question(run.at) } else { score }
                 }
-            }.padding()
+                .id(run.at)
+                // On to the next like a page turning sideways; under Reduce Motion a cross-fade.
+                .transition(still ? .opacity : .asymmetric(insertion: .offset(x: 40).combined(with: .opacity),
+                                                          removal: .offset(x: -40).combined(with: .opacity)))
+            }
+            .padding()
+        }
+        .symbolEffectsRemoved(still)
+        // On the pane, which is there before any answer: on the Next button, which comes with the answer, it never fired.
+        .sensoryFeedback(trigger: run.answered) { old, new in
+            guard let (q, o) = new.first(where: { old[$0.key] == nil }) else { return nil }
+            return quiz[q].answer == o ? .success : .error
+        }
+    }
+
+    private func question(_ at: Int) -> some View {
+        let q = quiz[at], picked = run.answered[at]
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("\(at + 1) of \(quiz.count)").font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+            Text(q.q).font(size: 22, weight: .semibold, relativeTo: .title2)
+            ForEach(q.options.indices, id: \.self) { o in
+                Button { if picked == nil { withAnimation(.snappy) { run.answered[at] = o } } } label: {
+                    HStack {
+                        Text(q.options[o])
+                        Spacer(minLength: 8)
+                        // The right one's check draws itself in; the wrong pick gets a cross (and a shake, below).
+                        if picked != nil, o == q.answer {
+                            Image(systemName: "checkmark.circle").foregroundStyle(Color.greenInk)
+                                .transition(still ? AnyTransition.opacity : AnyTransition(.symbolEffect(.drawOn)))
+                        } else if o == picked {
+                            Image(systemName: "xmark.circle").foregroundStyle(Color.redInk)
+                                .transition(still ? AnyTransition.opacity : AnyTransition(.symbolEffect(.drawOn)))
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 13)
+                    .background(fill(o, q, picked), in: .rect(cornerRadius: 16, style: .continuous))
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.press)
+                // A wrong pick shakes its head, side to side and still, over 0.4 s. The red and the cross say it too.
+                .keyframeAnimator(initialValue: CGFloat(0), trigger: picked == o && o != q.answer && !still) { row, x in
+                    row.offset(x: x)
+                } keyframes: { _ in
+                    // The trigger only ever turns on (a new question is a new row), so this never plays backwards.
+                    KeyframeTrack {
+                        SpringKeyframe(-9, duration: 0.08, spring: .snappy)
+                        SpringKeyframe(8, duration: 0.09, spring: .snappy)
+                        SpringKeyframe(-5, duration: 0.09, spring: .snappy)
+                        SpringKeyframe(0, duration: 0.14, spring: .smooth)
+                    }
+                }
+                .accessibilityValue(picked == nil ? "" : o == q.answer ? "Correct" : o == picked ? "Wrong" : "")
+                .rise(o)
+            }
+            if let picked {
+                if let why = q.why { Text(why).font(.callout).foregroundStyle(.secondary).rise(0) }
+                Button { withAnimation(.snappy) { run.at += 1 } } label: {
+                    Text(at + 1 < quiz.count ? "Next" : "See score").font(.headline).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).buttonBorderShape(.capsule).controlSize(.large)
+                .padding(.top, 6)
+                .rise(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var score: some View {
+        let right = run.answered.filter { quiz[$0.key].answer == $0.value }.count
+        return VStack {
+            // The star (all right) or the list bounces once as the score comes up.
+            ContentUnavailableView {
+                Label("\(right) / \(quiz.count)", systemImage: right == quiz.count ? "star.fill" : "checklist")
+                    .symbolEffect(.bounce, value: finished)
+            } description: { Text("Done sends the result to Otto.") }
+            .onAppear { finished += 1 }
+            Button("Try again") { withAnimation(.snappy) { run = QuizRun() } }.frame(maxWidth: .infinity)
         }
     }
 

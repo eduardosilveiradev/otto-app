@@ -479,6 +479,7 @@ private struct ConversationCell: View {
     let store: OttoStore
     var pinned = false
     @Environment(\.dynamicTypeSize) private var type
+    @Environment(\.accessibilityReduceMotion) private var still
 
     private var pips: PipStore { store.pips }
     /// The thread on the card.
@@ -516,9 +517,14 @@ private struct ConversationCell: View {
             .contentShape(.rect)
         }
         .buttonStyle(CellPress(selected: selected))
+        // Grows in when news comes, shrinks away once read (a fade under Reduce Motion).
         .overlay(alignment: .leading) {
-            if row.unread > 0 { Circle().fill(Color.ottoInk).frame(width: 8, height: 8).padding(.leading, 14) }
+            if row.unread > 0 {
+                Circle().fill(Color.ottoInk).frame(width: 8, height: 8).padding(.leading, 14)
+                    .transition(still ? .opacity : .scale(scale: 0.3).combined(with: .opacity))
+            }
         }
+        .animation(.spring(duration: 0.3, bounce: 0), value: row.unread > 0)
         .accessibilityElement(children: .combine)
         .accessibilityValue(row.unread > 0 ? "Unread" : "")
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -738,7 +744,7 @@ struct GroupLinkBubble: View {
             .background(BubbleShape(mine: false, tail: true).fill(.incomingBubble))
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityLabel("Group \(group.name), \(names)")
     }
 }
@@ -1509,7 +1515,7 @@ private struct PipEditSheet: View {
                             .frame(maxWidth: .infinity)
                             .contentShape(.rect)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .accessibilityLabel(s.rawValue.replacing("-", with: " ").capitalized)
                     .accessibilityAddTraits(solid == s ? .isSelected : [])
                 }
@@ -1668,8 +1674,10 @@ private struct ScheduleEditor: View {
                 .background(on ? Color.primary : Color(.secondarySystemFill), in: .circle)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .contentShape(.rect)
+                .animation(.spring(duration: 0.25, bounce: 0), value: on)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
+        .sensoryFeedback(.selection, trigger: on)
         .accessibilityLabel(cal.standaloneWeekdaySymbols[d])
         .accessibilityAddTraits(on ? .isSelected : [])
     }
@@ -1745,15 +1753,6 @@ private struct PillButton: View {
             .background(primary ? Color.accentColor : Color(.secondarySystemFill), in: .capsule)
             .contentShape(.capsule)
         }
-        .buttonStyle(PillPress())
-    }
-}
-
-private struct PillPress: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var still
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed && !still ? 0.96 : 1)
-            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+        .buttonStyle(.press)
     }
 }

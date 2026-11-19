@@ -108,7 +108,10 @@ that offers a longer yes, `-approvalScope always` to open with it picked,
 `-approvalDemo draft` for an email to approve), `-jobsThread` (coding jobs; `-jobsThread worst` for the
 awkward ones, `-jobOpen <id>` to open one), and `-details -screen <Loops|Memory|People|Money|Trips|Activity|Status|Devices|Rules>`
 to open the contact card on one of its pages, or `-details -checkServer` to open it on the
-server fields and check them.
+server fields and check them. For recording motion: `-faceBeat glance` or `-faceBeat cheer` (Otto's face
+does that on every idle beat), `-drowsy YES` or `NO` (the quiet-hours face, whatever the clock says),
+`-quickReply` (the sample backend answers a message in 1.5 s) and, with `-jobsThread`, `-jobsMerge`
+(the running job merges 8 s in).
 
 A Release build with `OTHER_SWIFT_FLAGS='$(inherited) -DPERFDEMO'` also takes `-perfDemo`
 (sends, typing steps, tapbacks and replies in a loop, then prints how many frames ran late)

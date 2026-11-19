@@ -51,7 +51,7 @@ struct PassportScreen: View {
                     LazyVGrid(columns: columns, spacing: 8) {
                         ForEach(Array(stamps.enumerated()), id: \.element.id) { i, s in
                             Button { open = s } label: { InkStamp(stamp: s, index: i) }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.press)
                                 .accessibilityLabel("\(s.headline), \(s.countryName ?? ""), first visited \(s.first)")
                         }
                     }

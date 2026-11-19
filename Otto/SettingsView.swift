@@ -9,6 +9,10 @@ struct SettingsView: View {
     @State private var failed = false
     /// The switch whose flip got no answer, so it's still as it was: said under it, by name.
     @State private var unchanged: String?
+    /// A flip on its way to the Mac: the switch moves at once, under the finger, and the Mac's answer settles it.
+    @State private var flipping: (id: String, on: Bool)?
+    /// A flip that didn't take, felt as it slides back.
+    @State private var bounced = 0
 
     private static let sections = [("otto", "Otto"), ("recurring", "Recurring"), ("connectors", "Connectors")]
 
@@ -30,12 +34,14 @@ struct SettingsView: View {
                         ForEach(ts) { t in
                             let name = t.label.prefix(1).capitalized + t.label.dropFirst()
                             VStack(alignment: .leading, spacing: 4) {
-                                Toggle(name, isOn: Binding(get: { t.on }, set: { _ in flip(t.id) }))
+                                Toggle(name, isOn: Binding(get: { flipping?.id == t.id ? flipping!.on : t.on }, set: { _ in flip(t.id, to: !t.on) }))
                                     .disabled(busy)
                                 if unchanged == t.id {
                                     Text("Didn’t change: your Mac didn’t answer. Try again.").font(.footnote).foregroundStyle(Color.redInk)
+                                        .transition(.opacity)
                                 }
                             }
+                            .animation(.spring(duration: 0.3, bounce: 0), value: unchanged)
                         }
                     } header: { Text(title) } footer: {
                         if key == "connectors" { Text("A change applies from the next session.") }
@@ -64,6 +70,7 @@ struct SettingsView: View {
         .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)   // as every other card page: a large title sat on the first section's header
         .refreshable { await load() }
         .task { await load() }
+        .sensoryFeedback(.warning, trigger: bounced)
     }
 
     private func load() async {
@@ -74,12 +81,18 @@ struct SettingsView: View {
 
     /// The Mac answers with the whole page as it is now, so a refused flip just shows unflipped (with its
     /// note). No answer at all leaves the switch where it was, and says so under it.
-    private func flip(_ id: String) {
+    /// The switch slides over straight away; if the Mac refuses, or doesn't answer, it slides back, with a buzz.
+    private func flip(_ id: String, to on: Bool) {
         busy = true
+        flipping = (id, on)
         Task {
             let fresh = await store.backend.settings(flip: id)
-            if let fresh { page = fresh; failed = false }
-            unchanged = fresh == nil ? id : nil
+            withAnimation(.spring(duration: 0.3, bounce: 0)) {
+                if let fresh { page = fresh; failed = false }
+                unchanged = fresh == nil ? id : nil
+                flipping = nil
+            }
+            if fresh?.toggles.first(where: { $0.id == id })?.on != on { bounced += 1 }
             if fresh == nil { AccessibilityNotification.Announcement("Didn’t change: your Mac didn’t answer.").post() }
             busy = false
         }

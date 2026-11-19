@@ -7,12 +7,66 @@ struct OttoAvatar: View {
     var size: CGFloat = 44
     var thinking = false
     var asleep = false
+    /// Bumped from outside for a hop (a reply landed) or a beat of joy (a job merged).
+    var hops = 0
+    var joys = 0
+    /// On its own, not inside a button: a tap makes it hop and smile, with a light tap back.
+    var pokeable = false
+    /// Off where something just above clips it (the header bar): the beat pops in place instead of hopping.
+    var roomAbove = true
+    @State private var pokes = 0
 
     var body: some View {
         // Small faces play cached frames; large ones render live, for the eye transitions.
-        FaceView(look: .otto.with(asleep ? .asleep : thinking ? .working : .rest), size: size, live: size > 32)
+        FaceView(look: .otto.with(asleep ? .asleep : thinking ? .working : .rest), size: size, live: size > 32, joys: joys + pokes)
             .frame(width: size, height: size)
+            .hop(hops: hops, joys: joys + pokes, size: size, roomAbove: roomAbove)
+            .contentShape(.circle)
+            // Off (`.subviews`) inside a button, which keeps the tap.
+            .gesture(TapGesture().onEnded { pokes += 1 }, including: pokeable ? .all : .subviews)
+            .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.7), trigger: pokes)
     }
+}
+
+/// Anything custom you can press: it gives under the finger at once and settles back without a bounce,
+/// interruptibly. System bordered, prominent and glass buttons already do their own, so this is for
+/// plain and card-like ones. Under Reduce Motion it dims instead of moving; a disabled one never gives.
+struct Press: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var still
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        let down = configuration.isPressed && enabled
+        configuration.label
+            // The whole label takes the tap, as the default style's does: a face in it is a UIKit view that
+            // doesn't hit-test, and without this a tap on Otto's face in the header went nowhere.
+            .contentShape(.rect)
+            .opacity(enabled ? (down && still ? 0.6 : 1) : 0.4)
+            .scaleEffect(down && !still ? 0.96 : 1)
+            .animation(.spring(duration: 0.2, bounce: 0), value: down)
+    }
+}
+
+extension ButtonStyle where Self == Press {
+    static var press: Press { Press() }
+}
+
+/// Comes up into place as it appears, a beat after the ones before it: a short stagger for a set that lands
+/// together (a question's answers). Under Reduce Motion it only fades in.
+private struct Rise: ViewModifier {
+    let delay: Double
+    @Environment(\.accessibilityReduceMotion) private var still
+    @State private var on = false
+    func body(content: Content) -> some View {
+        content
+            .opacity(on ? 1 : 0)
+            .offset(y: on || still ? 0 : 10)
+            .onAppear { withAnimation(.spring(duration: 0.4, bounce: 0).delay(delay)) { on = true } }
+    }
+}
+
+extension View {
+    /// The `i`th of a set rising into place, 40 ms apart (Rise).
+    func rise(_ i: Int) -> some View { modifier(Rise(delay: Double(i) * 0.04)) }
 }
 
 // MARK: - Design tokens (design/ios-redesign-mockup.html)

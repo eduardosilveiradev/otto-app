@@ -221,7 +221,7 @@ struct CallView: View {
                             .font(.subheadline).foregroundStyle(.white.opacity(0.85)).multilineTextAlignment(.center).lineLimit(3)
                             .padding(.horizontal, 32).padding(.vertical, 10).contentShape(.rect)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .accessibilityLabel((line.otto ? "Otto said: " : "You said: ") + line.text)
                     .accessibilityHint("Shows everything said so far")
                     .transition(.opacity)
