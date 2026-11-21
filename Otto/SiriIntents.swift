@@ -106,6 +106,7 @@ struct SaveThisPlace: AppIntent {
         let words = said?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var fix = await Here.location()
         if fix == nil {   // first use (the permission prompt) or not "in use" yet: once in the foreground
+            LaunchMorph.skip()   // Siri opens the app on its question, not on the launch
             try await continueInForeground("Otto needs your location for this.", alwaysConfirm: false)
             fix = await Here.location()
         }
@@ -160,7 +161,7 @@ extension AppIntent {
     /// buttons is waiting on a tap (a write never happens from Siri), so the app opens on the thread.
     @MainActor func spoken(_ a: LiveBackend.Answer, late: IntentDialog = "Still on it. The answer will be in the chat.") async throws -> IntentDialog {
         guard let r = a.reply else { return late }
-        if !r.buttons.isEmpty { try await continueInForeground(nil, alwaysConfirm: false) }
+        if !r.buttons.isEmpty { LaunchMorph.skip(); try await continueInForeground(nil, alwaysConfirm: false) }
         return "\(r.text)"
     }
 }

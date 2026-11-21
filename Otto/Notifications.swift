@@ -186,7 +186,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let conversation = info["conversation"] as? String
         // A reminder (Reminders.swift) opens Otto's own thread, where its message lands once the Mac is up.
         if let open = conversation ?? (info["reminder"] != nil ? "app" : nil), response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-            Task { @MainActor in OttoStore.shared.pips.open(open); done() }
+            Task { @MainActor in LaunchMorph.skip(); OttoStore.shared.pips.open(open); done() }
             return
         }
         // One of Otto's own messages: its thread, wherever the app was left (a pip's thread, the drawer, a card page).

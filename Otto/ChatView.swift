@@ -747,14 +747,14 @@ struct ChatView: View {
             .liftedTitle()
         } else if pipsOn {
             Button { showDetails = true } label: {
-                HeaderTitle(name: "Otto", status: offline) { FaceView(look: ottoLook, size: 68, live: true, joys: joys).frame(width: 68, height: 68).hop(hops: hops, joys: joys, size: 68, roomAbove: false) }
+                HeaderTitle(name: "Otto", status: offline) { FaceView(look: ottoLook, size: 68, live: true, joys: joys).frame(width: 68, height: 68).hop(hops: hops, joys: joys, size: 68, roomAbove: false).launchSeat() }
             }
             .buttonStyle(.press)
             .liftedTitle()
             .matchedTransitionSource(id: "card", in: card)
         } else {
             Button { showDetails = true } label: {
-                HeaderTitle(name: "Otto", status: offline) { OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, hops: hops, joys: joys, roomAbove: false) }
+                HeaderTitle(name: "Otto", status: offline) { OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, hops: hops, joys: joys, roomAbove: false).launchSeat() }
             }
             .buttonStyle(.press)
             .matchedTransitionSource(id: "card", in: card)
@@ -1311,6 +1311,7 @@ final class PastingTextView: UITextView {
         placeholder.frame = CGRect(x: textContainerInset.left, y: textContainerInset.top,
                                    width: bounds.width - textContainerInset.left - textContainerInset.right,
                                    height: placeholder.intrinsicContentSize.height)
+        LaunchMorph.shared.hold(placeholder)   // where the launch's greeting lands
     }
 
     // Paste is offered when the clipboard holds an image, which a plain text view refuses.
