@@ -23,11 +23,12 @@ final class SampleHandler: RPBroadcastSampleHandler {
             return queue.async { self.finish("Start a talk with Otto first, then share your screen.") }
         }
         DictationBridge.observe(ScreenShare.stop) { [weak self] in self?.queue.async { self?.finish("Otto can’t see your screen any more.") } }
+        ScreenShare.stamp(ScreenShare.extensionAlive)   // before the first tick, which stops if it's gone
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now(), repeating: 1)
+        t.schedule(deadline: .now() + 1, repeating: 1)
         t.setEventHandler { [weak self] in self?.tick() }
+        queue.sync { timer = t }
         t.resume()
-        queue.async { self.timer = t; ScreenShare.stamp(ScreenShare.extensionAlive) }
         DictationBridge.post(ScreenShare.started)
     }
 
@@ -42,10 +43,12 @@ final class SampleHandler: RPBroadcastSampleHandler {
         DictationBridge.post(ScreenShare.finished)
     }
 
-    /// Every second: say it's still here, stop if the app isn't, and write the newest frame when one is due.
+    /// Every second: stop if the app cleared the folder (its stop, even if the notification went missing) or has gone
+    /// quiet, else say it's still here and write the newest frame when one is due.
     private func tick() {
         guard !over else { return }
-        guard (ScreenShare.age(ScreenShare.appAlive) ?? .infinity) < ScreenShare.stale else { return finish("Otto can’t see your screen any more.") }
+        guard ScreenShare.age(ScreenShare.extensionAlive) != nil,
+              (ScreenShare.age(ScreenShare.appAlive) ?? .infinity) < ScreenShare.stale else { return finish("Otto can’t see your screen any more.") }
         ScreenShare.stamp(ScreenShare.extensionAlive)
         guard let b = pending, ScreenShare.due(wrote), let pixels = CMSampleBufferGetImageBuffer(b) else { return }
         pending = nil
