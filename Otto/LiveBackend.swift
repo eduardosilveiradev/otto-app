@@ -47,13 +47,20 @@ import Foundation
 ///                   POST /app/jobs/<answer|steer|stop|merge|resolve> {"id","text"?} acts on one and answers with it.
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
 ///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
+///   talk mode, on the same socket (otto-core's otto/talk.ts has the whole protocol; Talk.swift speaks it):
+///     app -> otto  {"type":"talk.start"}, {"type":"talk.audio","audio":"<base64 16 kHz mono s16le, ≤ 200 ms>"},
+///                  {"type":"talk.end"} (the phone's pause), {"type":"talk.cut"} (you talked over Otto), {"type":"talk.stop"}
+///     otto -> app  talk.ready, talk.partial, talk.ending, talk.final, talk.accepted, talk.text, talk.audio (a playable
+///                  WAV each, in order), talk.done, talk.cut, talk.error, talk.timing: each with the server's "turn"
+///                  An older server ignores talk.start and never says talk.ready: talk then sends voice notes.
 ///   GET  <server>/app/approvals  [approval frame without "type"], the ones still pending ([] when none); not on every
 ///                   server yet, and a 404 means "can't say", never "none" (design/hillclimb-2026-11-16/server-contract.md)
 ///   GET  <server>/app/brief    brief JSON
 ///   GET  <server>/app/history?limit=  [{"dir":"in"|"out","text","ts","id"?,"kind":"terminal"?,"read"?, and on Otto's: "files","voice","reply_to","buttons"?,"src"?,"why"?}]   (X-Otto-Background: 1 from the background refresh)
 ///   GET  <server>/app/file/<id>  a file or voice clip from a message
 ///   POST <server>/app/photo?text=<caption>&id=<uuid>  JPEG body -> 204 once the server has it
-///   POST <server>/app/voice?id=<uuid>    m4a body -> {"text": "<transcript>"}
+///   POST <server>/app/voice?id=<uuid>&via=talk?    m4a body -> {"text": "<transcript>"}; an id the Mac already has
+///                   (a talk turn's, saved over the stream) is answered and not taken in twice
 ///   POST <server>/app/ask     {"id","text","via":"siri"|"here","place"?} -> {"reply"?:{"id","text","buttons"}}  (Siri; waits for Otto's first reply)
 ///   POST <server>/app/photo?snap=1&id=<uuid>  JPEG body -> the same answer, for the Snap intent
 ///   POST <server>/app/health  JSON {notifications, backgroundRefresh, keepAwake, shareConfigured, lastRefresh?, build, version, ios, reason} -> 204
@@ -129,6 +136,12 @@ final class LiveBackend: OttoBackend {
     private var acked: Set<String> = []
     private var gone: Set<String> = []
     private var loop: Task<Void, Never>?
+    private var talkOut: AsyncStream<Data>.Continuation?
+    /// Where talk.* frames go, in the order they came: the talk under way, if any.
+    var talkSink: AsyncStream<Data>.Continuation? {
+        get { lock.withLock { talkOut } }
+        set { lock.withLock { talkOut?.finish(); talkOut = newValue } }
+    }
 
     init(serverURL: URL, token: String) {
         var c = URLComponents(url: serverURL, resolvingAgainstBaseURL: false)!
@@ -334,9 +347,10 @@ final class LiveBackend: OttoBackend {
         }
     }
 
-    func sendVoice(_ m4a: Data, id: String, replyTo: String?) async -> String? {
+    func sendVoice(_ m4a: Data, id: String, replyTo: String?, via: String?) async -> String? {
         guard let data = await post("app/voice", m4a, query: [URLQueryItem(name: "id", value: id)]
-                                    + (replyTo.map { [URLQueryItem(name: "reply_to", value: $0)] } ?? [])) else { return nil }
+                                    + (replyTo.map { [URLQueryItem(name: "reply_to", value: $0)] } ?? [])
+                                    + (via.map { [URLQueryItem(name: "via", value: $0)] } ?? [])) else { return nil }
         return (try? JSONDecoder().decode([String: String].self, from: data))?["text"] ?? ""
     }
 
@@ -479,6 +493,7 @@ final class LiveBackend: OttoBackend {
         // Before WireMessage: an approval's `files` aren't RemoteFiles, so it would fail that decode whole.
         struct Kind: Decodable { let type: String; let id: String?; let gone: Bool? }
         if let k = try? JSONDecoder().decode(Kind.self, from: data) {
+            if k.type.hasPrefix("talk.") { talkSink?.yield(data); return }
             if k.type == "approval" { if let a = try? JSONDecoder().decode(ApprovalRequest.self, from: data) { approvalOut.yield(.show(a)) }; return }
             if k.type == "approval_done", let id = k.id { approvalOut.yield(.done(id)); return }
             // Here, not below: its `ts` is a number, which WireMessage would refuse.
@@ -526,6 +541,20 @@ final class LiveBackend: OttoBackend {
                           files: f.files, audio: f.voice, thread: f.thread, level: f.level, src: f.src, why: f.why, scheduled: f.scheduled, recorded: f.recorded, card: f.card,
                           jobs: f.jobs ?? f.job.map { [$0] }, otp: f.otp, quiet: f.quiet))
     }
+
+    /// A talk frame, now or never: talk keeps its own copy of a turn (its voice note) for when the socket is down.
+    /// Sent in the order called, so a turn's audio stays in order.
+    @discardableResult func talkSend(_ frame: [String: String]) -> Bool {
+        guard let task = lock.withLock({ live ? socket : nil }),
+              let json = try? JSONSerialization.data(withJSONObject: frame), let s = String(data: json, encoding: .utf8) else { return false }
+        task.send(.string(s)) { _ in }
+        return true
+    }
+
+    #if DEBUG
+    /// Talk's `-talkDrop`: the socket cut from under a turn, as a lift or a tunnel would.
+    func dropSocket() { lock.withLock { socket }?.cancel(with: .goingAway, reason: nil) }
+    #endif
 
     private func write(_ frame: [String: String]) async {
         var frame = frame

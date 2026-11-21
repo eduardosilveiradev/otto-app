@@ -37,7 +37,7 @@ struct NotifierStub { func post(_ message: Message) {} }
     var calls = 0
     var desktopSync: DesktopSync? = nil
     func history(background: Bool, limit: Int, since: Date?) async -> [Message]? { rows }
-    func sendVoice(_ audio: Data, id: String, replyTo: String?) async -> String? {
+    func sendVoice(_ audio: Data, id: String, replyTo: String?, via: String?) async -> String? {
         calls += 1
         if hold { return await withCheckedContinuation { held = $0 } }
         return response
@@ -116,11 +116,11 @@ cat >> "$T/check.swift" <<'SWIFT'
         let decoder = VoiceDecoder()
         for body in [#"{"text":"spoken words"}"#, #"{"text":""}"#] {
             decoder.response = Data(body.utf8)
-            let result = await decoder.sendVoice(Data([1]), id: "test-note", replyTo: nil)
+            let result = await decoder.sendVoice(Data([1]), id: "test-note", replyTo: nil, via: "talk")
             assert(result != nil) // both normal and deduped 2xx responses are delivery
         }
         decoder.response = nil
-        let failed = await decoder.sendVoice(Data([1]), id: "test-note", replyTo: nil)
+        let failed = await decoder.sendVoice(Data([1]), id: "test-note", replyTo: nil, via: "talk")
         assert(failed == nil)
         // The real server preserves this exact UUID in /app/history, including its casing.
         let note = Message(from: .me, text: "", isVoice: true, pending: true)
