@@ -30,8 +30,10 @@ what Otto knows about your day.
 - Web calls to Otto through [Vapi](https://vapi.ai), if you have it set up
 - Local notifications while the app is in the background
 - Talk mode: hands-free voice with Otto. You talk, a pause ends your turn,
-  Otto answers out loud, and talking over it cuts it off. Each turn goes up as
-  a voice note. Open it from the phone button's menu (a tap then opens whichever
+  Otto answers out loud, and talking over it cuts it off. Each turn streams to
+  the Mac as you talk, so your words show as it hears them and Otto's voice
+  plays as it's made; with a Mac that has no talk stream, or a dropped
+  connection, the turn goes up as a voice note instead. Open it from the phone button's menu (a tap then opens whichever
   of Call Otto and Talk you picked last), the "Talk with Otto" shortcut on the
   Action Button, the Lock Screen widget or the Control Center control
 - Widgets: a small one for the Home Screen that opens the chat and shows an

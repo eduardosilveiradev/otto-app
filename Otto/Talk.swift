@@ -34,8 +34,8 @@ struct OpenWalkie: AppIntent {
 // MARK: - Turn-taking
 
 /// Where your turns start and end, from the microphone's loudness alone, on the phone: a voice that holds
-/// starts a turn, a pause ends it. Biased to miss rather than fire, since every turn it sends is a voice note
-/// in the thread that Otto answers.
+/// starts a turn, a pause ends it. Biased to miss rather than fire, since every turn it sends lands in the
+/// thread for Otto to answer.
 struct TurnDetector {
     // The knobs. Measured nowhere but the simulator and a quiet room: tune them on a phone.
     /// Seconds of voice before a turn starts.
@@ -269,6 +269,8 @@ final class TalkSession {
         /// Frames scheduled and played, at `rate`.
         var queued = 0.0, played = 0.0, rate = 24_000.0
         var done = false
+        /// The socket went mid-answer: what came plays, and the line is kept as cut short there.
+        var dropped = false
         /// Its voice didn't come in time, so the phone's said it.
         var phone = false
     }
@@ -315,12 +317,15 @@ final class TalkSession {
     @ObservationIgnored private var pcm = Data()
     /// Whether this Mac has the talk stream: nil until a turn has tried it.
     @ObservationIgnored private var streams: Bool?
+    /// The connection that verdict is about: a new one is asked again (a frozen socket can eat one talk.ready).
+    @ObservationIgnored private var streamsConn = 0
     @ObservationIgnored private var frames: Task<Void, Never>?
     @ObservationIgnored private var playing: (frames: Double, gen: Int)?
     /// Bumped whenever Otto's voice is stopped or replaced, so a late callback from the last one is ignored.
     @ObservationIgnored private var gen = 0
     @ObservationIgnored private let synth = AVSpeechSynthesizer()
     @ObservationIgnored private let aloud = Aloud()
+    @ObservationIgnored private var rendering: Rendering?
     /// When talk first saw each of Otto's messages, for how long a clip has been waited for.
     @ObservationIgnored private var seen: [Message.ID: Date] = [:]
     /// Messages there before the talk, and Otto's ones already said or skipped: none of these is said again.
@@ -566,6 +571,7 @@ final class TalkSession {
         case nil: break
         }
         stream()
+        speakRendered()
         if let p = playing, p.gen == gen, let t = player.lastRenderTime, let pt = player.playerTime(forNodeTime: t), p.frames > 0 {
             said = min(1, max(0, Double(pt.sampleTime) / p.frames))
         }
@@ -583,6 +589,7 @@ final class TalkSession {
         answering = nil   // whatever Otto was about to say to your last turn is moot now
         guard let format else { return }
         let url = URL.temporaryDirectory.appending(path: "talk-\(UUID().uuidString).m4a")
+        if let live, live.connections != streamsConn { streams = nil }
         let streamed = streams != false && live?.isLive == true && !Self.notesOnly
         do { try tap.begin(url, format: format, stream: streamed) } catch {
             // Nowhere to put what you say: said as a microphone that won't start (Try again builds it afresh).
@@ -689,14 +696,14 @@ final class TalkSession {
             // The socket dropped before the Mac wrote the turn down: a turn it hasn't written down is gone there.
             if !o.final && (live.connections != o.conn || !live.isLive) { return fallBack() }
             // No talk.ready: a Mac without the talk stream. Every turn after this one goes as a note.
-            if o.turn == nil && Date.now.timeIntervalSince(o.asked) > Self.readyWait { streams = false; return fallBack() }
+            if o.turn == nil && Date.now.timeIntervalSince(o.asked) > Self.readyWait { streams = false; streamsConn = live.connections; return fallBack() }
             // The Mac said nothing more about it: sent again as a note. Long, as a slow transcriber isn't helped by a second
             // job (one took 20 s on a loaded Mac), and a transcriber that fails says so with talk.error.
             if let e = o.ended, !o.final, Date.now.timeIntervalSince(e) > 45 { return fallBack() }
         } else {
             pcm = Data()
         }
-        if let r = reply, !r.done, let live, live.connections != r.conn || !live.isLive { replyDone(r.turn) }   // dropped mid-answer
+        if let r = reply, !r.done, let live, live.connections != r.conn || !live.isLive { reply?.dropped = true; replyDone(r.turn) }
         // Otto's words came and its voice hasn't: the phone's says them, and the Mac stops making it.
         if let r = reply, r.clips == 0, !r.phone, !hearing, saying == nil, Date.now.timeIntervalSince(r.came) > Self.voiceWait {
             if outgoing == nil { live?.talkSend(["type": "talk.cut"]) }
@@ -731,7 +738,7 @@ final class TalkSession {
         switch f.type {
         case "talk.ready":
             guard var o = outgoing, o.turn == nil, let t = f.turn else { return }
-            streams = true
+            streams = true; streamsConn = live?.connections ?? 0
             o.turn = t
             // The line takes the Mac's id for the turn: the thread's copy of it comes back under it.
             if let id = UUID(uuidString: t) { rebind(o.line, to: id); o.line = id }
@@ -848,7 +855,11 @@ final class TalkSession {
         let since = started.addingTimeInterval(-30)   // history caught up after a reconnect is old news
         let now = Date.now
         for m in store.messages where m.from == .otto && !heard.contains(m.id) && m.date >= since {
-            if Self.streamed(m, in: replies.values) { heard.insert(m.id); continue }
+            if let k = replies.first(where: { Self.streamed(m, in: [$0.value]) })?.key {
+                // Said over the stream. Taken off what's kept, so a later "Done." isn't found in an older answer.
+                if let r = replies[k]?.range(of: m.text.trimmingCharacters(in: .whitespacesAndNewlines)) { replies[k]?.removeSubrange(r) }
+                heard.insert(m.id); continue
+            }
             let first = seen[m.id] ?? now
             seen[m.id] = first
             // Its talk.text can be a moment behind it on another stream; a streamed answer is said from there.
@@ -889,30 +900,45 @@ final class TalkSession {
     private func sayText(_ id: Message.ID, _ text: String) {
         let g = saying == id ? gen : begin(id)
         let box = Rendered()
-        synth.write(AVSpeechUtterance(string: text), toBufferCallback: Self.collect(box) { [weak self] in self?.playRendered(box.buffers, id, text, gen: g) })
-        // Not playing within 3 s (rendering gave nothing, or never finished): the phone's voice straight out instead,
-        // so the words are never left unsaid.
+        rendering = Rendering(box: box, id: id, text: text, gen: g)
+        synth.write(AVSpeechUtterance(string: text), toBufferCallback: Self.collect(box))
+        // Nothing rendered in 3 s: the phone's voice straight out instead, so the words are never left unsaid.
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(3))
-            guard let self, g == self.gen, self.saying == id, self.playing == nil else { return }
+            guard let self, g == self.gen, self.saying == id, box.isEmpty else { return }
             self.synth.stopSpeaking(at: .immediate)
+            self.rendering = nil
             self.sayAloud(id, text)
         }
     }
 
-    private func playRendered(_ buffers: [AVAudioPCMBuffer], _ id: Message.ID, _ text: String, gen g: Int) {
-        guard g == gen, playing == nil else { return }
-        guard let engine, let first = buffers.first,
-              let f = AVAudioFormat(standardFormatWithSampleRate: first.format.sampleRate, channels: first.format.channelCount) else { return sayAloud(id, text) }
-        let floats = buffers.compactMap { Self.float($0, f) }
-        guard !floats.isEmpty else { return sayAloud(id, text) }
-        player.stop()
-        engine.connect(player, to: engine.mainMixerNode, format: f)
-        for (i, b) in floats.enumerated() {
-            player.scheduleBuffer(b, completionCallbackType: .dataPlayedBack,
-                                  completionHandler: i == floats.count - 1 ? Self.finished { [weak self] in self?.done(g) } : nil)
+    /// The phone's voice played as it renders, a piece at a time, so a long answer doesn't wait for its last word.
+    private func speakRendered() {
+        guard var r = rendering else { return }
+        guard r.gen == gen, let engine else { rendering = nil; return }
+        let finished = r.box.finished
+        for b in r.box.buffers.dropFirst(r.taken) {
+            r.taken += 1
+            guard let f = r.format ?? AVAudioFormat(standardFormatWithSampleRate: b.format.sampleRate, channels: b.format.channelCount),
+                  let pcm = Self.float(b, f) else { continue }
+            if r.format == nil {
+                r.format = f
+                player.stop()
+                engine.connect(player, to: engine.mainMixerNode, format: f)
+                play(frames: 0, gen: gen)
+            }
+            let n = Double(pcm.frameLength), g = gen
+            r.queued += n
+            player.scheduleBuffer(pcm, completionCallbackType: .dataPlayedBack, completionHandler: Self.finished { [weak self] in
+                if self?.gen == g { self?.rendering?.played += n }
+            })
         }
-        play(frames: floats.reduce(0) { $0 + Double($1.frameLength) }, gen: g)
+        rendering = r
+        if finished && r.queued == 0 { rendering = nil; return sayAloud(r.id, r.text) }
+        guard r.queued > 0 else { return }
+        let total = finished ? r.queued : max(r.queued, Double(r.text.count) / 14 * (r.format?.sampleRate ?? 22_050))
+        said = max(said, min(1, r.played / total))
+        if finished && r.played >= r.queued { rendering = nil; done(gen) }
     }
 
     /// The phone's voice spoken directly, for when rendering it gave nothing to play. It doesn't pass through the
@@ -927,6 +953,10 @@ final class TalkSession {
             if over { self.done(g) } else { self.said = Double(range.upperBound) / n }
         }
         aloud.synth.speak(AVSpeechUtterance(string: text))
+        #if DEBUG
+        NSLog("talk: the phone's voice, straight out")
+        if firstSpoke == nil { firstSpoke = .now }
+        #endif
     }
 
     /// A clip of a streamed answer: queued behind the last, the first one starting Otto's voice.
@@ -954,7 +984,7 @@ final class TalkSession {
         guard g == gen, var r = reply else { return }
         r.played += frames
         reply = r
-        if r.done && r.played >= r.queued { reply = nil; done(g) }
+        if r.done && r.played >= r.queued { finish(r) }
     }
 
     /// No more of this answer is coming (talk.done, or the socket went): said in the phone's voice if none of its
@@ -965,7 +995,13 @@ final class TalkSession {
         reply = r
         if r.phone { reply = nil; return }
         if r.clips == 0 { return phone(r) }
-        if r.played >= r.queued { reply = nil; done(gen) }
+        if r.played >= r.queued { finish(r) }
+    }
+
+    private func finish(_ r: Reply) {
+        reply = nil
+        if r.dropped, let i = lines.lastIndex(where: { $0.id == r.line }) { lines[i].cut = said }
+        done(gen)
     }
 
     private func phone(_ r: Reply) {
@@ -1019,7 +1055,7 @@ final class TalkSession {
         player.stop()
         synth.stopSpeaking(at: .immediate)
         aloud.synth.stopSpeaking(at: .immediate)
-        playing = nil; saying = nil
+        playing = nil; saying = nil; rendering = nil
     }
 
     private nonisolated static func finished(_ then: @escaping @MainActor () -> Void) -> @Sendable (AVAudioPlayerNodeCompletionCallbackType) -> Void {
@@ -1030,9 +1066,21 @@ final class TalkSession {
     final class Rendered: @unchecked Sendable {
         private let lock = NSLock()
         private var all: [AVAudioPCMBuffer] = []
+        private var over = false
         var buffers: [AVAudioPCMBuffer] { lock.withLock { all } }
         var isEmpty: Bool { lock.withLock { all.isEmpty } }
+        var finished: Bool { lock.withLock { over } }
         func add(_ b: AVAudioPCMBuffer) { lock.withLock { all.append(b) } }
+        func finish() { lock.withLock { over = true } }
+    }
+    private struct Rendering {
+        let box: Rendered
+        let id: Message.ID
+        let text: String
+        let gen: Int
+        var taken = 0
+        var format: AVAudioFormat?
+        var queued = 0.0, played = 0.0
     }
 
     /// The phone's voice spoken straight out, telling talk how far it has got and when it's done.
@@ -1048,9 +1096,9 @@ final class TalkSession {
         }
     }
 
-    private nonisolated static func collect(_ box: Rendered, then: @escaping @MainActor () -> Void) -> AVSpeechSynthesizer.BufferCallback {
+    private nonisolated static func collect(_ box: Rendered) -> AVSpeechSynthesizer.BufferCallback {
         { buffer in
-            guard let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 else { Task { @MainActor in then() }; return }
+            guard let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 else { return box.finish() }
             box.add(pcm)
         }
     }
