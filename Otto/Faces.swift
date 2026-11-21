@@ -299,6 +299,9 @@ enum FaceCache {
         }
     }
 
+    /// One blink, now.
+    func blink() { blinkAt = CACurrentMediaTime(); run() }
+
     /// Eyes and head turn a little to one side, as if something caught its eye, and come back.
     func glance() {
         guard let look = lastLook, look.state == .rest, to?.u.arc == 0 else { return }
@@ -601,6 +604,13 @@ final class FaceUIView: UIView {
         imageLayer.add(looped(a, phase), forKey: "blink")
     }
 
+    /// A new count is one blink.
+    func blink(_ n: Int) {
+        defer { blinked = n }
+        if let last = blinked, n != last { liveLayer?.blink() }
+    }
+    private var blinked: Int?
+
     /// A new joy is a beat: the eyes close into smiles. (The hop that goes with it is SwiftUI's, `.hop`.)
     func beat(joys: Int) {
         defer { beats = joys }
@@ -735,12 +745,15 @@ struct FaceView: UIViewRepresentable {
     var ring: UIColor = .systemBackground
     /// Bump for a beat of joy (a job merged, a poke): the eyes smile. Pair it with `.hop`.
     var joys = 0
+    /// Bump for one blink now (the launch's face, once it has landed). Live faces only.
+    var blinks = 0
 
     func makeUIView(context: Context) -> FaceUIView { FaceUIView() }
     func updateUIView(_ v: FaceUIView, context: Context) {
         v.ring = ring
         v.configure(look: look, size: size, live: live, drift: drift, ringed: ringed)
         v.beat(joys: joys)
+        v.blink(blinks)
     }
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: FaceUIView, context: Context) -> CGSize? { CGSize(width: size, height: size) }
 }

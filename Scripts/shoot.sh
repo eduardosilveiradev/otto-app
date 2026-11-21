@@ -111,6 +111,12 @@ shot onboarding share 4 "Share-sheet step" -onboarding -onboardingStep 4 $N
 shot onboarding awake 4 "Stay-connected step" -onboarding -onboardingStep 5 $N
 shot onboarding done 4 "All set" -onboarding -onboardingStep 6 $N
 shot launch connecting 4 "Splash while the Mac is being reached" $DEAD $N -holdSplash
+# The cold launch held at one moment (-launchAt <ms>, LaunchMorph.swift); the greeting follows the clock.
+shot launch wordmark 6 "Cold launch, 400 ms: the wordmark, Otto's face beside it" $B -demoThread -launchAt 400
+shot launch greeting 6 "Cold launch, 1300 ms: the wordmark has opened into the greeting, the face above it" $B -demoThread -launchAt 1300
+shot launch folding 6 "Cold launch, 1950 ms: the greeting folds into the composer, the face lifts to the header" $B -demoThread -launchAt 1950
+shot launch landed 6 "Cold launch, 2400 ms: landed on the real placeholder and header face, the chat in around them" $B -demoThread -launchAt 2400
+shot launch landed-pips 6 "Cold launch, 2400 ms, pips on: the face lands in the bigger header face beside the drawer button" $O -demoThread -launchAt 2400
 
 # --- Otto's thread -------------------------------------------------------------------
 shot chat empty 6 "Fresh thread, nothing yet" $O -emptyThread
