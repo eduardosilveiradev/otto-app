@@ -201,10 +201,11 @@ shot sheet job 7 "Job detail sheet: a job up for review, with its pull request" 
 shot chat jobs-worst 6 "Worst case: a long title and question with five answers, a state this build doesn't know, a job the Mac no longer lists" $O -jobsThread worst
 shot sheet job-worst 7 "Worst case opened: a failure with a long error, thirty steps and a pull request in the thousands" $O -jobsThread worst -jobOpen worst-failed
 shot talk listening 7 "Talk, listening: nothing said yet" $O -demoThread -talk -talkState listening
-shot talk hearing 7 "Talk, your turn: the ring follows your voice" $O -demoThread -talk -talkState hearing
+shot talk hearing 7 "Talk, your turn: your words as the Mac hears them, the last one still a guess" $O -demoThread -talk -talkState hearing
+shot talk missed 7 "Talk, the Mac heard nothing it could write down" $O -demoThread -talk -talkState missed
 shot talk thinking 7 "Talk, thinking: what you said, once the Mac has written it down" $O -demoThread -talk -talkState thinking
 shot talk speaking 7 "Talk, Otto speaking: its words light up as it says them" $O -demoThread -talk -talkState speaking
-shot talk cut-in 7 "Talk, you cut in: Otto stopped where it was" $O -demoThread -talk -talkState cutin
+shot talk cut-in 7 "Talk, you cut in: Otto stopped where it was, and your words come in under it" $O -demoThread -talk -talkState cutin
 shot talk working 7 "Talk, Otto working: its steps and the page it has open" $O -demoThread -talk -talkState working -thinking -browserTile
 shot talk working-private 7 "Talk, working on a sign-in page: caption only" $O -demoThread -talk -talkState working -thinking -browserTile private
 shot talk long 7 "Worst case: a long answer, part said" $O -demoThread -talk -talkState long
