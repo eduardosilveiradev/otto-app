@@ -101,11 +101,11 @@ final class TalkMic: @unchecked Sendable {
 
     func heard(_ b: AVAudioPCMBuffer) {
         let rms = Self.rms(b)
-        let copy = Self.copy(b)
+        let copy = Self.mono(b)
         lock.withLock {
             mic = rms
-            if let file { try? file.write(from: b); return }
             guard let copy else { return }
+            if let file { try? file.write(from: copy); return }
             preroll.append(copy); prerollFrames += copy.frameLength
             // About 0.4 s kept: the voice that started the turn was already under way when it was recognised as one.
             while prerollFrames > AVAudioFrameCount(b.format.sampleRate * 0.4), preroll.count > 1 {
@@ -116,11 +116,11 @@ final class TalkMic: @unchecked Sendable {
 
     func played(_ b: AVAudioPCMBuffer) { let rms = Self.rms(b); lock.withLock { otto = rms } }
 
-    /// Opens a turn's file in the microphone's own format (AAC; the Mac's transcriber takes it as a voice note does).
+    /// Opens a turn's file: AAC, mono, at the microphone's rate (the Mac's transcriber takes it as it takes a voice note).
     func begin(_ url: URL, format: AVAudioFormat) throws {
         let f = try AVAudioFile(forWriting: url, settings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: format.sampleRate,
-            AVNumberOfChannelsKey: format.channelCount, AVEncoderBitRateKey: 48_000,
+            AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 48_000,
         ], commonFormat: .pcmFormatFloat32, interleaved: false)
         lock.withLock {
             for b in preroll { try? f.write(from: b) }
@@ -144,11 +144,14 @@ final class TalkMic: @unchecked Sendable {
         return (sum / Float(b.frameLength)).squareRoot()
     }
 
-    private static func copy(_ b: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        guard let c = AVAudioPCMBuffer(pcmFormat: b.format, frameCapacity: b.frameLength),
+    /// The first channel, copied: the engine reuses its buffers, and the voice-processing input can carry more
+    /// channels than a voice note needs (the simulator's did, and the AAC writer refused them).
+    private static func mono(_ b: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let f = AVAudioFormat(standardFormatWithSampleRate: b.format.sampleRate, channels: 1),
+              let c = AVAudioPCMBuffer(pcmFormat: f, frameCapacity: b.frameLength),
               let from = b.floatChannelData, let to = c.floatChannelData else { return nil }
         c.frameLength = b.frameLength
-        for ch in 0..<Int(b.format.channelCount) { to[ch].update(from: from[ch], count: Int(b.frameLength)) }
+        to[0].update(from: from[0], count: Int(b.frameLength))
         return c
     }
 }
@@ -215,6 +218,7 @@ final class TalkSession {
     @ObservationIgnored private var observers: [any NSObjectProtocol] = []
     @ObservationIgnored private var activity: Activity<TalkActivityAttributes>?
     @ObservationIgnored private var shown: TalkActivityAttributes.ContentState?
+    @ObservationIgnored private var tried = Date.distantPast
     #if DEBUG
     @ObservationIgnored var fixtureTexts: [Message.ID: String] = [:]
     @ObservationIgnored private var firstSpoke: Date?
@@ -256,7 +260,7 @@ final class TalkSession {
     func start() async {
         Self.current = self
         Self.active = true
-        ended = false; endedAt = nil; started = .now; asked = .now
+        ended = false; endedAt = nil; started = .now; asked = .now; tried = .distantPast
         lines = []; steps = []; cutIn = false; awaiting = false; saying = nil; said = 0
         heard = Set(store.messages.map(\.id))
         AudioPlayer.shared.stop()   // a voice note playing in the thread
@@ -314,8 +318,11 @@ final class TalkSession {
             try s.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
             try s.setActive(true)
             let e = AVAudioEngine()
-            // On before the format is read: it changes the input's format. The simulator may refuse it; that's fine there.
+            // On before the format is read: it changes the input's format. Not in the simulator, whose Mac-side voice
+            // processing stops the engine every few hundred milliseconds (and there's no speaker to echo there anyway).
+            #if !targetEnvironment(simulator)
             try? e.inputNode.setVoiceProcessingEnabled(true)
+            #endif
             let input = e.inputNode
             let f = input.outputFormat(forBus: 0)
             guard f.sampleRate > 0, f.channelCount > 0 else { throw CocoaError(.featureUnsupported) }
@@ -360,10 +367,14 @@ final class TalkSession {
                 }
             },
             // AirPods in or out: the input's format changes under the engine, which stops. Built again on the new route.
+            // One still running (voice processing settling in posts one too) is left alone, or it would rebuild forever.
             nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] n in
                 let changed = n.object as AnyObject?
                 MainActor.assumeIsolated {
-                    guard let self, !self.ended, self.mic == .on, changed === self.engine else { return }
+                    guard let self, !self.ended, self.mic == .on, let e = self.engine, changed === e, !e.isRunning else { return }
+                    #if DEBUG
+                    NSLog("talk: engine stopped by a route change, rebuilding")
+                    #endif
                     self.pause()
                     Task { await self.resume() }
                 }
@@ -417,7 +428,12 @@ final class TalkSession {
         if saying != nil { cut() }
         guard let format else { return }
         let url = URL.temporaryDirectory.appending(path: "talk-\(UUID().uuidString).m4a")
-        guard (try? tap.begin(url, format: format)) != nil else { return }
+        do { try tap.begin(url, format: format) } catch {
+            #if DEBUG
+            NSLog("talk: no turn file for %@: %@", format.description, String(describing: error))
+            #endif
+            return
+        }
         turn = url
         hearing = true
     }
@@ -564,12 +580,22 @@ final class TalkSession {
     private func show() {
         guard !ended else { return }
         let state = outside
+        guard let a = activity else {
+            // Only the app in front may start one. Opened from the Action Button or a widget, the talk can start before
+            // the app is: it's asked again on every tick until it's up.
+            guard UIApplication.shared.applicationState == .active, ActivityAuthorizationInfo().areActivitiesEnabled,
+                  Date.now.timeIntervalSince(tried) > 2 else { return }
+            tried = .now
+            do { activity = try Activity.request(attributes: TalkActivityAttributes(), content: .init(state: state, staleDate: nil)); shown = state } catch {
+                #if DEBUG
+                NSLog("talk: no live activity yet: %@", String(describing: error))
+                #endif
+            }
+            return
+        }
         guard state != shown else { return }
         shown = state
-        if let a = activity { Task { await a.update(.init(state: state, staleDate: nil)) } }
-        else if ActivityAuthorizationInfo().areActivitiesEnabled {
-            activity = try? Activity.request(attributes: TalkActivityAttributes(), content: .init(state: state, staleDate: nil))
-        }
+        Task { await a.update(.init(state: state, staleDate: nil)) }
     }
 
     private var outside: TalkActivityAttributes.ContentState {
@@ -587,7 +613,8 @@ final class TalkSession {
         case .working: ("Working", steps.last?.text ?? "", "ellipsis")
         case .listening: ("Listening", otto, "waveform")
         }
-        return .init(title: title, line: line, symbol: muted && mic == .on ? "mic.slash" : symbol, started: started, muted: muted)
+        let mute = muted && mic == .on
+        return .init(title: mute && phase == .listening ? "Muted" : title, line: line, symbol: mute ? "mic.slash" : symbol, started: started, muted: muted)
     }
 
     // MARK: DEBUG
@@ -836,7 +863,7 @@ struct TalkView: View {
                     let newest = i == min(session.steps.count, 4) - 1
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text(Duration.seconds(step.at).formatted(.time(pattern: .minuteSecond)))
-                            .font(size: 13, relativeTo: .footnote).monospacedDigit().foregroundStyle(.tertiary)
+                            .font(size: 13, relativeTo: .footnote).monospacedDigit().foregroundStyle(.secondary)
                         Text(step.text).font(size: 15, relativeTo: .subheadline)
                             .foregroundStyle(newest ? .primary : .secondary).lineLimit(2)
                     }
@@ -897,7 +924,8 @@ private struct Lit: View {
     let fraction: Double
     var body: some View {
         let head = Self.head(text, fraction)
-        Text("\(Text(head))\(Text(text.dropFirst(head.count)).foregroundStyle(.tertiary))")
+        // Half white for what's still to come: dimmer than the said part at a glance, and still 5:1 on black to read.
+        Text("\(Text(head))\(Text(text.dropFirst(head.count)).foregroundStyle(.white.opacity(0.5)))")
             .lineLimit(6)
             .accessibilityLabel(text)
     }
