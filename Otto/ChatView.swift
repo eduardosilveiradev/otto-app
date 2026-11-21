@@ -389,7 +389,6 @@ struct ChatView: View {
                 }
         }
         .fullScreenCover(isPresented: webCall) { CallView(context: callContext) }
-        .fullScreenCover(isPresented: Binding(get: { TalkLauncher.shared.open }, set: { TalkLauncher.shared.open = $0 })) { TalkView() }
         .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
             MediaViewerView(store: store).presentationBackground(.clear)
         }

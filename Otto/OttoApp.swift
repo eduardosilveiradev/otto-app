@@ -137,6 +137,9 @@ private struct MainRoot: View {
                 #endif
                 withAnimation(.easeOut(duration: 0.25)) { splashing = false }
             }
+            // Talk lives here, over whichever thread is showing, not on the thread: a thread swapped under it (the pips
+            // arriving at launch, a door opening Otto's thread) would take the talk down with it.
+            .fullScreenCover(isPresented: Binding(get: { TalkLauncher.shared.open }, set: { TalkLauncher.shared.open = $0 })) { TalkView().environment(store) }
             // (An approval's sheet goes up from ApprovalPresenter, over whatever is on top.)
             // A pairing link opened once the app is set up: named and confirmed before it replaces the Mac. After an
             // approval's sheet, never at the same time: two presentations from one place and neither shows.
