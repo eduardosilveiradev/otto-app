@@ -193,6 +193,7 @@ struct OttoTalkActivity: Widget {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         Text(context.state.title).font(.headline).lineLimit(1)
+                        if context.state.sharing { Sees() }
                         CallTime(started: context.state.started, alignment: .leading).font(.subheadline).foregroundStyle(.secondary)
                     }
                     // Otto's words can name what it's reading or buying: hidden while the phone is locked.
@@ -211,7 +212,12 @@ struct OttoTalkActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) { OttoFace(size: 36) }
-                DynamicIslandExpandedRegion(.center) { Text(context.state.title).font(.headline).lineLimit(1) }
+                DynamicIslandExpandedRegion(.center) {
+                    HStack(spacing: 6) {
+                        Text(context.state.title).font(.headline).lineLimit(1)
+                        if context.state.sharing { Sees() }
+                    }
+                }
                 DynamicIslandExpandedRegion(.trailing) { CallTime(started: context.state.started).font(.headline) }
                 DynamicIslandExpandedRegion(.bottom) {
                     HStack(alignment: .center, spacing: 12) {
@@ -229,6 +235,14 @@ struct OttoTalkActivity: Widget {
             }
             .widgetURL(URL(string: "otto://walkie"))
         }
+    }
+}
+
+/// Otto sees your screen: a phone beside the talk's title, as the compact island shows it.
+struct Sees: View {
+    var body: some View {
+        Image(systemName: "iphone").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            .accessibilityLabel("Otto sees your screen")
     }
 }
 

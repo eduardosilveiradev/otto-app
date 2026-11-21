@@ -1,6 +1,7 @@
 import ActivityKit
 import AppIntents
 import AVFoundation
+import ReplayKit
 import SwiftUI
 import VoiceRingKit
 
@@ -325,6 +326,12 @@ final class TalkSession {
     private(set) var missed = false
     /// Otto's steps on what you last asked, as its status line changed.
     private(set) var steps: [Step] = []
+    /// Your screen goes to Otto with what you say (the OttoScreen broadcast), from when iOS's sheet starts it.
+    private(set) var sharing = false
+    /// The Mac doesn't take your screen (talk.error "unknown talk frame"): Share stays off on this connection.
+    private(set) var screenRefused = false
+    /// Why sharing just stopped, for a few seconds.
+    private(set) var shareNote: String?
 
     @ObservationIgnored private var engine: AVAudioEngine?
     @ObservationIgnored private var player = AVAudioPlayerNode()
@@ -370,7 +377,16 @@ final class TalkSession {
     /// When the engine last stopped under the talk, and whether it now runs without voice processing because of them.
     @ObservationIgnored private var stops: [Date] = []
     @ObservationIgnored private var plain = false
+    @ObservationIgnored private var shareNoteAt = Date.distantPast
+    @ObservationIgnored private var shareSince = Date.distantPast
+    /// When a frame of your screen last went, and which one (its file's date).
+    @ObservationIgnored private var screenSent: Date?
+    @ObservationIgnored private var screenSentOf: Date?
+    /// The connection asked whether it takes your screen.
+    @ObservationIgnored private var screenAsked = -1
+    @ObservationIgnored private var stamped = Date.distantPast
     #if DEBUG
+    @ObservationIgnored private var fakeShare: Task<Void, Never>?
     @ObservationIgnored private var firstSpoke: Date?
     @ObservationIgnored private var fakeClips: [AVAudioPCMBuffer] = []
     @ObservationIgnored private var fakeFed: [AVAudioFrameCount] = []
@@ -416,6 +432,7 @@ final class TalkSession {
         lines = []; steps = []; cutIn = false; awaiting = false; saying = nil; said = 0
         words = [:]; guessing = nil; missed = false; turnLine = nil
         outgoing = nil; reply = nil; answering = nil; replies = [:]; pcm = Data(); streams = nil; streamedOnce = false
+        sharing = false; screenRefused = false; shareNote = nil; screenSent = nil; screenSentOf = nil; screenAsked = -1
         heard = Set(store.messages.map(\.id)); seen = [:]
         AudioPlayer.shared.stop()   // a voice note playing in the thread
         UIApplication.shared.isIdleTimerDisabled = true
@@ -426,6 +443,9 @@ final class TalkSession {
         observe()
         listen()
         await openMic()
+        #if DEBUG
+        if Self.fakeScreen { fakeSharing() }
+        #endif
         show()
         loop?.cancel()
         loop = Task { [weak self] in
@@ -439,6 +459,7 @@ final class TalkSession {
     func end() {
         guard !ended else { return }
         ended = true; endedAt = .now
+        stopSharing(nil)   // a talk's end always ends the broadcast, and leaves no frame
         loop?.cancel(); loop = nil
         _ = detector.close()
         hearing = false
@@ -546,6 +567,9 @@ final class TalkSession {
 
     private func observe() {
         guard observers.isEmpty else { return }
+        // The broadcast extension starting and finishing (the system's red pill, Control Center, or its own end).
+        DictationBridge.observe(ScreenShare.started) { MainActor.assumeIsolated { TalkSession.current?.shareStarted() } }
+        DictationBridge.observe(ScreenShare.finished) { MainActor.assumeIsolated { TalkSession.current?.shareFinished() } }
         let nc = NotificationCenter.default
         observers = [
             // A phone call or Siri takes the microphone: what you were saying goes, Otto stops, and the talk waits.
@@ -590,6 +614,7 @@ final class TalkSession {
     // MARK: Every 50 ms
 
     private func tick() {
+        if !ended { screen() }   // first: a paused microphone (a call) doesn't stop sharing
         guard !ended, mic == .on else { return show() }
         var level = muted ? 0 : tap.level
         #if DEBUG
@@ -670,7 +695,7 @@ final class TalkSession {
             if o.abandoned != nil { settle() }
             else {
                 stream()   // what's left of it
-                if o.turn != nil && !o.serverEnded { live?.talkSend(["type": "talk.end"]) }
+                if o.turn != nil && !o.serverEnded { sendEnd() }
             }
         } else {
             note(line, url)
@@ -820,7 +845,7 @@ final class TalkSession {
             if let id = UUID(uuidString: t) { rebind(o.line, to: id); o.line = id }
             outgoing = o
             stream()
-            if o.ended != nil { live?.talkSend(["type": "talk.end"]) }
+            if o.ended != nil { sendEnd() }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-talkDrop"), !dropped, Self.dropAt == "turn" {
                 dropped = true
@@ -874,6 +899,13 @@ final class TalkSession {
         #if DEBUG
         NSLog("talk: %@", error)
         #endif
+        // A Mac that doesn't take your screen: Share goes off and the talk carries on. Before anything about the turn,
+        // since the error carries the turn's id and would otherwise send it as a voice note.
+        if error.contains("unknown talk frame") {
+            screenRefused = true
+            if sharing { stopSharing("Your Mac can’t see your screen yet, so sharing stopped.") }
+            return
+        }
         // About a turn already written down (Otto's speech), or one that carries on: talk.done follows, or the turn does.
         guard let o = outgoing, o.abandoned == nil, o.turn == nil || o.turn == turn else { return }
         if ["send talk.start before audio", "60 second turn limit", "audio must", "speech unavailable"].contains(where: error.hasPrefix) { return }
@@ -894,6 +926,85 @@ final class TalkSession {
         fallBack()
     }
 
+    // MARK: Your screen
+
+    /// Share screen can start: a Mac that streams talk and takes your screen, and a shared folder for the frames.
+    /// In voice-note mode there's no turn on the socket to send them with.
+    var canShare: Bool {
+        #if DEBUG
+        if Self.fixtureState != nil { return !screenRefused }
+        #endif
+        return live != nil && streams != false && !Self.notesOnly && !screenRefused && ScreenShare.dir != nil
+    }
+
+    /// Every tick: say the talk is still here (the extension stops without it), ask a new connection whether it takes
+    /// your screen, notice a share that ended under us, and while you speak send the newest frame at most every 2 s.
+    private func screen() {
+        if Date.now.timeIntervalSince(stamped) >= 1 {
+            stamped = .now
+            ScreenShare.stamp(ScreenShare.appAlive)
+            if shareNote != nil, Date.now.timeIntervalSince(shareNoteAt) > 6 { shareNote = nil }
+            // Before you go through iOS's sheet: a Mac that doesn't know the frame answers "unknown talk frame".
+            if let live, live.isLive, screenAsked != live.connections, !Self.notesOnly {
+                screenAsked = live.connections; screenRefused = false
+                live.talkSend(["type": "talk.screen", "off": true])
+            }
+            if sharing, !canShare { return stopSharing("Your Mac can’t see your screen yet, so sharing stopped.") }
+            // The extension went without a word (out of memory): sharing is over.
+            if sharing, Date.now.timeIntervalSince(shareSince) > ScreenShare.stale, (ScreenShare.age(ScreenShare.extensionAlive) ?? .infinity) > ScreenShare.stale { return stopSharing() }
+        }
+        guard sharing, hearing, let o = outgoing, o.turn != nil, o.abandoned == nil, !o.serverEnded, ScreenShare.due(screenSent),
+              let at = ScreenShare.frameDate(), at != screenSentOf else { return }
+        sendScreen()
+    }
+
+    /// The newest frame, to the Mac. Never read while sharing is off.
+    private func sendScreen() {
+        guard sharing, !screenRefused, let live, let f = ScreenShare.latest() else { return }
+        live.talkSend(["type": "talk.screen", "image": f.jpeg.base64EncodedString(), "width": f.width, "height": f.height])
+        screenSent = .now; screenSentOf = f.at
+    }
+
+    /// Your turn's end, with your screen as it is right then.
+    private func sendEnd() {
+        sendScreen()
+        live?.talkSend(["type": "talk.end"])
+    }
+
+    /// Share screen, for VoiceOver and the DEBUG canned screen: a finger lands on the system's own picker instead.
+    func share() {
+        guard canShare, !sharing else { return }
+        ScreenShare.stamp(ScreenShare.appAlive)
+        #if DEBUG
+        if Self.fakeScreen { return fakeSharing() }
+        #endif
+        BroadcastPicker.open()
+    }
+
+    /// The broadcast started: frames from here on, if this talk can take them; else it's finished at once.
+    private func shareStarted() {
+        guard !ended, canShare else { return stopSharing(nil) }
+        sharing = true; shareNote = nil; shareSince = .now; screenSent = nil; screenSentOf = nil
+    }
+
+    /// The broadcast finished on its own: the system's red pill, Control Center, or the extension giving up.
+    private func shareFinished() { if sharing { stopSharing() } }
+
+    /// Sharing stops, whatever stopped it: the Mac is told, the frame goes, and the broadcast is finished.
+    func stopSharing(_ note: String? = "Stopped sharing. Otto can’t see your screen.") {
+        let was = sharing
+        sharing = false
+        #if DEBUG
+        fakeShare?.cancel(); fakeShare = nil
+        #endif
+        ScreenShare.clear()
+        DictationBridge.post(ScreenShare.stop)
+        guard was else { return }
+        if !screenRefused { live?.talkSend(["type": "talk.screen", "off": true]) }
+        screenSent = nil; screenSentOf = nil
+        if let note { shareNote = note; shareNoteAt = .now }
+    }
+
     // MARK: Otto's voice
 
     /// How long a reply's own voice is waited for before its words go out in the phone's voice. A voice note's
@@ -910,6 +1021,14 @@ final class TalkSession {
     static let notesOnly = ProcessInfo.processInfo.arguments.contains("-talkNoStream")
     #else
     static let notesOnly = false
+    #endif
+    #if DEBUG
+    /// `-talkScreen [seconds]`: a canned screen stands in for the broadcast extension (which the simulator can't run),
+    /// from the talk's start and on Share: written through the same pipeline and into the same file, and sent the same
+    /// way. With seconds, sharing stops after that long, as the chip at the top stops it.
+    static let fakeScreen = ProcessInfo.processInfo.arguments.contains("-talkScreen")
+    #else
+    static let fakeScreen = false
     #endif
 
     enum Say: Equatable { case clip, text, wait, skip }
@@ -1294,7 +1413,13 @@ final class TalkSession {
         case .listening: ("Listening", otto, "waveform")
         }
         let mute = muted && mic == .on
-        return .init(title: mute && phase == .listening ? "Muted" : title, line: line, symbol: mute ? "mic.slash" : symbol, started: started, muted: muted)
+        // Sharing shows in the compact island as a phone, as the mockup has it; its stopping, in words.
+        let inTalk = [.hearing, .speaking, .thinking, .working, .listening].contains(phase)
+        if inTalk, !sharing, shareNote != nil, phase == .listening || phase == .thinking {
+            return .init(title: "Stopped sharing", line: "Otto can’t see your screen any more.", symbol: "iphone.slash", started: started, muted: muted)
+        }
+        return .init(title: mute && phase == .listening ? "Muted" : title, line: line,
+                     symbol: mute ? "mic.slash" : sharing && inTalk ? "iphone" : symbol, started: started, muted: muted, sharing: sharing)
     }
 
     // MARK: DEBUG
@@ -1340,6 +1465,9 @@ final class TalkSession {
         case "paused": mic = .paused
         case "failed": lines = []; mic = .failed
         case "muted": lines = []; muted = true
+        case "share": saying = say(true, 6, offer); said = 0.48; sharing = true
+        case "share-stopped": lines = []; shareNote = "Stopped sharing. Otto can’t see your screen."
+        case "share-refused": lines = []; screenRefused = true
         case "ended":
             _ = say(true, 6, "There’s a 7:52 from Milano Centrale that gets you in at 8:55, and an 8:10 that’s cheaper but slower. Want the 7:52?", cut: 0.42)
             _ = say(false, 11, "The 7:52, window seat please.")
@@ -1357,6 +1485,43 @@ final class TalkSession {
         default: break
         }
         show()
+    }
+
+    /// The canned screen in place of the extension (`fakeScreen`).
+    private func fakeSharing() {
+        guard canShare, !sharing else { return }
+        let context = CIContext(), canned = Self.cannedScreen()
+        ScreenShare.stamp(ScreenShare.extensionAlive)
+        shareStarted()
+        let a = ProcessInfo.processInfo.arguments, since = Date.now
+        let stopAfter = a.firstIndex(of: "-talkScreen").flatMap { a.indices.contains($0 + 1) ? TimeInterval(a[$0 + 1]) : nil }
+        fakeShare = Task { [weak self] in
+            var wrote: Date?
+            while !Task.isCancelled, self?.sharing == true {
+                if let stopAfter, Date.now.timeIntervalSince(since) > stopAfter { self?.stopSharing(); return }
+                ScreenShare.stamp(ScreenShare.extensionAlive)
+                if ScreenShare.due(wrote), let jpeg = ScreenShare.jpeg(canned, context: context) { ScreenShare.write(jpeg); wrote = .now }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    /// A phone-sized screen (1206 × 2622 px) of a checkout form.
+    static func cannedScreen() -> CIImage {
+        let f = UIGraphicsImageRendererFormat(); f.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 1206, height: 2622), format: f).image { c in
+            UIColor.white.setFill(); c.fill(CGRect(x: 0, y: 0, width: 1206, height: 2622))
+            let big: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 84, weight: .bold), .foregroundColor: UIColor.black]
+            let body: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 48), .foregroundColor: UIColor.darkGray]
+            ("Checkout" as NSString).draw(at: CGPoint(x: 72, y: 220), withAttributes: big)
+            for (i, label) in ["Name", "Street address", "Postcode", "City", "Card number"].enumerated() {
+                (label as NSString).draw(at: CGPoint(x: 72, y: 420 + i * 260), withAttributes: body)
+                UIColor.systemGray4.setStroke()
+                UIBezierPath(roundedRect: CGRect(x: 72, y: 490 + i * 260, width: 1062, height: 130), cornerRadius: 24).stroke()
+            }
+            ("The address doesn’t match the postcode." as NSString).draw(at: CGPoint(x: 72, y: 1780), withAttributes: [.font: UIFont.systemFont(ofSize: 44), .foregroundColor: UIColor.systemRed])
+        }
+        return CIImage(image: image) ?? CIImage(color: .white).cropped(to: CGRect(x: 0, y: 0, width: 1206, height: 2622))
     }
 
     /// `-talkDrop turn|answer`: the socket cut a second into your first streamed turn, or as Otto's first answer starts.
@@ -1449,9 +1614,11 @@ struct TalkView: View {
                 Text("Otto").font(size: 17, weight: .semibold, relativeTo: .headline)
                 Text(session.started, style: .timer).font(size: 17, relativeTo: .headline).monospacedDigit().foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20).padding(.top, 12)
             .accessibilityElement(children: .combine)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Over the row, not in it: the row keeps its height as sharing comes and goes.
+            .overlay(alignment: .trailing) { if session.sharing { sees } }
+            .padding(.horizontal, 20).padding(.top, 12)
 
             Spacer(minLength: 12)
             VStack(spacing: 0) {
@@ -1462,8 +1629,15 @@ struct TalkView: View {
             .animation(still ? .easeOut(duration: 0.2) : .spring(duration: 0.35, bounce: 0), value: working)
             Spacer(minLength: 12)
 
-            controls.padding(.bottom, 16)
+            controls
+                .overlay(alignment: .top) {
+                    // A zero-height frame on the controls' top edge, the note hanging up from it: never over the buttons.
+                    if let note = session.shareNote { stopped(note).containerRelativeFrame(.horizontal).frame(height: 0, alignment: .bottom).offset(y: -20) }
+                }
+                .animation(.easeOut(duration: 0.2), value: session.shareNote)
+                .padding(.bottom, 16)
         }
+        .onChange(of: session.shareNote) { _, note in if let note { AccessibilityNotification.Announcement(note).post() } }
         // Past the first accessibility size the working state (steps and the page) no longer fits one screen.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
@@ -1614,10 +1788,37 @@ struct TalkView: View {
         .transition(.opacity)
     }
 
+    // MARK: Your screen
+
+    /// While Otto sees your screen: says so at the top, and a tap stops it.
+    private var sees: some View {
+        Button { session.stopSharing() } label: {
+            Label("Sees your screen", systemImage: "iphone")
+                .font(size: 13, weight: .semibold, relativeTo: .footnote)
+                .padding(.horizontal, 12).frame(height: 30)
+                .background(.white.opacity(0.12), in: .capsule)
+                .frame(minHeight: 44).contentShape(.rect)
+        }
+        .buttonStyle(.press)
+        .accessibilityLabel("Otto sees your screen")
+        .accessibilityHint("Stops sharing your screen.")
+    }
+
+    /// Why sharing just stopped, above the controls for a few seconds.
+    private func stopped(_ note: String) -> some View {
+        Label(note, systemImage: "iphone.slash")
+            .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(.white.opacity(0.12), in: .rect(cornerRadius: 16, style: .continuous))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 20)
+            .transition(.opacity)
+    }
+
     // MARK: Controls
 
     private var controls: some View {
-        HStack(spacing: 56) {
+        HStack(spacing: 40) {
             let on = session.mic == .on
             TalkButton(symbol: session.muted ? "mic.slash.fill" : "mic.fill",
                        label: on ? (session.muted ? "Unmute" : "Mute") : "Mic off",
@@ -1626,9 +1827,41 @@ struct TalkView: View {
             }
             .disabled(!on)
             .accessibilityAddTraits(session.muted ? .isSelected : [])
+            let sharing = session.sharing, can = session.canShare
+            TalkButton(symbol: "iphone", label: sharing ? "Sharing" : can ? "Share screen" : "Can’t share",
+                       fill: sharing ? .white : .white.opacity(0.16), tint: sharing ? .black : .white) {
+                if sharing { session.stopSharing() } else { session.share() }
+            }
+            .disabled(!sharing && !can)
+            .accessibilityAddTraits(sharing ? .isSelected : [])
+            .accessibilityHint(sharing ? "Stops sharing your screen." : can ? "Otto sees your screen while you talk." : "Your Mac can’t see your screen yet.")
+            // The system's own picker over the circle, so a finger opens iOS's sheet with Otto picked.
+            .overlay(alignment: .top) {
+                if !sharing && can && !TalkSession.fakeScreen { BroadcastPicker().frame(width: 64, height: 64).accessibilityHidden(true) }
+            }
             TalkButton(symbol: "xmark", label: "End", fill: .red, tint: .white) { session.end() }
         }
     }
+}
+
+/// The system's Start Broadcast button, preselected to Otto's extension, laid unseen over Share: iOS's sheet opens
+/// for a touch on it or for its own button's action, not for an app's call.
+private struct BroadcastPicker: UIViewRepresentable {
+    @MainActor static weak var shown: RPSystemBroadcastPickerView?
+
+    func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
+        let p = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
+        p.preferredExtension = ScreenShare.extensionID
+        p.showsMicrophoneButton = false
+        p.alpha = 0.02   // unseen, and still touched: UIKit stops hit-testing a view below 0.01
+        Self.shown = p
+        return p
+    }
+
+    func updateUIView(_ p: RPSystemBroadcastPickerView, context: Context) {}
+
+    /// Its button's action, for VoiceOver's activate and the label under the circle, which land on Share instead.
+    @MainActor static func open() { for case let b as UIButton in shown?.subviews ?? [] { b.sendActions(for: .touchUpInside) } }
 }
 
 /// A round control with its name under it, as the Phone app draws them.
