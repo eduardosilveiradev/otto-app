@@ -14,10 +14,67 @@
  *   add &quiet=1 to either to send no socket frame, so only GET /app/approvals can tell the phone
  *   curl -X POST 'localhost:<port>/test/browser'             show a page Otto is stuck on, that it will hand over
  *   curl -X POST 'localhost:<port>/test/working'             Otto starts a turn ("Reading your mail"): the bubble that Stop is on
+ *
+ * Talk (otto-core's otto/talk.ts), unless `old`: talk.start is answered, the turn's audio is taken and dropped, and
+ * talk.end gets a transcript, then an answer whose voice is the WAV clips in TALK_CLIPS (a folder of s<sentence>-<n>.wav,
+ * cut as the Mac cuts them), sent TALK_PACE times slower than they play (1.3: a busy Mac), each late or early by up
+ * to TALK_JITTER of its length, with a talk.timing frame and a pause before each sentence as the Mac's speech makes.
+ * The answer also comes as a thread message, as otto-core sends it. TALK_DROP=speaking|ended|final|answer closes the
+ * socket at that stage and stays unreachable for TALK_DOWN seconds (7): a lift, a tunnel, cellular. A closed socket's
+ * turns go as otto-core's do: one still being said or written down is dropped, one already written down gets its answer
+ * as a thread message only. POST /app/voice takes a note in once per id. Every turn Otto takes in is logged as
+ * "TURN <n>", and one refused as already in as "deduped": one utterance should make exactly one TURN.
  */
 const port = Number(process.argv[2] ?? 4599), delay = Number(process.argv[3] ?? 0), old = process.argv[4] === 'old'
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 23), ...a)
 const sockets = new Set<any>()
+import { readdirSync, readFileSync } from 'fs'
+const clipDir = process.env.TALK_CLIPS, pace = Number(process.env.TALK_PACE ?? 1), jitter = Number(process.env.TALK_JITTER ?? 0)
+const clips = clipDir ? readdirSync(clipDir).filter(f => /^s\d+-\d+\.wav$/.test(f)).sort() : []
+const cuts = new Set<string>()
+type Talk = { turn: string; phase: 'mic' | 'written' | 'answering'; audio: number }
+const talks = new Map<unknown, Talk>()
+const answerText = process.env.TALK_TEXT ?? 'Sunlight is a mix of every colour. The air scatters blue light much more than red.'
+const dropAt = process.env.TALK_DROP, downFor = Number(process.env.TALK_DOWN ?? 7) * 1000
+let downUntil = 0, dropped = false
+const rows: Record<string, unknown>[] = []   // the thread since start, as /app/history serves it
+const taken = new Map<string, string>()   // what Otto took in, by id: one per thing you said
+function takeIn(id: string, how: string): boolean {
+  if (taken.has(id)) { log(`deduped ${how} ${id} (already in by ${taken.get(id)})`); return false }
+  taken.set(id, how); log(`TURN ${taken.size} by ${how} ${id}`)
+  rows.push({ dir: 'in', text: 'Why is the sky blue?', ts: new Date().toISOString(), id })
+  return true
+}
+/** Otto's answer as a thread message, to whoever is connected and to history. */
+function answer(to: string) {
+  const m = { type: 'message', id: crypto.randomUUID().slice(0, 8), text: answerText, ts: new Date().toISOString(), voice: null, reply_to: to }
+  log('answer as a message to', to)
+  rows.push({ dir: 'out', ...m }); for (const ws of sockets) ws.send(JSON.stringify(m))
+}
+function drop(ws: any, stage: string): boolean {
+  if (dropped || dropAt !== stage) return false
+  dropped = true; downUntil = Date.now() + downFor; log(`DROP at ${stage}, down ${downFor} ms`)
+  ws.close(1001, 'lost'); return true
+}
+/** One answer's voice down the socket, clip by clip, at the Mac's pace. A WAV's length: its data bytes at 16-bit mono. */
+async function speak(ws: any, turn: string) {
+  let seq = 0, sentence = ''
+  for (const f of clips) {
+    if (seq === 4 && drop(ws, 'answer')) return
+    if (cuts.has(turn)) return
+    const wav = readFileSync(`${clipDir}/${f}`), seconds = (wav.length - 44) / 2 / wav.readUInt32LE(24)
+    if (f.split('-')[0] !== sentence) {
+      sentence = f.split('-')[0]
+      await Bun.sleep(800)   // the next sentence's first clip, from the warm daemon
+      ws.send(JSON.stringify({ type: 'talk.timing', turn, sentenceToAudioMs: 800 }))
+    }
+    await Bun.sleep(seconds * 1000 * (pace + (Math.random() * 2 - 1) * jitter))
+    if (cuts.has(turn)) return
+    log('clip', f, `${Math.round(seconds * 1000)} ms`)
+    ws.send(JSON.stringify({ type: 'talk.audio', turn, seq: seq++, audio: wav.toString('base64'), format: 'wav' }))
+  }
+  ws.send(JSON.stringify({ type: 'talk.done', turn }))
+}
 const expires = () => new Date(Date.now() + 24 * 60_000).toISOString()
 type Approval = Record<string, unknown> & { id: string }
 const approvals = new Map<string, Approval>()
@@ -46,6 +103,14 @@ Bun.serve({
   async fetch(req, server) {
     const u = new URL(req.url), p = u.pathname
     if (p !== '/app') log(req.method, p + u.search, req.headers.get('x-otto-background') ? '(background)' : '')
+    if (Date.now() < downUntil && !p.startsWith('/test/')) return new Response('down', { status: 503 })   // out of reach
+    if (p === '/app/voice' && req.method === 'POST' && !old) {
+      const id = u.searchParams.get('id') ?? crypto.randomUUID()
+      await req.arrayBuffer()
+      log('note', id, 'via', u.searchParams.get('via') ?? '-')
+      if (takeIn(id, 'note')) setTimeout(() => answer(id), 1500)
+      return Response.json({ text: 'Why is the sky blue?' })
+    }
     if (p === '/app') { await Bun.sleep(delay); return server.upgrade(req) ? undefined : new Response('upgrade failed', { status: 400 }) }
     if (p === '/test/raise') {
       const a = demo(u.searchParams.get('kind') ?? 'cal'); approvals.set(a.id, a); alerted.delete(a.id)
@@ -55,7 +120,7 @@ Bun.serve({
       return Response.json(a)
     }
     if (p === '/test/settle') { const id = u.searchParams.get('id')!; approvals.delete(id); if (u.searchParams.get('quiet') !== '1') for (const ws of sockets) ws.send(JSON.stringify({ type: 'approval_done', id })); return Response.json({ ok: true }) }
-    if (p === '/app/history') return Response.json([{ dir: 'out', text: 'Morning. Two things today: the dentist at 16:00 and the boiler man between 9 and 11.', ts: new Date(Date.now() - 3600_000).toISOString(), id: 'h1' }])
+    if (p === '/app/history') return Response.json([{ dir: 'out', text: 'Morning. Two things today: the dentist at 16:00 and the boiler man between 9 and 11.', ts: new Date(Date.now() - 3600_000).toISOString(), id: 'h1' }, ...rows])
     if (p === '/app/brief') return Response.json({ asOf: new Date().toISOString(), events: [], inbox: [], bulk: 0, loops: [], triggers: [] })
     if (p === '/app/settings') return Response.json({ toggles: [] })
     if (old) return new Response('not found', { status: 404 })
@@ -84,11 +149,47 @@ Bun.serve({
       for (const a of approvals.values()) ws.send(frame(a))
       if (browsing && !old) ws.send(browserFrame())
     },
-    close(ws) { sockets.delete(ws); log('socket closed') },
+    close(ws) {
+      sockets.delete(ws); log('socket closed')
+      // As otto-core does: a turn still being said or written down is dropped; one written down and not yet answered is
+      // answered as a thread message only (Otto takes a few seconds), for whoever is connected by then and in history.
+      const t = talks.get(ws); talks.delete(ws)
+      if (t) cuts.add(t.turn)
+      if (t?.phase === 'mic') log('dropped the turn being said', t.turn)
+      if (t?.phase === 'written') setTimeout(() => answer(t.turn), 3000)
+    },
     message(ws, m) {
-      log('frame', String(m).slice(0, 300))
       try {
         const f = JSON.parse(String(m)); const op = f.op ?? (f.type === 'message' ? f.id : undefined)
+        if (f.type === 'talk.audio') {   // the turn's audio: counted, not kept
+          const t = talks.get(ws)
+          if (t?.phase === 'mic' && ++t.audio === 8) drop(ws, 'speaking')
+          return
+        }
+        log('frame', String(m).slice(0, 300))
+        if (!old && typeof f.type === 'string' && f.type.startsWith('talk.')) {
+          const talk = talks.get(ws), turn = talk?.turn
+          if (f.type === 'talk.start') { const t = crypto.randomUUID(); talks.set(ws, { turn: t, phase: 'mic', audio: 0 }); ws.send(JSON.stringify({ type: 'talk.ready', turn: t, sampleRate: 16000 })) }
+          if (f.type === 'talk.cut') { if (turn) { cuts.add(turn); ws.send(JSON.stringify({ type: 'talk.cut', turn })) } }
+          if (f.type === 'talk.stop') { if (turn) cuts.add(turn); talks.delete(ws) }
+          if (f.type === 'talk.end' && talk?.phase === 'mic') {
+            if (drop(ws, 'ended')) return
+            const said = (t: Record<string, unknown>) => ws.send(JSON.stringify({ turn, ...t }))
+            said({ type: 'talk.ending' }); said({ type: 'talk.final', text: 'Why is the sky blue?' })
+            takeIn(turn!, 'stream')
+            ws.send(JSON.stringify({ type: 'echo', id: turn, text: 'Why is the sky blue?', ts: new Date().toISOString() }))
+            said({ type: 'talk.accepted' })
+            talk.phase = 'written'
+            if (drop(ws, 'final')) return
+            setTimeout(() => {
+              if (!sockets.has(ws) || talks.get(ws) !== talk) return
+              talk.phase = 'answering'
+              said({ type: 'talk.text', text: answerText }); answer(turn!)
+              void speak(ws, turn!)
+            }, 500)
+          }
+          return
+        }
         if (f.type === 'approval_alerted') { alerted.add(f.id); return }
         if (f.type === 'stop') {
           // The turn ends: typing off, and a word in the thread about where it got to.
