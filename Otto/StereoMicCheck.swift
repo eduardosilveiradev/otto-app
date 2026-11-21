@@ -27,10 +27,17 @@ struct StereoMicCheck: View {
                 } header: {
                     Text(check.test?.title ?? "Measurement complete")
                 }
-                if !check.live.isEmpty {
+                if !check.live.isEmpty || !check.secondLive.isEmpty {
                     Section("Live input") {
-                        Text(check.live).monospacedDigit()
-                            .accessibilityHidden(check.busy)
+                        if !check.live.isEmpty {
+                            Text(check.live).monospacedDigit()
+                                .accessibilityHidden(check.busy)
+                        }
+                        if !check.secondLive.isEmpty {
+                            Text("Second input\n\(check.secondLive)")
+                                .monospacedDigit()
+                                .accessibilityHidden(check.busy)
+                        }
                     }
                 }
                 if !check.report.isEmpty {
@@ -112,6 +119,7 @@ struct StereoMicCheck: View {
 
     private(set) var report = ""
     private(set) var live = ""
+    private(set) var secondLive = ""
     private(set) var busy = false
     var hasEngine: Bool { engine != nil }
     var test: Test? { Test.allCases.indices.contains(testIndex) ? Test.allCases[testIndex] : nil }
@@ -218,6 +226,7 @@ struct StereoMicCheck: View {
         testIndex += 1
         busy = false
         live = ""
+        secondLive = ""
     }
 
     private func start(_ test: Test) async throws {
@@ -351,6 +360,7 @@ struct StereoMicCheck: View {
         node.installTap(onBus: 0, bufferSize: 2048, format: format, block: Self.tap(converter) { [weak self] reading, wireFrames in
             guard let self, self.run == token else { return }
             if isSecond {
+                self.secondLive = reading.live
                 if self.measuring { self.secondary.add(reading) }
             } else {
                 if self.measuring {
