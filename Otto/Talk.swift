@@ -1846,8 +1846,6 @@ struct TalkView: View {
     }
 }
 
-/// The system's Start Broadcast button, preselected to Otto's extension, laid unseen over Share: iOS's sheet opens
-/// for a touch on it or for its own button's action, not for an app's call.
 /// How far the ring leans from how the phone has turned: the talk's start is the centre, and as the screen turns
 /// away from you the ring leans back toward where you were. Pure, so `-approvalCheck` checks it.
 enum RingLean {
@@ -1955,6 +1953,8 @@ private struct LeaningRing: View {
     }
 }
 
+/// The system's Start Broadcast button, preselected to Otto's extension, laid unseen over Share: iOS's sheet opens
+/// for a touch on it or for its own button's action, not for an app's call.
 private struct BroadcastPicker: UIViewRepresentable {
     @MainActor static weak var shown: RPSystemBroadcastPickerView?
 
