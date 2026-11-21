@@ -910,7 +910,7 @@ struct TalkView: View {
                     .accessibilityElement(children: .combine)
                 }
             }
-            if let b = store.browser { BrowserTileView(browser: b, share: 1) }
+            if let b = store.browser { BrowserTileView(browser: b, full: true) }
         }
         .frame(maxWidth: 520, alignment: .leading)
         .padding(.horizontal, 20)

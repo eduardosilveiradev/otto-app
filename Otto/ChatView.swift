@@ -2684,10 +2684,18 @@ struct LiveBrowser: Equatable {
 /// frames land every second in a thread pinned to the bottom.
 struct BrowserTileView: View {
     let browser: LiveBrowser
-    /// How much of the width it takes: most of the thread's, all of the talk screen's column.
-    var share: CGFloat = 0.6
+    /// Across all of the column it's in (the talk screen), not 60% of the screen as in the thread.
+    var full = false
 
     var body: some View {
+        if full { tile } else {
+            tile.containerRelativeFrame(.horizontal, alignment: .leading) { w, _ in w * 0.6 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)   // the row's width takes the tap, as before
+        }
+    }
+
+    private var tile: some View {
         VStack(alignment: .leading, spacing: 6) {
             // A ZStack, so old and new frames overlap while they cross-fade.
             ZStack { BrowserShot(shot: browser.shot).id(browser.tile.ts).transition(.opacity) }
@@ -2700,8 +2708,6 @@ struct BrowserTileView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2, reservesSpace: true)
         }
-        .containerRelativeFrame(.horizontal, alignment: .leading) { [share] w, _ in w * share }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(.rect)
     }
 }
