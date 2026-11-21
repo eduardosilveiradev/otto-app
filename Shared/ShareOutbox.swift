@@ -12,9 +12,13 @@ enum ShareOutbox {
 
     /// SideStore registers app groups under its own team and writes the real id into
     /// ALTAppGroups; the plain id is what Xcode builds and the simulator use.
-    static var dir: URL? {
+    static var container: URL? {
         let group = (Bundle.main.object(forInfoDictionaryKey: "ALTAppGroups") as? [String])?.first ?? "group.dev.otto.app"
-        guard let c = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+    }
+
+    static var dir: URL? {
+        guard let c = container else { return nil }
         let d = c.appending(path: "outbox", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d

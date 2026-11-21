@@ -31,6 +31,8 @@ struct OttoApp: App {
         // The "Otto is working" activity is gone; one an older build left running ends here.
         Task { for a in Activity<WorkActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
         Task { for a in Activity<TalkActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
+        // Nor a screen share: one left by a talk that was killed is finished, and its frame goes.
+        ScreenShare.clear(); DictationBridge.post(ScreenShare.stop)
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
         // `-callActivity`: a call's Live Activity 83 seconds in, for screenshots of the Lock Screen and the Dynamic Island.
