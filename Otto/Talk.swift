@@ -932,7 +932,7 @@ final class TalkSession {
     /// In voice-note mode there's no turn on the socket to send them with.
     var canShare: Bool {
         #if DEBUG
-        if Self.fixtureState != nil || Self.fakeScreen { return !screenRefused }
+        if Self.fixtureState != nil { return !screenRefused }
         #endif
         return live != nil && streams != false && !Self.notesOnly && !screenRefused && ScreenShare.dir != nil
     }
