@@ -50,7 +50,7 @@ struct OttoApp: App {
         WindowGroup {
             // The store is made only once onboarding is over, so it starts on the server just paired.
             Group {
-                if onboarded { MainRoot() } else { OnboardingFlow { withAnimation { onboarded = true } } }
+                if onboarded { MainRoot() } else { OnboardingFlow { LaunchMorph.skip(); withAnimation { onboarded = true } } }
             }
             .onOpenURL { url in
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
@@ -74,6 +74,7 @@ struct OttoApp: App {
 /// walkie-talkie, a call or an approval put off with Later over it. Nothing before setup: there's no store yet.
 @MainActor enum Doors {
     static func open(_ door: String) {
+        LaunchMorph.skip()   // straight to where the door leads, not behind the launch
         // As OttoApp's @AppStorage reads it: unset means "paired already" if there's a server.
         // bool(forKey:) also takes a launch argument's "YES", which arrives as a string.
         let d = UserDefaults.standard
@@ -128,6 +129,7 @@ private struct MainRoot: View {
         }
             // Over the content, so it is already laid out underneath when the splash fades.
             .overlay { if splashing { Connecting().transition(.opacity) } }
+            .overlay { LaunchOverlay(store: store) }   // a cold launch's greeting (LaunchMorph.swift)
             .task {
                 #if DEBUG
                 if CommandLine.arguments.contains("-holdSplash") { return }   // screenshots: the splash stays up
