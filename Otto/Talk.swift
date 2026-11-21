@@ -953,7 +953,7 @@ final class TalkSession {
             // The extension went without a word (out of memory): sharing is over.
             if sharing, Date.now.timeIntervalSince(shareSince) > ScreenShare.stale, (ScreenShare.age(ScreenShare.extensionAlive) ?? .infinity) > ScreenShare.stale { return stopSharing() }
         }
-        guard sharing, hearing, let o = outgoing, o.turn != nil, !o.serverEnded, ScreenShare.due(screenSent),
+        guard sharing, hearing, let o = outgoing, o.turn != nil, o.abandoned == nil, !o.serverEnded, ScreenShare.due(screenSent),
               let at = ScreenShare.frameDate(), at != screenSentOf else { return }
         sendScreen()
     }
