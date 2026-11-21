@@ -29,34 +29,14 @@ struct CallActivityAttributes: ActivityAttributes {
     }
 }
 
-/// Otto at work on something that takes a while, on the Lock Screen and in the Dynamic Island. The app starts
-/// it and keeps it current (WorkActivity); nothing reaches it from outside, so past its stale date it says
-/// to open Otto instead of naming a step that may be over.
+/// What the removed "Otto is working" Live Activity carried. Nothing starts one any more; the type stays only so
+/// the app can end one an older build left running (OttoApp's launch). Its shape must match theirs to read them.
 struct WorkActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
-        /// What Otto is doing right now ("Reading mail", "Coding: fix the share sheet").
         var status: String
         var started: Date
-        /// Something is waiting on the owner (an approval, a job's question): the tangerine mark, and a tap opens it.
         var needsYou = false
         var done = false
-    }
-}
-
-/// The work activity's words for each of its states: working, waiting on you, done, and stale (the app was
-/// suspended, so what it last knew may be old: it says where to look, not what it was).
-struct WorkLine {
-    let title: String, detail: String
-    let needsYou: Bool, running: Bool
-    var url: URL? { URL(string: needsYou ? "otto://approval" : "otto://chat") }
-
-    init(_ s: WorkActivityAttributes.ContentState, stale: Bool) {
-        needsYou = s.needsYou
-        running = !s.done && !stale
-        if s.done { title = "Otto is done"; detail = "The answer is in the chat." }
-        else if stale { title = "Otto"; detail = "Open the app for where it’s got to." }
-        else if s.needsYou { title = "Otto needs you"; detail = s.status }
-        else { title = "Otto is working"; detail = s.status }
     }
 }
 

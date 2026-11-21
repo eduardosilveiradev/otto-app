@@ -28,18 +28,12 @@ struct OttoApp: App {
         HangUpOttoCall.run = { CallManager.current?.hangUp() }
         // A call's Live Activity outlives an app that was killed mid-call; no call is live at launch.
         Task { for a in Activity<CallActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
-        Task { await WorkActivity.endLeftovers() }
+        // The "Otto is working" activity is gone; one an older build left running ends here.
+        Task { for a in Activity<WorkActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
         Task { for a in Activity<TalkActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
         // `-callActivity`: a call's Live Activity 83 seconds in, for screenshots of the Lock Screen and the Dynamic Island.
-        // `-workActivity`: Otto at work, three minutes in, for screenshots of the Lock Screen and the Dynamic Island.
-        if CommandLine.arguments.contains("-workActivity") {
-            Task {
-                try? await Task.sleep(for: .seconds(1))
-                _ = try? Activity.request(attributes: WorkActivityAttributes(), content: .init(state: .init(status: "Reading the three boiler quotes", started: .now.addingTimeInterval(-187)), staleDate: nil))
-            }
-        }
         if CommandLine.arguments.contains("-callActivity") {
             Task {
                 try? await Task.sleep(for: .seconds(1))   // after the clean-up above
@@ -459,12 +453,6 @@ final class OttoStore {
                 approvals.removeAll(where: lapsed)
             }
             syncWidget()
-            // Work that takes a while goes on the Lock Screen (WorkActivity): a reply in the making, or a coding job.
-            let job = jobs.byID.values.filter(\.working).max { ($0.startedAt ?? "") < ($1.startedAt ?? "") }
-            let typing = ottoStatus.flatMap { $0.isEmpty ? nil : $0 } ?? "Thinking"
-            WorkActivity.sync(status: ottoTyping ? typing : job.map { "Coding: \($0.title.isEmpty ? "a job" : $0.title)" },
-                              needsYou: !approvals.isEmpty || jobs.byID.values.contains(where: \.needsYou),
-                              foreground: foreground, alive: (foreground || Keepalive.enabled) && !TalkSession.active)   // a talk has its own
             // An ack that never came on a socket that still looks fine: try again every 15s.
             if live && n % 15 == 0 { Task { await resendPending() } }
             if live != connected { connected = live }

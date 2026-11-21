@@ -40,9 +40,6 @@ what Otto knows about your day.
   while it lasts
 - An approval put off with Later waits over the composer with the time the
   Mac still holds it
-- Otto's work on the Lock Screen and in the Dynamic Island once it has taken
-  20 seconds (a reply in the making, or a coding job), kept current while the
-  app runs
 - PDFs: shared from any app, or from the composer's + menu; they go as
   pictures of their pages
 - Pairing from a link: an `otto://pair` link tapped anywhere (the Camera's QR
