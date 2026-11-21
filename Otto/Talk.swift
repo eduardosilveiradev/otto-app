@@ -739,6 +739,8 @@ struct TalkView: View {
 
             controls.padding(.bottom, 16)
         }
+        // Past the first accessibility size the working state (steps and the page) no longer fits one screen.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
     // MARK: The ring
@@ -838,6 +840,8 @@ struct TalkView: View {
         default:
             if store.asleep {
                 Text("What you say waits here and goes when your Mac is back.").font(size: 20, relativeTo: .title3).foregroundStyle(.secondary)
+            } else if session.muted {
+                Text("Otto can’t hear you. Unmute to talk.").font(size: 20, relativeTo: .title3).foregroundStyle(.secondary)
             } else if let otto = session.lines.last(where: \.otto) {
                 Text(session.text(otto.id)).font(size: 20, relativeTo: .title3).lineLimit(5)
             } else {
@@ -924,10 +928,20 @@ private struct Lit: View {
     let fraction: Double
     var body: some View {
         let head = Self.head(text, fraction)
+        // A long answer shows from the sentence being said, so the lit words never run past the last line shown.
+        let from = Self.sentenceStart(head)
+        let said = (from == head.startIndex ? "" : "…") + head[from...]
         // Half white for what's still to come: dimmer than the said part at a glance, and still 5:1 on black to read.
-        Text("\(Text(head))\(Text(text.dropFirst(head.count)).foregroundStyle(.white.opacity(0.5)))")
+        Text("\(Text(said))\(Text(text.dropFirst(head.count)).foregroundStyle(.white.opacity(0.5)))")
             .lineLimit(6)
             .accessibilityLabel(text)
+    }
+
+    /// Where the sentence `head` ends in starts, once `head` is long enough to push it out of six lines; else the start.
+    private static func sentenceStart(_ head: String) -> String.Index {
+        guard head.count > 200 else { return head.startIndex }
+        let stops = head.indices.filter { i in ".?!".contains(head[i]) && head.index(after: i) < head.endIndex && head[head.index(after: i)] == " " }
+        return stops.last.map { head.index($0, offsetBy: 2) } ?? head.startIndex
     }
 
     /// The text up to `fraction` of the way through, ending on a whole word.
