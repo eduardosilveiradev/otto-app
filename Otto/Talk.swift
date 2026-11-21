@@ -219,6 +219,9 @@ final class TalkSession {
     @ObservationIgnored private var activity: Activity<TalkActivityAttributes>?
     @ObservationIgnored private var shown: TalkActivityAttributes.ContentState?
     @ObservationIgnored private var tried = Date.distantPast
+    /// When the engine last stopped under the talk, and whether it now runs without voice processing because of them.
+    @ObservationIgnored private var stops: [Date] = []
+    @ObservationIgnored private var plain = false
     #if DEBUG
     @ObservationIgnored var fixtureTexts: [Message.ID: String] = [:]
     @ObservationIgnored private var firstSpoke: Date?
@@ -260,7 +263,7 @@ final class TalkSession {
     func start() async {
         Self.current = self
         Self.active = true
-        ended = false; endedAt = nil; started = .now; asked = .now; tried = .distantPast
+        ended = false; endedAt = nil; started = .now; asked = .now; tried = .distantPast; stops = []; plain = false
         lines = []; steps = []; cutIn = false; awaiting = false; saying = nil; said = 0
         heard = Set(store.messages.map(\.id))
         AudioPlayer.shared.stop()   // a voice note playing in the thread
@@ -318,26 +321,53 @@ final class TalkSession {
             try s.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
             try s.setActive(true)
             let e = AVAudioEngine()
-            // On before the format is read: it changes the input's format. Not in the simulator, whose Mac-side voice
-            // processing stops the engine every few hundred milliseconds (and there's no speaker to echo there anyway).
-            #if !targetEnvironment(simulator)
-            try? e.inputNode.setVoiceProcessingEnabled(true)
-            #endif
-            let input = e.inputNode
-            let f = input.outputFormat(forBus: 0)
-            guard f.sampleRate > 0, f.channelCount > 0 else { throw CocoaError(.featureUnsupported) }
+            // On before the format is read: it changes the input's format. A phone that refuses it talks without it.
+            if !plain { try? e.inputNode.setVoiceProcessingEnabled(true) }
             player = AVAudioPlayerNode()
             e.attach(player)
             e.connect(player, to: e.mainMixerNode, format: nil)
-            input.installTap(onBus: 0, bufferSize: 1024, format: f, block: Self.feed(tap))
-            e.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil, block: Self.meter(tap))
-            e.prepare()
-            try e.start()
-            engine = e; format = f; mic = .on
+            engine = e
+            try tapAndStart(e)
+            detector = TurnDetector()
+            mic = .on
         } catch {
             closeEngine()
             mic = .failed
         }
+    }
+
+    /// Taps the input at its format now (a route change changes it) and starts the engine.
+    private func tapAndStart(_ e: AVAudioEngine) throws {
+        e.inputNode.removeTap(onBus: 0)
+        e.mainMixerNode.removeTap(onBus: 0)
+        let f = e.inputNode.outputFormat(forBus: 0)
+        guard f.sampleRate > 0, f.channelCount > 0 else { throw CocoaError(.featureUnsupported) }
+        e.inputNode.installTap(onBus: 0, bufferSize: 1024, format: f, block: Self.feed(tap))
+        e.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil, block: Self.meter(tap))
+        e.prepare()
+        try e.start()
+        format = f
+    }
+
+    /// The engine stopped under the talk (AirPods in or out): the same engine again, at the input's new format. What
+    /// you were saying goes, and Otto stops. Voice processing can keep stopping it (the simulator's does, every few
+    /// hundred milliseconds), which would close every turn unsent: after a fourth stop in five seconds the talk goes
+    /// on without it.
+    private func restart() {
+        guard let e = engine else { return }
+        closeTurn(send: true)
+        if saying != nil { cut() }
+        stops = stops.filter { Date.now.timeIntervalSince($0) < 5 } + [.now]
+        #if DEBUG
+        NSLog("talk: engine stopped (%d in 5 s)", stops.count)
+        #endif
+        if stops.count > 3 && !plain {
+            plain = true
+            closeEngine()
+            Task { await openMic() }
+            return
+        }
+        do { try tapAndStart(e) } catch { closeEngine(); mic = .failed }
     }
 
     // Made outside the main actor: the engine calls these on its own thread.
@@ -372,11 +402,7 @@ final class TalkSession {
                 let changed = n.object as AnyObject?
                 MainActor.assumeIsolated {
                     guard let self, !self.ended, self.mic == .on, let e = self.engine, changed === e, !e.isRunning else { return }
-                    #if DEBUG
-                    NSLog("talk: engine stopped by a route change, rebuilding")
-                    #endif
-                    self.pause()
-                    Task { await self.resume() }
+                    self.restart()
                 }
             },
             // Headphones gone: Otto doesn't carry on out of the speaker, as music doesn't.
@@ -429,9 +455,13 @@ final class TalkSession {
         guard let format else { return }
         let url = URL.temporaryDirectory.appending(path: "talk-\(UUID().uuidString).m4a")
         do { try tap.begin(url, format: format) } catch {
+            // Nowhere to put what you say: said as a microphone that won't start (Try again builds it afresh).
             #if DEBUG
             NSLog("talk: no turn file for %@: %@", format.description, String(describing: error))
             #endif
+            _ = detector.close()
+            closeEngine()
+            mic = .failed
             return
         }
         turn = url
@@ -583,9 +613,14 @@ final class TalkSession {
         guard let a = activity else {
             // Only the app in front may start one. Opened from the Action Button or a widget, the talk can start before
             // the app is: it's asked again on every tick until it's up.
-            guard UIApplication.shared.applicationState == .active, ActivityAuthorizationInfo().areActivitiesEnabled,
-                  Date.now.timeIntervalSince(tried) > 2 else { return }
+            guard UIApplication.shared.applicationState == .active, Date.now.timeIntervalSince(tried) > 2 else { return }
             tried = .now
+            guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+                #if DEBUG
+                NSLog("talk: live activities are off for Otto")
+                #endif
+                return
+            }
             do { activity = try Activity.request(attributes: TalkActivityAttributes(), content: .init(state: state, staleDate: nil)); shown = state } catch {
                 #if DEBUG
                 NSLog("talk: no live activity yet: %@", String(describing: error))
@@ -756,7 +791,7 @@ struct TalkView: View {
         return VoiceRing(.mono, state: state, source: .level { muted ? 0 : Double(min(1, (otto ? tap.playing : tap.level) * 8)) },
                          style: { var s = VoiceStyle(); s.theme = .dark; return s }(), size: size)
             .frame(width: size, height: size)
-            .accessibilityHidden(true)   // the caption under it says the same in words
+            .accessibilityElement(children: .ignore).accessibilityHidden(true)   // the caption under it says the same in words
     }
 
     // MARK: The words
