@@ -22,11 +22,14 @@ struct OttoApp: App {
         try? Wearables.configure()
         // What reaches the app from its widgets and controls (WidgetData's intents run here).
         OpenWalkieControl.run = { Doors.open("walkie") }
+        MuteOttoTalk.run = { TalkSession.current?.muted.toggle() }
+        EndOttoTalk.run = { TalkSession.current?.end() }
         MuteOttoCall.run = { CallManager.current?.toggleMute() }
         HangUpOttoCall.run = { CallManager.current?.hangUp() }
         // A call's Live Activity outlives an app that was killed mid-call; no call is live at launch.
         Task { for a in Activity<CallActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
         Task { await WorkActivity.endLeftovers() }
+        Task { for a in Activity<TalkActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
         // `-callActivity`: a call's Live Activity 83 seconds in, for screenshots of the Lock Screen and the Dynamic Island.
@@ -54,7 +57,7 @@ struct OttoApp: App {
             }
             .onOpenURL { url in
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
-                // The widgets: Otto's thread, the walkie-talkie, or an approval put off with Later.
+                // The widgets: Otto's thread, talk mode (still at its walkie-talkie address), or an approval put off with Later.
                 if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval"].contains(door) { Doors.open(door); return }
                 // A pairing link from the Camera's QR banner, AirDrop or a message. Anyone can make one, so it is
                 // only held here: onboarding and the main screen each ask, naming the Mac, before any of it is used.
@@ -70,8 +73,8 @@ struct OttoApp: App {
     }
 }
 
-/// The ways in from outside the app (widgets, controls, the Action Button): Otto's thread, with the
-/// walkie-talkie, a call or an approval put off with Later over it. Nothing before setup: there's no store yet.
+/// The ways in from outside the app (widgets, controls, the Action Button): Otto's thread, with talk mode
+/// (the "walkie" door, its old name, which placed widgets still use), a call or an approval put off with Later over it. Nothing before setup: there's no store yet.
 @MainActor enum Doors {
     static func open(_ door: String) {
         // As OttoApp's @AppStorage reads it: unset means "paired already" if there's a server.
@@ -81,7 +84,7 @@ struct OttoApp: App {
         let store = OttoStore.shared
         if store.pips.active { store.pips.open("app") }
         switch door {
-        case "walkie": WalkieLauncher.shared.open = true
+        case "walkie": TalkLauncher.shared.open = true   // already open (the island tapped): nothing changes
         case "call": CallLauncher.shared.start()
         // One put off with Later comes back; one not yet answered is already up, over whatever is on screen.
         case "approval": if store.shownApproval == nil, let w = store.waitingApproval { store.reopenApproval(w.id) }
@@ -458,7 +461,7 @@ final class OttoStore {
             let typing = ottoStatus.flatMap { $0.isEmpty ? nil : $0 } ?? "Thinking"
             WorkActivity.sync(status: ottoTyping ? typing : job.map { "Coding: \($0.title.isEmpty ? "a job" : $0.title)" },
                               needsYou: !approvals.isEmpty || jobs.byID.values.contains(where: \.needsYou),
-                              foreground: foreground, alive: foreground || Keepalive.enabled)
+                              foreground: foreground, alive: (foreground || Keepalive.enabled) && !TalkSession.active)   // a talk has its own
             // An ack that never came on a socket that still looks fine: try again every 15s.
             if live && n % 15 == 0 { Task { await resendPending() } }
             if live != connected { connected = live }

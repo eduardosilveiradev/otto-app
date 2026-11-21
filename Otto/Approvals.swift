@@ -110,13 +110,19 @@ enum ApprovalCheck {
         }
         assert(ids(["x", "y"], ["y", "z"]) == ["y", "z"] && ids(["x"], []) == [] && ids([], ["z"]) == ["z"], "reconcile")
         assert(ids(["x"], [], keep: ["x"]) == ["x"] && ids([], ["x"], decided: ["x"]) == [], "a receipt stays; an answered one doesn't come back")
-        // The walkie's answer: the reply that names the note, else the first thing Otto said that wasn't news it was sending anyway.
-        func said(_ text: String, src: String? = nil, replyTo: String? = nil, at: TimeInterval) -> Message {
-            var m = Message(from: .otto, text: text, date: now.addingTimeInterval(at)); m.src = src; m.replyTo = replyTo; return m
+        // Talk's turns: a held voice starts one, a pause ends it; a blip never starts one, a short one isn't sent,
+        // talking over Otto needs longer, and a steady noise becomes the room's floor instead of a voice.
+        func turns(_ run: [(Float, Double)], speaking: Bool = false) -> [TurnDetector.Event] {
+            var d = TurnDetector(), out: [TurnDetector.Event] = []
+            for (level, seconds) in run { for _ in 0..<Int((seconds / 0.05).rounded()) { if let e = d.step(level: level, dt: 0.05, ottoSpeaking: speaking) { out.append(e) } } }
+            return out
         }
-        let thread = [said("old", at: -5), said("reminder", src: "reminders", at: 1), said("answer", at: 2), said("named", replyTo: "n1", at: 3)]
-        assert(WalkieView.answer(in: thread, to: nil, since: now)?.text == "answer" && WalkieView.answer(in: thread, to: "n1", since: now)?.text == "named", "walkie answer")
-        assert(WalkieView.answer(in: Array(thread.prefix(2)), to: "n1", since: now) == nil, "news isn't an answer")
+        assert(turns([(0.002, 2)]).isEmpty && turns([(0.002, 1), (0.08, 0.1), (0.002, 2)]).isEmpty, "a blip isn't a turn")
+        assert(turns([(0.002, 1), (0.08, 1.5), (0.002, 1)]) == [.start, .end(send: true)], "a turn, then a pause sends it")
+        assert(turns([(0.002, 1), (0.08, 0.25), (0.002, 1)]) == [.start, .end(send: false)], "too short to send")
+        assert(turns([(0.002, 1), (0.08, 0.25), (0.002, 1)], speaking: true).isEmpty && turns([(0.002, 1), (0.08, 0.5)], speaking: true) == [.start], "cutting in takes longer")
+        assert(turns([(0.002, 1), (0.08, 0.5), (0.002, 0.5), (0.08, 0.5), (0.002, 1)]) == [.start, .end(send: true)], "a short breath doesn't end it")
+        assert(turns([(0.002, 1), (0.03, 40)]).count <= 2 && turns([(0.002, 1), (0.03, 40)]) == turns([(0.002, 1), (0.03, 60)]), "a steady fan becomes the floor")
         // Work on the Lock Screen: only once it has lasted, and only started from the front.
         assert(!WorkActivity.starts(after: 19, foreground: true) && WorkActivity.starts(after: 20, foreground: true) && !WorkActivity.starts(after: 300, foreground: false), "work activity start")
         assert(WorkLine(.init(status: "Reading mail", started: now), stale: true).detail != "Reading mail" && WorkLine(.init(status: "x", started: now, needsYou: true), stale: false).url?.host() == "approval", "work line")
@@ -820,7 +826,7 @@ struct PrintedReceipt: View {
     }
 }
 
-/// Puts an approval's sheet over whatever is on top: the thread, the contact card, a call, the walkie-talkie, a
+/// Puts an approval's sheet over whatever is on top: the thread, the contact card, a call, a talk, a
 /// picture, the page Otto has open. One presenter for all of them, from UIKit: a SwiftUI sheet can only come up
 /// from a view that isn't already presenting, so one raised while a cover was up waited behind it unseen (and two
 /// presentations asked for at once left neither on screen). Asked again every second by the store's tick, so a
@@ -857,7 +863,7 @@ struct PrintedReceipt: View {
         guard var top = scene?.keyWindow?.rootViewController else { return nil }
         while let next = top.presentedViewController { top = next }
         guard !top.isBeingPresented, !top.isBeingDismissed, top.transitionCoordinator == nil, !(top is UIAlertController) else { return nil }
-        // Not while a voice note or a walkie press is recording: a sheet coming up under the finger could leave the
+        // Not while a voice note is recording (a talk's open microphone doesn't count: nothing is held there): a sheet coming up under the finger could leave the
         // hold never ended and the microphone open. It goes up when the recording stops (and the Mac's own push
         // covers the wait, since nothing is said to have been alerted).
         guard !VoiceRecorder.active else { return nil }

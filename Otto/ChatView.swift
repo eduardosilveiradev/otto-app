@@ -60,9 +60,12 @@ struct ChatView: View {
     @State private var gate = GateWatch()
     @State private var showGate = false
     @State private var openCall: DashCall?
-    /// When the "hold for walkie-talkie" hint last showed; it comes back every two months.
-    @AppStorage("walkieHintAt") private var walkieHintAt = 0.0
-    @State private var walkieHint = false
+    /// When the phone button's "hold for Call Otto or Talk" hint last showed; it comes back every two months.
+    /// The key keeps the walkie-talkie's name, so the hint doesn't come back early for anyone who saw that one.
+    @AppStorage("walkieHintAt") private var phoneHintAt = 0.0
+    @State private var phoneHint = false
+    /// What a tap on the phone button opens: the last one picked from its menu ("call" or "talk"). A call until then.
+    @AppStorage("phoneButton") private var phonePick = "call"
     /// "Hold to stop Otto", once ever, on the bubble that carries the menu.
     @AppStorage("stopHintShown") private var stopHintShown = false
     @State private var stopHint = false
@@ -386,7 +389,7 @@ struct ChatView: View {
                 }
         }
         .fullScreenCover(isPresented: webCall) { CallView(context: callContext) }
-        .fullScreenCover(isPresented: Binding(get: { WalkieLauncher.shared.open }, set: { WalkieLauncher.shared.open = $0 })) { WalkieView() }
+        .fullScreenCover(isPresented: Binding(get: { TalkLauncher.shared.open }, set: { TalkLauncher.shared.open = $0 })) { TalkView() }
         .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
             MediaViewerView(store: store).presentationBackground(.clear)
         }
@@ -487,7 +490,7 @@ struct ChatView: View {
                             .contextMenu { stopMenu }
                             .accessibilityActions { stopMenu }
                             // Said once, the first time Otto works on a Mac that can be stopped: a menu behind a
-                            // hold is otherwise found by nobody (the walkie-talkie's hint, for this bubble).
+                            // hold is otherwise found by nobody (the phone button's hint, for this bubble).
                             .popover(isPresented: $stopHint, arrowEdge: .bottom) {
                                 Label("Hold to stop Otto", systemImage: "stop.circle")
                                     .font(size: 14, weight: .medium, relativeTo: .subheadline)
@@ -770,6 +773,13 @@ struct ChatView: View {
     /// Another conversation than the one on screen has messages not read yet.
     private var unreadElsewhere: Bool { store.pips.rows.contains { $0.id != store.pips.current && $0.unread > 0 } }
 
+    /// A pick from the phone button's menu: opens it now, and is what a tap opens from then on.
+    private func pickPhone(_ pick: String) {
+        phoneHint = false
+        phonePick = pick
+        if pick == "talk" { TalkLauncher.shared.open = true } else { CallLauncher.shared.start() }
+    }
+
     private var header: some View {
         ZStack(alignment: Alignment(horizontal: .center, vertical: .headerRow)) {
             HStack {
@@ -805,33 +815,41 @@ struct ChatView: View {
                     .accessibilityLabel("Update Otto")
                 }
                 Spacer()
-                Button { CallLauncher.shared.start() } label: {
-                    Image(systemName: "phone").font(.system(size: 18))
+                // A tap opens whichever of Call Otto and Talk was last picked from the menu a hold brings up.
+                let talk = phonePick == "talk"
+                Button { if talk { TalkLauncher.shared.open = true } else { CallLauncher.shared.start() } } label: {
+                    Image(systemName: talk ? "waveform" : "phone").font(.system(size: 18))
+                        .contentTransition(.symbolEffect(.replace))
                         .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: .circle)
                 }
                 .tint(.primary)
-                // Long press: the walkie-talkie, for talking to Otto on the move.
+                .accessibilityLabel(talk ? "Talk with Otto" : "Call Otto")
                 .contextMenu {
-                    Button("Walkie-talkie", systemImage: "waveform") { walkieHint = false; WalkieLauncher.shared.open = true }
+                    Button("Call Otto", systemImage: "phone") { pickPhone("call") }
+                    Button("Talk", systemImage: "waveform") { pickPhone("talk") }
                 }
-                .popover(isPresented: $walkieHint, arrowEdge: .top) {
-                    Label("Hold for walkie-talkie", systemImage: "waveform")
+                .accessibilityActions {
+                    Button("Call Otto") { pickPhone("call") }
+                    Button("Talk") { pickPhone("talk") }
+                }
+                .popover(isPresented: $phoneHint, arrowEdge: .top) {
+                    Label("Hold for Call Otto or Talk", systemImage: "hand.tap")
                         .font(size: 14, weight: .medium, relativeTo: .subheadline)
                         .padding(.horizontal, 14).padding(.vertical, 10)
                         .presentationCompactAdaptation(.popover)
                 }
                 .task {
-                    var due = Date.now.timeIntervalSince1970 - walkieHintAt > 60 * 86_400
+                    var due = Date.now.timeIntervalSince1970 - phoneHintAt > 60 * 86_400
                     #if DEBUG
-                    if CommandLine.arguments.contains("-walkieHint") { due = true }
+                    if CommandLine.arguments.contains("-phoneHint") { due = true }
                     #endif
                     guard due else { return }
                     try? await Task.sleep(for: .seconds(1.5))
-                    walkieHintAt = Date.now.timeIntervalSince1970
-                    walkieHint = true
+                    phoneHintAt = Date.now.timeIntervalSince1970
+                    phoneHint = true
                     try? await Task.sleep(for: .seconds(6))
-                    walkieHint = false
+                    phoneHint = false
                 }
             }
             // Hidden while the contact card is up, so the header's face doesn't show through its glass as a
@@ -2390,7 +2408,7 @@ private struct VoiceRow: View {
 }
 
 extension View {
-    /// A voice note or walkie press that couldn't start recording says why, and where to fix it.
+    /// A voice note that couldn't start recording says why, and where to fix it.
     func micProblem(_ recorder: VoiceRecorder) -> some View {
         alert(recorder.problem == .denied ? "Otto can’t use the microphone" : "Couldn’t start recording",
               isPresented: Binding(get: { recorder.problem != nil }, set: { if !$0 { recorder.problem = nil } })) {
@@ -2399,7 +2417,7 @@ extension View {
                 Button("Not Now", role: .cancel) {}
             } else { Button("OK") {} }
         } message: {
-            Text(recorder.problem == .denied ? "Turn on Microphone for Otto in Settings to send voice notes and use the walkie-talkie."
+            Text(recorder.problem == .denied ? "Turn on Microphone for Otto in Settings to send voice notes."
                  : "Something else may be using the microphone. Try again in a moment.")
         }
     }
@@ -2665,8 +2683,10 @@ struct LiveBrowser: Equatable {
 /// What Otto is doing in Chrome: the latest screenshot, rounded, with its caption under it. A new
 /// frame cross-fades in over the last; the box keeps its size with or without a picture, since
 /// frames land every second in a thread pinned to the bottom.
-private struct BrowserTileView: View {
+struct BrowserTileView: View {
     let browser: LiveBrowser
+    /// How much of the width it takes: most of the thread's, all of the talk screen's column.
+    var share: CGFloat = 0.6
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -2681,7 +2701,7 @@ private struct BrowserTileView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2, reservesSpace: true)
         }
-        .containerRelativeFrame(.horizontal, alignment: .leading) { w, _ in w * 0.6 }
+        .containerRelativeFrame(.horizontal, alignment: .leading) { [share] w, _ in w * share }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(.rect)
     }
