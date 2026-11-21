@@ -1,6 +1,7 @@
 import ActivityKit
 import AppIntents
 import AVFoundation
+import CoreMotion
 import ReplayKit
 import SwiftUI
 import VoiceRingKit
@@ -1433,6 +1434,8 @@ final class TalkSession {
 
     private func fixture(_ state: String) {
         started = .now.addingTimeInterval(-84)
+        // The ring leans only while it hears a voice: `-talkLean` shots get a steady one.
+        if ProcessInfo.processInfo.arguments.contains("-talkLean") { tap.fake(0.05) }
         func say(_ otto: Bool, _ at: TimeInterval, _ text: String, cut: Double? = nil) -> Message.ID {
             let id = UUID(); words[id] = text
             lines.append(Line(id: id, at: at, otto: otto, cut: cut)); return id
@@ -1586,7 +1589,7 @@ struct TalkView: View {
     @Environment(OttoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-    /// Reduce Motion: the ring holds still on its own (VoiceRingKit reads it); here, changes cross-fade instead of moving.
+    /// Reduce Motion: the ring holds still on its own (VoiceRingKit reads it) and doesn't lean; here, changes cross-fade instead of moving.
     @Environment(\.accessibilityReduceMotion) private var still
     @State private var session = TalkSession()
 
@@ -1652,8 +1655,7 @@ struct TalkView: View {
         default: (.idle, false)
         }
         let tap = session.tap, muted = session.muted, size: CGFloat = working ? 120 : 220
-        return VoiceRing(.mono, state: state, source: .level { muted ? 0 : Double(min(1, (otto ? tap.playing : tap.level) * 8)) },
-                         style: { var s = VoiceStyle(); s.theme = .dark; return s }(), size: size)
+        return LeaningRing(state: state, source: .level { muted ? 0 : Double(min(1, (otto ? tap.playing : tap.level) * 8)) }, size: size)
             .frame(width: size, height: size)
             .accessibilityElement(children: .ignore).accessibilityHidden(true)   // the caption under it says the same in words
     }
@@ -1841,6 +1843,118 @@ struct TalkView: View {
             }
             TalkButton(symbol: "xmark", label: "End", fill: .red, tint: .white) { session.end() }
         }
+    }
+}
+
+/// How far the ring leans from how the phone has turned: the talk's start is the centre, and as the screen turns
+/// away from you the ring leans back toward where you were. Pure, so `-approvalCheck` checks it.
+enum RingLean {
+    /// The turn that gives a clear lean (about three quarters of full); past it the lean saturates gently. Tune on a phone.
+    static let reach = 20.0 * .pi / 180
+    /// Seconds for the centre to catch up with how you hold the phone now (gyro drift, a shift in your seat). Tune on a phone.
+    static let settle = 20.0
+    /// How fast the ring travels to its lean and back, VoiceRingKit's `leanSpeed` (1 settles in about 2 s). Tune on a phone.
+    static let speed = 2.5
+
+    /// `turn` (radians about gravity, counter-clockwise from above: the screen facing more to your right) as the ring's
+    /// direction, −1 left … 1 right. The ring leans the other way, back toward you.
+    static func direction(_ turn: Double) -> Double { -tanh(turn / reach) }
+
+    /// The turn from centre after `dt` seconds turning at `rate` rad/s, the centre easing toward the phone meanwhile.
+    static func step(_ turn: Double, rate: Double, dt: Double) -> Double { (turn + rate * dt) * exp(-dt / settle) }
+}
+
+/// Talk's ring, leaning with the phone. Device motion runs only while the ring is on screen, the app is active and
+/// Reduce Motion is off; it needs no permission. VoiceRingKit eases the lean itself (a critically damped spring), and
+/// leans only while a voice is heard: in silence and while Otto thinks it drifts back to centre.
+private struct LeaningRing: View {
+    let state: VoiceState, source: VoiceSource, size: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var still
+    @Environment(\.scenePhase) private var scene
+    @State private var tilt = Tilt()
+
+    var body: some View {
+        VoiceRing(.mono, state: state, source: source,
+                  style: { var s = VoiceStyle(); s.theme = .dark; s.leanSpeed = RingLean.speed; return s }(),
+                  direction: still ? nil : tilt.direction, size: size)
+            .onAppear(perform: sync)
+            .onDisappear { tilt.stop() }
+            .onChange(of: scene) { sync() }
+            .onChange(of: still) { sync() }
+    }
+
+    /// Back from the background, or Reduce Motion turned off: wherever the phone is now is the new centre.
+    private func sync() { if scene == .active && !still { tilt.start() } else { tilt.stop() } }
+
+    @MainActor @Observable final class Tilt {
+        private(set) var direction = 0.0
+        /// Made on first start: SwiftUI builds a `Tilt` each time the talk screen redraws and keeps only the first.
+        @ObservationIgnored private var motion: CMMotionManager?
+        @ObservationIgnored private var turn = 0.0
+        @ObservationIgnored private var last: TimeInterval?
+        #if DEBUG
+        @ObservationIgnored private var fake: Task<Void, Never>?
+        #endif
+
+        func start() {
+            #if DEBUG
+            NSLog("talk lean: on")
+            if let degrees = Self.fakeTurn { return startFake(degrees) }
+            #endif
+            let motion = motion ?? CMMotionManager()
+            self.motion = motion
+            guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
+            turn = 0; last = nil; direction = 0
+            motion.deviceMotionUpdateInterval = 1.0 / 30
+            motion.startDeviceMotionUpdates(to: .main) { [weak self] m, _ in
+                guard let m else { return }
+                MainActor.assumeIsolated { self?.read(m) }
+            }
+        }
+
+        func stop() {
+            motion?.stopDeviceMotionUpdates()
+            #if DEBUG
+            NSLog("talk lean: off")
+            fake?.cancel(); fake = nil
+            #endif
+        }
+
+        /// The turn about gravity, from the gyro: the same whether the phone stands upright or lies flat, with none of
+        /// Euler yaw's trouble when it stands upright. Tilting it sideways in your hand doesn't count.
+        private func read(_ m: CMDeviceMotion) {
+            let g = m.gravity, r = m.rotationRate, n = (g.x * g.x + g.y * g.y + g.z * g.z).squareRoot()
+            let dt = last.map { min(0.1, max(0, m.timestamp - $0)) } ?? 0
+            last = m.timestamp
+            guard n > 0.1 else { return }
+            turn = RingLean.step(turn, rate: -(r.x * g.x + r.y * g.y + r.z * g.z) / n, dt: dt)
+            direction = RingLean.direction(turn)
+        }
+
+        #if DEBUG
+        /// `-talkLean <degrees>|sweep`: the simulator has no gyro. A fixed turn (30 leans left, −30 right), or a slow
+        /// sweep of ±30° every 8 s, fed in as the phone's turn.
+        static let fakeTurn: Double? = {
+            let a = ProcessInfo.processInfo.arguments
+            guard let i = a.firstIndex(of: "-talkLean"), a.indices.contains(i + 1) else { return nil }
+            return a[i + 1] == "sweep" ? .infinity : Double(a[i + 1])
+        }()
+
+        private func startFake(_ degrees: Double) {
+            guard degrees.isFinite else {
+                guard fake == nil else { return }
+                let from = Date.now
+                fake = Task { [weak self] in
+                    while !Task.isCancelled {
+                        self?.direction = RingLean.direction(30 * .pi / 180 * sin(2 * .pi * Date.now.timeIntervalSince(from) / 8))
+                        try? await Task.sleep(for: .milliseconds(33))
+                    }
+                }
+                return
+            }
+            direction = RingLean.direction(degrees * .pi / 180)
+        }
+        #endif
     }
 }
 
