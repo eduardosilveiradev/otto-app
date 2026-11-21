@@ -313,7 +313,7 @@ struct CallTranscript: View {
 }
 
 #if DEBUG
-/// `-tryAgainOnce`: the first "try again" (a call's or the walkie's) presses itself three seconds after
+/// `-tryAgainOnce`: the first "try again" (a call's) presses itself three seconds after
 /// it shows, through the tap's own action, to test the retry where nothing can tap (a headless simulator).
 var labTryAgain = ProcessInfo.processInfo.arguments.contains("-tryAgainOnce")
 #endif

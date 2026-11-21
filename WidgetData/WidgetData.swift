@@ -76,10 +76,40 @@ struct HangUpOttoCall: LiveActivityIntent {
     @MainActor func perform() async throws -> some IntentResult { Self.run(); return .result() }
 }
 
-/// The Control Center (and Lock Screen) button: opens the app on the walkie-talkie. In both targets, as a
-/// control's intent must be; with openAppWhenRun it runs in the app, which points `run` at the walkie.
+/// A talk with Otto while it lasts, on the Lock Screen and in the Dynamic Island. The app starts it and keeps
+/// it current from its own process (TalkSession; the microphone keeps the app running), so it needs no push.
+struct TalkActivityAttributes: ActivityAttributes {
+    struct ContentState: Codable, Hashable {
+        /// Where the talk is ("Listening", "Working"), and the words that go with it: what Otto said, or its latest step.
+        var title: String
+        var line: String
+        /// The SF Symbol for the island's compact side.
+        var symbol: String
+        var started: Date
+        var muted = false
+    }
+}
+
+/// The talk's own buttons on its Live Activity, run in the app (the app points `run` at the talk).
+struct MuteOttoTalk: LiveActivityIntent {
+    static let title: LocalizedStringResource = "Mute or unmute the talk with Otto"
+    static let isDiscoverable = false
+    @MainActor static var run: () -> Void = {}
+    @MainActor func perform() async throws -> some IntentResult { Self.run(); return .result() }
+}
+
+struct EndOttoTalk: LiveActivityIntent {
+    static let title: LocalizedStringResource = "End the talk with Otto"
+    static let isDiscoverable = false
+    @MainActor static var run: () -> Void = {}
+    @MainActor func perform() async throws -> some IntentResult { Self.run(); return .result() }
+}
+
+/// The Control Center (and Lock Screen) button: opens the app on talk mode. In both targets, as a control's
+/// intent must be; with openAppWhenRun it runs in the app, which points `run` at talk. Still named for the
+/// walkie-talkie it replaced, so controls already placed keep working.
 struct OpenWalkieControl: AppIntent {
-    static let title: LocalizedStringResource = "Otto walkie-talkie"
+    static let title: LocalizedStringResource = "Talk with Otto"
     static let isDiscoverable = false
     static let openAppWhenRun = true
     @MainActor static var run: () -> Void = {}
