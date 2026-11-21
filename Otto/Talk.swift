@@ -1631,7 +1631,8 @@ struct TalkView: View {
 
             controls
                 .overlay(alignment: .top) {
-                    if let note = session.shareNote { stopped(note).alignmentGuide(.top) { $0[.bottom] + 20 } }
+                    // A zero-height frame on the controls' top edge, the note hanging up from it: never over the buttons.
+                    if let note = session.shareNote { stopped(note).containerRelativeFrame(.horizontal).frame(height: 0, alignment: .bottom).offset(y: -20) }
                 }
                 .animation(.easeOut(duration: 0.2), value: session.shareNote)
                 .padding(.bottom, 16)
@@ -1809,6 +1810,7 @@ struct TalkView: View {
             .font(size: 13, relativeTo: .footnote).foregroundStyle(.secondary)
             .padding(.horizontal, 14).padding(.vertical, 8)
             .background(.white.opacity(0.12), in: .rect(cornerRadius: 16, style: .continuous))
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 20)
             .transition(.opacity)
     }
