@@ -210,6 +210,9 @@ shot talk working 7 "Talk, Otto working: its steps and the page it has open" $O 
 shot talk working-private 7 "Talk, working on a sign-in page: caption only" $O -demoThread -talk -talkState working -thinking -browserTile private
 shot talk long 7 "Worst case: a long answer, part said" $O -demoThread -talk -talkState long
 shot talk muted 7 "Talk, muted" $O -demoThread -talk -talkState muted
+shot talk share 7 "Talk with your screen shared: Otto sees it, and the chip at the top stops it" $O -demoThread -talk -talkState share
+shot talk share-stopped 7 "Sharing just stopped (the red pill, the chip, or Share): said for a few seconds" $O -demoThread -talk -talkState share-stopped
+shot talk share-refused 7 "A Mac that can't take your screen yet: Share is off, the talk carries on" $O -demoThread -talk -talkState share-refused
 shot talk lost 7 "Talk with the Mac out of reach: what you say waits" $O -demoThread -talk -talkState listening -offline
 shot talk mic-blocked 7 "Talk with the microphone switched off for Otto" $O -demoThread -talk -talkState mic
 shot talk paused 7 "Talk paused by a phone call or Siri" $O -demoThread -talk -talkState paused

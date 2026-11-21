@@ -544,7 +544,7 @@ final class LiveBackend: OttoBackend {
 
     /// A talk frame, now or never: talk keeps its own copy of a turn (its voice note) for when the socket is down.
     /// Sent in the order called, so a turn's audio stays in order.
-    @discardableResult func talkSend(_ frame: [String: String]) -> Bool {
+    @discardableResult func talkSend(_ frame: [String: Any]) -> Bool {
         guard let task = lock.withLock({ live ? socket : nil }),
               let json = try? JSONSerialization.data(withJSONObject: frame), let s = String(data: json, encoding: .utf8) else { return false }
         task.send(.string(s)) { _ in }

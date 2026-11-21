@@ -1,5 +1,6 @@
 import SwiftUI
 import LocalAuthentication
+import CoreImage
 
 /// A change to Otto's own core that needs your say-so — the in-app version of typing
 /// "i approve the otto core change". The server sends it (what, why, every file with its
@@ -182,6 +183,28 @@ enum ApprovalCheck {
         assert(OttoStore.savedUnconfirmed()["check"] == nil, "and gone once it's settled")
         // Pairing: only Otto's own answer counts, not any page that says 200.
         assert(ServerProblem.isOtto(Data(#"{"toggles":[]}"#.utf8)) && !ServerProblem.isOtto(Data("<html>Sign in to Wi-Fi</html>".utf8)) && !ServerProblem.isOtto(Data("[]".utf8)), "a 200 that isn't Otto's")
+        // Your screen for Otto, the extension's pipeline: a phone's screen comes down to a 1600 px long edge and under
+        // 1.5 MB (busier than that steps the quality down, and gives up rather than send an oversize one), a frame is
+        // due every 2 s and no sooner, and stopping leaves nothing behind.
+        let ctx = CIContext()
+        let noise = CIFilter(name: "CIRandomGenerator")!.outputImage!.cropped(to: CGRect(x: 0, y: 0, width: 1206, height: 2622))
+        let shot = ScreenShare.jpeg(noise, context: ctx) ?? Data()
+        let shotSize = ScreenShare.size(shot)
+        assert(shotSize?.width == 736 && shotSize?.height == 1600 && shot.count < ScreenShare.maxBytes, "a screen comes down to 1600 px")
+        let capped = ScreenShare.jpeg(noise, context: ctx, under: 400_000)
+        assert(shot.count > 400_000 && (capped?.count ?? .max) < 400_000, "over the cap steps the quality down")
+        assert(ScreenShare.jpeg(noise, context: ctx, under: 1_000) == nil, "and never makes one past it")
+        let small = ScreenShare.jpeg(noise.cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300)), context: ctx).flatMap(ScreenShare.size)
+        assert(small?.width == 400 && small?.height == 300, "a small screen isn't blown up")
+        let t0 = Date.now
+        assert(ScreenShare.due(nil, t0) && !ScreenShare.due(t0, t0.addingTimeInterval(1.9)) && ScreenShare.due(t0, t0.addingTimeInterval(2)), "one frame every 2 s")
+        assert(ScreenShare.dir != nil, "an app group container")
+        assert(ScreenShare.write(shot) && ScreenShare.latest()?.jpeg == shot && ScreenShare.frameDate() != nil, "the newest frame is kept")
+        ScreenShare.stamp(ScreenShare.appAlive)
+        assert((ScreenShare.age(ScreenShare.appAlive) ?? 99) < 1, "a side's stamp")
+        ScreenShare.clear()
+        assert(ScreenShare.latest() == nil && ScreenShare.frameDate() == nil && ScreenShare.age(ScreenShare.appAlive) == nil, "off leaves no frame behind")
+        assert(!FileManager.default.fileExists(atPath: ScreenShare.dir?.path ?? "/"), "nor the folder")
         print("approval check ok")
         // An answer given with no socket never leaves the phone: it's said as that, and nothing is queued to
         // go out on the next connect (a stale yes then would be the worst of both).
