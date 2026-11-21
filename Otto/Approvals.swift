@@ -134,6 +134,12 @@ enum ApprovalCheck {
         assert(turned > 24 * deg, "a turn keeps its lean")
         for _ in 0..<(90 * 30) { turned = RingLean.step(turned, rate: 0, dt: 1.0 / 30) }   // then held still for 90 s
         assert(abs(RingLean.direction(turned)) < 0.05, "held still, it comes back to centre")
+        // The ring eases to its lean in about a second and home again, and never overshoots either way.
+        var pan = 0.0, velocity = 0.0, over = false
+        for _ in 0..<90 { RingLean.ease(&pan, &velocity, to: 1, dt: 1.0 / 60); over = over || pan > 1 }
+        assert(pan > 0.95 && !over, "out to a side")
+        for _ in 0..<120 { RingLean.ease(&pan, &velocity, to: 0, dt: 1.0 / 60); over = over || pan < 0 }
+        assert(pan < 0.02 && !over, "and home")
         // What talk says out loud. A text-only reply (the Mac's speech off: no voice, sent quiet because a desktop
         // was focused) is said in the phone's voice at once; one whose clip is on its way waits only a moment for
         // it; a reply the Mac tagged "chat" is still a reply; news isn't said.

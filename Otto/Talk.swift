@@ -1434,8 +1434,6 @@ final class TalkSession {
 
     private func fixture(_ state: String) {
         started = .now.addingTimeInterval(-84)
-        // The ring leans only while it hears a voice: `-talkLean` shots get a steady one.
-        if ProcessInfo.processInfo.arguments.contains("-talkLean") { tap.fake(0.05) }
         func say(_ otto: Bool, _ at: TimeInterval, _ text: String, cut: Double? = nil) -> Message.ID {
             let id = UUID(); words[id] = text
             lines.append(Line(id: id, at: at, otto: otto, cut: cut)); return id
@@ -1589,7 +1587,7 @@ struct TalkView: View {
     @Environment(OttoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-    /// Reduce Motion: the ring holds still on its own (VoiceRingKit reads it) and doesn't lean; here, changes cross-fade instead of moving.
+    /// Reduce Motion: the ring holds still on its own (VoiceRingKit reads it) and doesn't lean (LeaningRing); here, changes cross-fade instead of moving.
     @Environment(\.accessibilityReduceMotion) private var still
     @State private var session = TalkSession()
 
@@ -1853,7 +1851,7 @@ enum RingLean {
     static let reach = 20.0 * .pi / 180
     /// Seconds for the centre to catch up with how you hold the phone now (gyro drift, a shift in your seat). Tune on a phone.
     static let settle = 20.0
-    /// How fast the ring travels to its lean and back, VoiceRingKit's `leanSpeed` (1 settles in about 2 s). Tune on a phone.
+    /// How fast the ring travels to its lean and back, as VoiceRingKit's `leanSpeed` (1 settles in about 2 s). Tune on a phone.
     static let speed = 2.5
 
     /// `turn` (radians about gravity, counter-clockwise from above: the screen facing more to your right) as the ring's
@@ -1862,11 +1860,21 @@ enum RingLean {
 
     /// The turn from centre after `dt` seconds turning at `rate` rad/s, the centre easing toward the phone meanwhile.
     static func step(_ turn: Double, rate: Double, dt: Double) -> Double { (turn + rate * dt) * exp(-dt / settle) }
+
+    /// The lean eased toward `goal` as VoiceRingKit eases its own: a critically damped spring, quicker out to a side than
+    /// back home (its `panIn` 2.5 and `panOut` 1.6, times `speed`). It sets off gently and never overshoots.
+    static func ease(_ pan: inout Double, _ velocity: inout Double, to goal: Double, dt: Double) {
+        let w = (abs(goal) > abs(pan) ? 2.5 : 1.6) * speed
+        velocity += (w * w * (goal - pan) - 2 * w * velocity) * dt
+        pan += velocity * dt
+    }
 }
 
-/// Talk's ring, leaning with the phone. Device motion runs only while the ring is on screen, the app is active and
-/// Reduce Motion is off; it needs no permission. VoiceRingKit eases the lean itself (a critically damped spring), and
-/// leans only while a voice is heard: in silence and while Otto thinks it drifts back to centre.
+/// Talk's ring, leaning with the phone in every state, a voice or none. VoiceRingKit leans its ring only while it
+/// hears a voice, so this draws the ring through the package's own canvas with its `direction` left nil, and bends
+/// each frame with the package's own `leanFrame` (the drift, the near side drawn out, the press on the edge) from
+/// the phone's turn. Device motion runs only while the ring is on screen, the app is active and Reduce Motion is
+/// off; it needs no permission.
 private struct LeaningRing: View {
     let state: VoiceState, source: VoiceSource, size: CGFloat
     @Environment(\.accessibilityReduceMotion) private var still
@@ -1874,9 +1882,20 @@ private struct LeaningRing: View {
     @State private var tilt = Tilt()
 
     var body: some View {
-        VoiceRing(.mono, state: state, source: source,
-                  style: { var s = VoiceStyle(); s.theme = .dark; s.leanSpeed = RingLean.speed; return s }(),
-                  direction: still ? nil : tilt.direction, size: size)
+        let tilt = tilt
+        VoiceCanvas(resolve: { size in
+                        var preset = VoiceRing.preset(.mono, size: size)
+                        let draw = preset.frame, amounts = preset.lean, margin = preset.leanMargin
+                        preset.frame = { size, t, voice, opts in
+                            var frame = draw(size, t, voice, opts)
+                            MainActor.assumeIsolated { tilt.lean(&frame, size: size, amounts: amounts, margin: margin) }
+                            return frame
+                        }
+                        return preset
+                    },
+                    state: state, source: source, style: { var s = VoiceStyle(); s.theme = .dark; return s }(),
+                    mood: nil, direction: nil, size: size, colourful: false)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { tilt.box = $0 }
             .onAppear(perform: sync)
             .onDisappear { tilt.stop() }
             .onChange(of: scene) { sync() }
@@ -1884,16 +1903,26 @@ private struct LeaningRing: View {
     }
 
     /// Back from the background, or Reduce Motion turned off: wherever the phone is now is the new centre.
-    private func sync() { if scene == .active && !still { tilt.start() } else { tilt.stop() } }
+    private func sync() {
+        tilt.still = still
+        if scene == .active && !still { tilt.start() } else { tilt.stop() }
+    }
 
-    @MainActor @Observable final class Tilt {
+    /// The phone's turn and the lean drawn from it. Main thread only: the canvas draws there.
+    @MainActor final class Tilt {
+        /// Where the phone's turn says to lean, −1 left … 1 right.
         private(set) var direction = 0.0
+        var still = false
+        /// The ring's box on screen: the lean stops short of the window's edge, as the package's own does.
+        var box: CGRect?
         /// Made on first start: SwiftUI builds a `Tilt` each time the talk screen redraws and keeps only the first.
-        @ObservationIgnored private var motion: CMMotionManager?
-        @ObservationIgnored private var turn = 0.0
-        @ObservationIgnored private var last: TimeInterval?
+        private var motion: CMMotionManager?
+        private var turn = 0.0
+        private var last: TimeInterval?
+        private var pan = 0.0, velocity = 0.0, drawn: CFTimeInterval?, press = 0.0
+        private let bounce = EdgeBounce()
         #if DEBUG
-        @ObservationIgnored private var fake: Task<Void, Never>?
+        private var fake: Task<Void, Never>?
         #endif
 
         func start() {
@@ -1929,6 +1958,27 @@ private struct LeaningRing: View {
             guard n > 0.1 else { return }
             turn = RingLean.step(turn, rate: -(r.x * g.x + r.y * g.y + r.z * g.z) / n, dt: dt)
             direction = RingLean.direction(turn)
+        }
+
+        /// One drawn frame: the lean eased toward the phone's, then bent into the frame as VoiceRingKit bends it.
+        func lean(_ frame: inout OrbFrame, size: Double, amounts: LeanAmounts, margin: Double) {
+            let now = CACurrentMediaTime(), dt = min(0.05, max(0, now - (drawn ?? now)))
+            drawn = now
+            if still { pan = 0; velocity = 0; return }
+            RingLean.ease(&pan, &velocity, to: direction, dt: dt)
+            // The room to the window's edge, less the package's margin, as far as the canvas reaches past the box.
+            let reach = leanReach(amounts, size: size)
+            var bounds = (left: reach, right: reach)
+            if let box, let width = Self.windowWidth() {
+                bounds = (min(reach, max(0, Double(box.minX).rounded(.down) - margin)), min(reach, max(0, Double(width - box.maxX).rounded(.down) - margin)))
+            }
+            leanFrame(&frame, pan: pan, size: size, amounts: amounts, bounds: bounds, bounce: bounce.step(press: press, dt: dt))
+            press = frame.contact?.press ?? 0
+        }
+
+        private static func windowWidth() -> CGFloat? {
+            let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+            return (windows.first(where: \.isKeyWindow) ?? windows.first)?.bounds.width
         }
 
         #if DEBUG
