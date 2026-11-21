@@ -1,3 +1,6 @@
 build/
 xcuserdata/
 .DS_Store
+
+# Libraries.dev model files stay out of this public repository.
+*.mfxl
