@@ -22,21 +22,18 @@ struct OttoApp: App {
         try? Wearables.configure()
         // What reaches the app from its widgets and controls (WidgetData's intents run here).
         OpenWalkieControl.run = { Doors.open("walkie") }
+        MuteOttoTalk.run = { TalkSession.current?.muted.toggle() }
+        EndOttoTalk.run = { TalkSession.current?.end() }
         MuteOttoCall.run = { CallManager.current?.toggleMute() }
         HangUpOttoCall.run = { CallManager.current?.hangUp() }
         // A call's Live Activity outlives an app that was killed mid-call; no call is live at launch.
         Task { for a in Activity<CallActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
-        Task { await WorkActivity.endLeftovers() }
+        // The "Otto is working" activity is gone; one an older build left running ends here.
+        Task { for a in Activity<WorkActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
+        Task { for a in Activity<TalkActivityAttributes>.activities { await a.end(nil, dismissalPolicy: .immediate) } }
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
         // `-callActivity`: a call's Live Activity 83 seconds in, for screenshots of the Lock Screen and the Dynamic Island.
-        // `-workActivity`: Otto at work, three minutes in, for screenshots of the Lock Screen and the Dynamic Island.
-        if CommandLine.arguments.contains("-workActivity") {
-            Task {
-                try? await Task.sleep(for: .seconds(1))
-                _ = try? Activity.request(attributes: WorkActivityAttributes(), content: .init(state: .init(status: "Reading the three boiler quotes", started: .now.addingTimeInterval(-187)), staleDate: nil))
-            }
-        }
         if CommandLine.arguments.contains("-callActivity") {
             Task {
                 try? await Task.sleep(for: .seconds(1))   // after the clean-up above
@@ -54,7 +51,7 @@ struct OttoApp: App {
             }
             .onOpenURL { url in
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
-                // The widgets: Otto's thread, the walkie-talkie, or an approval put off with Later.
+                // The widgets: Otto's thread, talk mode (still at its walkie-talkie address), or an approval put off with Later.
                 if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval"].contains(door) { Doors.open(door); return }
                 // A pairing link from the Camera's QR banner, AirDrop or a message. Anyone can make one, so it is
                 // only held here: onboarding and the main screen each ask, naming the Mac, before any of it is used.
@@ -70,8 +67,8 @@ struct OttoApp: App {
     }
 }
 
-/// The ways in from outside the app (widgets, controls, the Action Button): Otto's thread, with the
-/// walkie-talkie, a call or an approval put off with Later over it. Nothing before setup: there's no store yet.
+/// The ways in from outside the app (widgets, controls, the Action Button): Otto's thread, with talk mode
+/// (the "walkie" door, its old name, which placed widgets still use), a call or an approval put off with Later over it. Nothing before setup: there's no store yet.
 @MainActor enum Doors {
     static func open(_ door: String) {
         // As OttoApp's @AppStorage reads it: unset means "paired already" if there's a server.
@@ -81,7 +78,7 @@ struct OttoApp: App {
         let store = OttoStore.shared
         if store.pips.active { store.pips.open("app") }
         switch door {
-        case "walkie": WalkieLauncher.shared.open = true
+        case "walkie": TalkLauncher.shared.open = true   // already open (the island tapped): nothing changes
         case "call": CallLauncher.shared.start()
         // One put off with Later comes back; one not yet answered is already up, over whatever is on screen.
         case "approval": if store.shownApproval == nil, let w = store.waitingApproval { store.reopenApproval(w.id) }
@@ -134,6 +131,9 @@ private struct MainRoot: View {
                 #endif
                 withAnimation(.easeOut(duration: 0.25)) { splashing = false }
             }
+            // Talk lives here, over whichever thread is showing, not on the thread: a thread swapped under it (the pips
+            // arriving at launch, a door opening Otto's thread) would take the talk down with it.
+            .fullScreenCover(isPresented: Binding(get: { TalkLauncher.shared.open }, set: { TalkLauncher.shared.open = $0 })) { TalkView().environment(store) }
             // (An approval's sheet goes up from ApprovalPresenter, over whatever is on top.)
             // A pairing link opened once the app is set up: named and confirmed before it replaces the Mac. After an
             // approval's sheet, never at the same time: two presentations from one place and neither shows.
@@ -453,12 +453,6 @@ final class OttoStore {
                 approvals.removeAll(where: lapsed)
             }
             syncWidget()
-            // Work that takes a while goes on the Lock Screen (WorkActivity): a reply in the making, or a coding job.
-            let job = jobs.byID.values.filter(\.working).max { ($0.startedAt ?? "") < ($1.startedAt ?? "") }
-            let typing = ottoStatus.flatMap { $0.isEmpty ? nil : $0 } ?? "Thinking"
-            WorkActivity.sync(status: ottoTyping ? typing : job.map { "Coding: \($0.title.isEmpty ? "a job" : $0.title)" },
-                              needsYou: !approvals.isEmpty || jobs.byID.values.contains(where: \.needsYou),
-                              foreground: foreground, alive: foreground || Keepalive.enabled)
             // An ack that never came on a socket that still looks fine: try again every 15s.
             if live && n % 15 == 0 { Task { await resendPending() } }
             if live != connected { connected = live }
@@ -1242,6 +1236,9 @@ final class OttoStore {
                 if h.read == true { messages[i].read = true }
             } else if h.from == .otto {
                 if messages[i].isVoice && messages[i].audio == nil && h.audio != nil { messages[i].audio = h.audio }
+                // History says no voice is coming (its synthesis failed or is off, and the frame saying so was missed):
+                // stop waiting for one, or the thread shows a voice bar, and talk holds the reply back, for 90 s.
+                if messages[i].isVoice && messages[i].audio == nil && !h.isVoice { messages[i].isVoice = false }
                 // History is the latest text; only one cut at its 8000-character cap keeps the longer local copy.
                 if messages[i].text != h.text && !(h.text.count >= 8000 && messages[i].text.hasPrefix(h.text)) { messages[i].text = h.text }
             }

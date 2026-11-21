@@ -473,7 +473,7 @@ private struct TalkPage: View {
                 Divider().padding(.leading, 52)
                 row("button.horizontal.top.press", "The Action Button", "Settings → Action Button → Shortcut → Message Otto.")
                 Divider().padding(.leading, 52)
-                row("waveform", "Walkie-talkie", "Hold the phone button in the chat.")
+                row("waveform", "Talk", "Hold the phone button in the chat, then Talk.")
             }
             .padding(.vertical, 4)
             .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 18, style: .continuous))

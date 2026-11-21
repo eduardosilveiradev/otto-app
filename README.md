@@ -29,15 +29,17 @@ what Otto knows about your day.
   app's own token.
 - Web calls to Otto through [Vapi](https://vapi.ai), if you have it set up
 - Local notifications while the app is in the background
+- Talk mode: hands-free voice with Otto. You talk, a pause ends your turn,
+  Otto answers out loud, and talking over it cuts it off. Each turn goes up as
+  a voice note. Open it from the phone button's menu (a tap then opens whichever
+  of Call Otto and Talk you picked last), the "Talk with Otto" shortcut on the
+  Action Button, the Lock Screen widget or the Control Center control
 - Widgets: a small one for the Home Screen that opens the chat and shows an
-  approval waiting on you, and a round one for the Lock Screen that opens the
-  walkie-talkie. A web call shows on the Lock Screen and in the Dynamic Island
+  approval waiting on you, and a round one for the Lock Screen that opens talk
+  mode. A web call or a talk shows on the Lock Screen and in the Dynamic Island
   while it lasts
 - An approval put off with Later waits over the composer with the time the
   Mac still holds it
-- Otto's work on the Lock Screen and in the Dynamic Island once it has taken
-  20 seconds (a reply in the making, or a coding job), kept current while the
-  app runs
 - PDFs: shared from any app, or from the composer's + menu; they go as
   pictures of their pages
 - Pairing from a link: an `otto://pair` link tapped anywhere (the Camera's QR
