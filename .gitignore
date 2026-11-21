@@ -1,3 +1,6 @@
 build/
 xcuserdata/
 .DS_Store
+
+# Libraries.dev models (VoicePosition.mfxl, Magnet.mfxl): licensed to ship inside the app only, never in this public repo.
+*.mfxl
