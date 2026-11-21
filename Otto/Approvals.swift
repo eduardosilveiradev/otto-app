@@ -147,6 +147,13 @@ enum ApprovalCheck {
         wav += Data("data".utf8) + Data([4, 0, 0, 0]) + Data([0x00, 0x40, 0x00, 0xC0])   // +0.5, -0.5
         let clip = TalkMic.wav(wav)
         assert(clip?.format.sampleRate == 24_000 && clip?.frameLength == 2 && clip?.floatChannelData?[0][0] == 0.5 && clip?.floatChannelData?[0][1] == -0.5, "a clip")
+        // Otto's streamed voice is held until there's enough to play through: half a second, a sentence's end, the
+        // answer's end, or a second with nothing new. Never with nothing held.
+        let hold = TalkSession.holdStart
+        assert(!TalkSession.release(held: 0.24, hold: hold, sentenceEnded: false, done: false, quiet: 0)
+               && TalkSession.release(held: 0.72, hold: hold, sentenceEnded: false, done: false, quiet: 0), "held until half a second")
+        assert(TalkSession.release(held: 0.1, hold: hold, sentenceEnded: true, done: false, quiet: 0) && TalkSession.release(held: 0.1, hold: hold, sentenceEnded: false, done: true, quiet: 0)
+               && TalkSession.release(held: 0.1, hold: hold, sentenceEnded: false, done: false, quiet: 1.2) && !TalkSession.release(held: 0, hold: hold, sentenceEnded: true, done: true, quiet: 9), "or a sentence's end")
         assert(TalkMic.wav(Data("not a wav".utf8)) == nil && TalkMic.wav(wav.prefix(40)) == nil, "not a clip")
         // A PDF as pictures: every page up to the cap, none wider or taller than 1400 px whatever the screen's scale.
         let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 595, height: 842)).pdfData { ctx in for _ in 0..<3 { ctx.beginPage() } }

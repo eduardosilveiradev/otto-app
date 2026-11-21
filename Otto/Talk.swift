@@ -124,7 +124,22 @@ final class TalkMic: @unchecked Sendable {
         }
     }
 
-    func played(_ b: AVAudioPCMBuffer) { let rms = Self.rms(b); lock.withLock { otto = rms } }
+    func played(_ b: AVAudioPCMBuffer) {
+        let rms = Self.rms(b)
+        lock.withLock { otto = rms }
+        #if DEBUG
+        // `-talkRecordOut <path>`: what the mixer plays, first channel, raw 32-bit floats, for measuring gaps.
+        if let out = Self.recordOut, let d = b.floatChannelData { out.write(Data(bytes: d[0], count: Int(b.frameLength) * 4)) }
+        #endif
+    }
+    #if DEBUG
+    static let recordOut: FileHandle? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-talkRecordOut"), a.indices.contains(i + 1) else { return nil }
+        FileManager.default.createFile(atPath: a[i + 1], contents: nil)
+        return FileHandle(forWritingAtPath: a[i + 1])
+    }()
+    #endif
 
     /// Opens a turn's file: AAC, mono, at the microphone's rate (the Mac's transcriber takes it as it takes a voice note).
     /// `stream`: the samples go to the talk stream too, from the first syllable.
@@ -256,6 +271,10 @@ final class TalkSession {
         var serverEnded = false
         var final = false
         var retried = false
+        /// The stream gave up on it: it goes as a voice note under `turn`, once it's safe to (`settle()`).
+        var abandoned: Date?
+        /// talk.stop reached the socket the turn is on, so the Mac dropped it and can't finish it too.
+        var stopped = false
     }
 
     /// Otto's answer coming down the talk stream: its words, then its voice in clips.
@@ -268,6 +287,15 @@ final class TalkSession {
         var clips = 0
         /// Frames scheduled and played, at `rate`.
         var queued = 0.0, played = 0.0, rate = 24_000.0
+        /// Clips held back until there's enough to play without a gap (`release()`), and when the last one came.
+        var held: [AVAudioPCMBuffer] = []
+        var lastClip = Date.now
+        /// Seconds held before playing starts or restarts; grows each time the clips run out mid-sentence.
+        var hold = TalkSession.holdStart
+        /// The longest clip so far: the Mac's are all one length but a sentence's last, which is shorter.
+        var longest = 0.0
+        /// A new sentence is coming (the last clip ended one, or talk.timing said so): its clips are held afresh.
+        var fresh = false
         var done = false
         /// The socket went mid-answer: what came plays, and the line is kept as cut short there.
         var dropped = false
@@ -319,6 +347,8 @@ final class TalkSession {
     @ObservationIgnored private var streams: Bool?
     /// The connection that verdict is about: a new one is asked again (a frozen socket can eat one talk.ready).
     @ObservationIgnored private var streamsConn = 0
+    /// This talk has had a talk.ready: the Mac has the stream, so a missing one later is the link, not the Mac.
+    @ObservationIgnored private var streamedOnce = false
     @ObservationIgnored private var frames: Task<Void, Never>?
     @ObservationIgnored private var playing: (frames: Double, gen: Int)?
     /// Bumped whenever Otto's voice is stopped or replaced, so a late callback from the last one is ignored.
@@ -385,7 +415,7 @@ final class TalkSession {
         ended = false; endedAt = nil; started = .now; asked = .now; tried = .distantPast; stops = []; plain = false
         lines = []; steps = []; cutIn = false; awaiting = false; saying = nil; said = 0
         words = [:]; guessing = nil; missed = false; turnLine = nil
-        outgoing = nil; reply = nil; answering = nil; replies = [:]; pcm = Data(); streams = nil
+        outgoing = nil; reply = nil; answering = nil; replies = [:]; pcm = Data(); streams = nil; streamedOnce = false
         heard = Set(store.messages.map(\.id)); seen = [:]
         AudioPlayer.shared.stop()   // a voice note playing in the thread
         UIApplication.shared.isIdleTimerDisabled = true
@@ -414,7 +444,8 @@ final class TalkSession {
         hearing = false
         if let turn { tap.end(); try? FileManager.default.removeItem(at: turn) }   // ended mid-sentence: dropped, not sent
         // A turn already said goes on without the talk: the Mac saves it, and its answer lands in the thread, unspoken.
-        if let o = outgoing, o.ended == nil { live?.talkSend(["type": "talk.stop"]) }
+        if let o = outgoing, o.ended == nil { if o.abandoned == nil { live?.talkSend(["type": "talk.stop"]) } }
+        else if outgoing?.abandoned != nil { settle(now: true) }   // a turn said and not yet sent: it still goes
         else if reply != nil { live?.talkSend(["type": "talk.cut"]) }
         turn = nil; outgoing = nil; reply = nil
         frames?.cancel(); frames = nil
@@ -610,7 +641,9 @@ final class TalkSession {
         // The last turn, still being written down: the Mac carries on with it without us, or if it never said it was
         // listening, it goes as a voice note now.
         if let o = outgoing {
-            if o.turn == nil { fallBack() } else { try? FileManager.default.removeItem(at: o.note); outgoing = nil; pcm = Data() }
+            if o.abandoned != nil { settle(now: true) }
+            else if o.turn == nil { fallBack(); settle(now: true) }
+            else { try? FileManager.default.removeItem(at: o.note); outgoing = nil; pcm = Data() }
         }
         if streamed, let live, live.talkSend(["type": "talk.start"]) {
             outgoing = Outgoing(line: line, note: url, conn: live.connections)
@@ -634,8 +667,11 @@ final class TalkSession {
         if var o = outgoing {
             o.ended = .now
             outgoing = o
-            stream()   // what's left of it
-            if o.turn != nil && !o.serverEnded { live?.talkSend(["type": "talk.end"]) }
+            if o.abandoned != nil { settle() }
+            else {
+                stream()   // what's left of it
+                if o.turn != nil && !o.serverEnded { live?.talkSend(["type": "talk.end"]) }
+            }
         } else {
             note(line, url)
         }
@@ -647,9 +683,10 @@ final class TalkSession {
         if case .end(let ok)? = detector.close() { finishTurn(send: send && ok) }
     }
 
-    /// The turn as a voice note, as the walkie-talkie sent one: its line becomes the note's bubble.
-    private func note(_ line: Message.ID, _ url: URL) {
-        guard let id = store.sendVoice(url) else {
+    /// The turn as a voice note, as the walkie-talkie sent one: its line becomes the note's bubble. Under the Mac's id
+    /// for the turn when the stream had one: the Mac takes an id it already has in once, whichever way came first.
+    private func note(_ line: Message.ID, _ url: URL, turn: String? = nil) {
+        guard let id = store.sendVoice(url, wireID: turn, via: "talk") else {
             try? FileManager.default.removeItem(at: url)
             lines.removeAll { $0.id == line }
             return
@@ -685,7 +722,10 @@ final class TalkSession {
     /// can't take the turn, so the voice note does.
     private func stream() {
         pcm.append(tap.take())
-        if let o = outgoing, let live {
+        if outgoing?.abandoned != nil {
+            pcm = Data()
+            settle()
+        } else if let o = outgoing, let live {
             if o.turn != nil, !o.serverEnded {
                 while !pcm.isEmpty {
                     let n = min(pcm.count, 3200)   // 100 ms
@@ -696,7 +736,12 @@ final class TalkSession {
             // The socket dropped before the Mac wrote the turn down: a turn it hasn't written down is gone there.
             if !o.final && (live.connections != o.conn || !live.isLive) { return fallBack() }
             // No talk.ready: a Mac without the talk stream. Every turn after this one goes as a note.
-            if o.turn == nil && Date.now.timeIntervalSince(o.asked) > Self.readyWait { streams = false; streamsConn = live.connections; return fallBack() }
+            // No talk.ready. A Mac that has never said it (this talk) has no talk stream: this connection's turns go as
+            // notes. One that has is on a slow link: only this turn does, and the next tries the stream again.
+            if o.turn == nil && Date.now.timeIntervalSince(o.asked) > Self.readyWait {
+                if !streamedOnce { streams = false; streamsConn = live.connections }
+                return fallBack()
+            }
             // The Mac said nothing more about it: sent again as a note. Long, as a slow transcriber isn't helped by a second
             // job (one took 20 s on a loaded Mac), and a transcriber that fails says so with talk.error.
             if let e = o.ended, !o.final, Date.now.timeIntervalSince(e) > 45 { return fallBack() }
@@ -709,36 +754,67 @@ final class TalkSession {
             if outgoing == nil { live?.talkSend(["type": "talk.cut"]) }
             phone(r)
         }
+        if let r = reply, !r.held.isEmpty, Self.release(held: held(r), hold: r.hold, sentenceEnded: false, done: r.done, quiet: Date.now.timeIntervalSince(r.lastClip)) { release() }
         if let r = reply, r.clips > 0, saying == r.line {
             // ponytail: how far through its words Otto is, from the share of audio played against a speaking rate
             // until talk.done says how much audio there is; the clips carry no word timings.
-            let total = r.done ? r.queued : max(r.queued, Double(r.text.count) / 14 * r.rate)
+            let total = r.done && !r.dropped ? r.queued : max(r.queued, Double(r.text.count) / 14 * r.rate)
             said = max(said, min(1, r.played / max(1, total)))
         }
     }
 
-    /// The stream can't take this turn: it goes as a voice note, now or when you pause.
+    /// The stream can't take this turn: it goes as a voice note instead, once you've paused and it's safe to. Never
+    /// both: one the Mac wrote down (talk.final) never goes as a note.
     private func fallBack() {
-        guard let o = outgoing else { return }
+        guard var o = outgoing, o.abandoned == nil else { return }
+        if o.final { try? FileManager.default.removeItem(at: o.note); outgoing = nil; return }
         #if DEBUG
         NSLog("talk: turn goes as a voice note (%@)", o.turn ?? "never ready")
         #endif
-        outgoing = nil; pcm = Data(); guessing = nil
+        pcm = Data(); guessing = nil
         tap.unstream()
-        live?.talkSend(["type": "talk.stop"])
-        if o.ended != nil { note(o.line, o.note) }
+        // Stopped on the socket the turn is on, the Mac drops it. A dropped socket can't carry the stop, and the Mac
+        // may not have noticed it go: it can still finish the turn, so `settle()` waits for its copy first.
+        o.stopped = live?.connections == o.conn && live?.isLive == true && live?.talkSend(["type": "talk.stop"]) == true
+        o.abandoned = .now
+        outgoing = o
+        settle()
+    }
+
+    /// How long a turn the Mac may still be finishing (its socket dropped) waits for the Mac's copy before its note goes.
+    static let orphanWait: TimeInterval = 10
+
+    /// Sends an abandoned turn's note when it's safe to, or drops it if the Mac's own copy of the turn turned up.
+    /// `now`: send it whatever (a new turn or the end of the talk); under the turn's id, the Mac still keeps one copy if
+    /// the stream's landed first.
+    private func settle(now: Bool = false) {
+        guard let o = outgoing, let gaveUp = o.abandoned, let said = o.ended else { return }
+        if let t = o.turn, !o.stopped, !now {
+            if store.messages.contains(where: { $0.wireID == t }) {
+                #if DEBUG
+                NSLog("talk: the Mac finished %@ after all, no note", t)
+                #endif
+                try? FileManager.default.removeItem(at: o.note)
+                outgoing = nil
+                return
+            }
+            guard Date.now.timeIntervalSince(max(gaveUp, said)) > Self.orphanWait else { return }
+        }
+        outgoing = nil
+        if let t = o.turn, store.messages.contains(where: { $0.wireID == t }) { try? FileManager.default.removeItem(at: o.note); return }
+        note(o.line, o.note, turn: o.turn)
     }
 
     private func frame(_ data: Data) {
-        struct Frame: Decodable { let type: String; let turn: String?; let text: String?; let audio: String?; let error: String? }
+        struct Frame: Decodable { let type: String; let turn: String?; let text: String?; let audio: String?; let error: String?; let sentenceToAudioMs: Double? }
         guard !ended, let f = try? JSONDecoder().decode(Frame.self, from: data) else { return }
         #if DEBUG
         if f.type != "talk.audio" || reply?.clips == 0 { NSLog("talk: %@ %@ %@", f.type, String((f.turn ?? "-").prefix(8)), f.text.map { "\($0.count) chars" } ?? f.error ?? "") }
         #endif
         switch f.type {
         case "talk.ready":
-            guard var o = outgoing, o.turn == nil, let t = f.turn else { return }
-            streams = true; streamsConn = live?.connections ?? 0
+            guard var o = outgoing, o.turn == nil, o.abandoned == nil, let t = f.turn else { return }
+            streams = true; streamsConn = live?.connections ?? 0; streamedOnce = true
             o.turn = t
             // The line takes the Mac's id for the turn: the thread's copy of it comes back under it.
             if let id = UUID(uuidString: t) { rebind(o.line, to: id); o.line = id }
@@ -752,14 +828,16 @@ final class TalkSession {
             }
             #endif
         case "talk.partial":
-            if let o = outgoing, o.turn == f.turn, !o.final, let text = f.text { words[o.line] = text }
+            if let o = outgoing, o.turn == f.turn, o.abandoned == nil, !o.final, let text = f.text { words[o.line] = text }
         case "talk.ending":
-            guard var o = outgoing, o.turn == f.turn else { return }
+            guard var o = outgoing, o.turn == f.turn, o.abandoned == nil else { return }
             o.serverEnded = true
             outgoing = o
             if hearing { _ = detector.close(); finishTurn(send: true) }
         case "talk.final":
             guard var o = outgoing, o.turn == f.turn else { return }
+            // Written down after the stream gave up on it (the stop crossed it): the Mac has it, so no note.
+            if o.abandoned != nil { try? FileManager.default.removeItem(at: o.note); outgoing = nil; return }
             if let text = f.text { words[o.line] = text }
             o.final = true
             outgoing = o
@@ -781,9 +859,14 @@ final class TalkSession {
             if let t = f.turn, let a = f.audio { clip(t, a) }
         case "talk.done":
             if let t = f.turn { replyDone(t) }
+        case "talk.timing":
+            // A sentence's first clip is next: what's held of the last one goes, and the new one is held afresh.
+            guard f.sentenceToAudioMs != nil, reply?.turn == f.turn else { return }
+            release()
+            reply?.fresh = true
         case "talk.error":
             failed(f.turn, f.error ?? "")
-        default: break   // talk.accepted, talk.cut, talk.timing
+        default: break   // talk.cut, the other talk.timing
         }
     }
 
@@ -792,7 +875,7 @@ final class TalkSession {
         NSLog("talk: %@", error)
         #endif
         // About a turn already written down (Otto's speech), or one that carries on: talk.done follows, or the turn does.
-        guard let o = outgoing, o.turn == nil || o.turn == turn else { return }
+        guard let o = outgoing, o.abandoned == nil, o.turn == nil || o.turn == turn else { return }
         if ["send talk.start before audio", "60 second turn limit", "audio must", "speech unavailable"].contains(where: error.hasPrefix) { return }
         if error.contains("could not hear") || error.contains("empty turn") {
             // The Mac heard nothing it could write down: a note would hear no more. Said, and dropped.
@@ -959,32 +1042,75 @@ final class TalkSession {
         #endif
     }
 
-    /// A clip of a streamed answer: queued behind the last, the first one starting Otto's voice.
+    /// Seconds of Otto's voice held before it starts, or starts again after its clips ran out: the Mac makes them at
+    /// about the speed they play, often slower when it's busy, so playing each the moment it lands leaves a gap at
+    /// every seam. Grows by `holdStep` each time they run out mid-sentence, up to `holdMost`.
+    nonisolated static let holdStart = 0.5, holdStep = 0.25, holdMost = 1.5
+    #if DEBUG
+    /// `-talkNoHold`: each clip plays the moment it lands, as before the hold, to compare the seams.
+    static let noHold = ProcessInfo.processInfo.arguments.contains("-talkNoHold")
+    #else
+    static let noHold = false
+    #endif
+
+    /// Whether held clips go to the player now: enough of them, the end of a sentence or of the answer, or nothing more
+    /// for a while (a sentence's end the clip lengths didn't show).
+    nonisolated static func release(held: Double, hold: Double, sentenceEnded: Bool, done: Bool, quiet: Double) -> Bool {
+        held > 0 && (held >= hold || sentenceEnded || done || quiet > 1)
+    }
+
+    /// A clip of a streamed answer. While the player still has some of Otto's voice ahead of it, the clip joins the
+    /// queue at once, back to back on the one player; once it has run out (or before the first), clips are held until
+    /// `release(...)` says there are enough to carry on without a gap.
     private func clip(_ turn: String, _ base64: String) {
-        guard var r = reply, r.turn == turn, !r.phone, let engine,
-              let data = Data(base64Encoded: base64), let b = TalkMic.wav(data) else { return }
-        if r.clips == 0 {
+        guard var r = reply, r.turn == turn, !r.phone, let data = Data(base64Encoded: base64), let b = TalkMic.wav(data) else { return }
+        let frames = Double(b.frameLength)
+        if r.clips == 0 { r.rate = b.format.sampleRate }
+        r.clips += 1
+        r.lastClip = .now
+        let ends = r.longest > 0 && frames < r.longest * 0.9
+        r.longest = max(r.longest, frames)
+        r.held.append(b)
+        reply = r
+        if Self.noHold || (r.queued > r.played && !r.fresh) { release() }
+        else if Self.release(held: held(r), hold: r.hold, sentenceEnded: ends, done: r.done, quiet: 0) { release() }
+        if ends { reply?.fresh = true }
+    }
+
+    private func held(_ r: Reply) -> Double { r.held.reduce(0) { $0 + Double($1.frameLength) } / r.rate }
+
+    /// Held clips to the player, back to back; the first of the answer starts Otto's voice (the one `play()`).
+    private func release() {
+        guard var r = reply, !r.held.isEmpty, let engine else { return }
+        if r.queued == 0 {
             _ = begin(r.line)
             awaiting = false
             player.stop()
-            engine.connect(player, to: engine.mainMixerNode, format: b.format)
-            r.rate = b.format.sampleRate
+            engine.connect(player, to: engine.mainMixerNode, format: r.held[0].format)
+            r.rate = r.held[0].format.sampleRate
             play(frames: 0, gen: gen)   // no total yet: `stream()` moves the words along instead
             #if DEBUG
             if Self.dropAt == "answer", !dropped { dropped = true; live?.dropSocket() }
             #endif
         }
-        let g = gen, frames = Double(b.frameLength)
-        r.clips += 1; r.queued += frames
+        let g = gen
+        for b in r.held {
+            let frames = Double(b.frameLength)
+            r.queued += frames
+            player.scheduleBuffer(b, completionCallbackType: .dataPlayedBack, completionHandler: Self.finished { [weak self] in self?.played(frames, gen: g) })
+        }
+        r.held = []
+        r.fresh = false
         reply = r
-        player.scheduleBuffer(b, completionCallbackType: .dataPlayedBack, completionHandler: Self.finished { [weak self] in self?.played(frames, gen: g) })
     }
 
     private func played(_ frames: Double, gen g: Int) {
         guard g == gen, var r = reply else { return }
         r.played += frames
+        // Ran out mid-sentence: the Mac is slower than the voice right now, so hold more before the next stretch.
+        if r.played >= r.queued && r.held.isEmpty && !r.done && !r.fresh { r.hold = min(r.hold + Self.holdStep, Self.holdMost) }
         reply = r
-        if r.done && r.played >= r.queued { finish(r) }
+        if r.done && r.held.isEmpty && r.played >= r.queued { finish(r) }
     }
 
     /// No more of this answer is coming (talk.done, or the socket went): said in the phone's voice if none of its
@@ -995,13 +1121,22 @@ final class TalkSession {
         reply = r
         if r.phone { reply = nil; return }
         if r.clips == 0 { return phone(r) }
-        if r.played >= r.queued { finish(r) }
+        release()
+        if let r = reply, r.played >= r.queued { finish(r) }
     }
 
     private func finish(_ r: Reply) {
         reply = nil
-        if r.dropped, let i = lines.lastIndex(where: { $0.id == r.line }) { lines[i].cut = said }
+        let reached = said
         done(gen)
+        // The socket went mid-answer: what came has played, and the rest of its words go in the phone's voice.
+        guard r.dropped, let i = lines.lastIndex(where: { $0.id == r.line }) else { return }
+        let rest = r.text.dropFirst(Lit.head(r.text, reached).count).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rest.isEmpty else { return }
+        if hearing { lines[i].cut = reached; return }   // you're talking: kept as cut short, as a cut-in is
+        let id = UUID()
+        words[id] = rest
+        sayText(id, rest)
     }
 
     private func phone(_ r: Reply) {
@@ -1014,6 +1149,9 @@ final class TalkSession {
     }
 
     private func begin(_ id: Message.ID) -> Int {
+        #if DEBUG
+        NSLog("talk: Otto says: %@", String(text(id).prefix(48)))
+        #endif
         gen += 1
         saying = id; said = 0; cutIn = false
         lines.append(Line(id: id, at: Date.now.timeIntervalSince(started), otto: true))
@@ -1244,8 +1382,12 @@ final class TalkSession {
         guard let f = fakeClips.first?.format else { return nil }
         let n = AVAudioFrameCount(f.sampleRate * 0.05)
         let t = Date.now.timeIntervalSince(started)
-        let which = t >= 1 && fakeFed[0] < fakeClips[0].frameLength ? 0
-            : fakeClips.count > 1 && firstSpoke.map { Date.now.timeIntervalSince($0) >= 1.2 } == true && fakeFed[1] < fakeClips[1].frameLength ? 1 : nil
+        // `-talkFakeAt 1,40`: each clip at that many seconds into the talk instead (a second turn, not a cut-in).
+        let at = ProcessInfo.processInfo.arguments.firstIndex(of: "-talkFakeAt").map { i in ProcessInfo.processInfo.arguments[i + 1].split(separator: ",").compactMap { Double($0) } }
+        let which = at.flatMap { at in fakeClips.indices.first { i in i < at.count && t >= at[i] && fakeFed[i] < fakeClips[i].frameLength } }
+            ?? (at != nil ? nil
+            : t >= 1 && fakeFed[0] < fakeClips[0].frameLength ? 0
+            : fakeClips.count > 1 && firstSpoke.map { Date.now.timeIntervalSince($0) >= 1.2 } == true && fakeFed[1] < fakeClips[1].frameLength ? 1 : nil)
         guard let out = AVAudioPCMBuffer(pcmFormat: f, frameCapacity: n), let to = out.floatChannelData else { return nil }
         out.frameLength = n
         for c in 0..<Int(f.channelCount) { to[c].update(repeating: 0, count: Int(n)) }

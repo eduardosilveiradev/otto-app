@@ -1468,8 +1468,11 @@ final class OttoStore {
     /// The bubble shows up at once; the transcript fills it in when the server has it.
     /// Pending until the upload lands, so a dropped one (a weak hotspot) is retried on the
     /// next connection instead of vanishing.
-    @discardableResult func sendVoice(_ file: URL, replyTo: String? = nil) -> Message.ID? {
-        let m = Message(from: .me, text: "", isVoice: true, pending: true, replyTo: replyTo)
+    /// `wireID`: the id it goes under (a talk turn's, so the Mac keeps one copy of it). `via`: where it was said.
+    @discardableResult func sendVoice(_ file: URL, replyTo: String? = nil, wireID: String? = nil, via: String? = nil) -> Message.ID? {
+        var m = Message(from: .me, text: "", isVoice: true, pending: true, replyTo: replyTo)
+        if let wireID { m.id = UUID(uuidString: wireID) ?? m.id; m.serverID = wireID }
+        m.via = via
         // Kept so the note plays back from the thread, and so a retry has the audio.
         try? FileManager.default.removeItem(at: VoiceStore.url(m.id))
         guard (try? FileManager.default.moveItem(at: file, to: VoiceStore.url(m.id))) != nil else { return nil }
@@ -1485,7 +1488,7 @@ final class OttoStore {
             if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i].pending = nil; messages[i].failed = true }
             return
         }
-        let text = await backend.sendVoice(audio, id: m.wireID, replyTo: m.replyTo)
+        let text = await backend.sendVoice(audio, id: m.wireID, replyTo: m.replyTo, via: m.via)
         guard let i = messages.firstIndex(where: { $0.id == m.id }) else { return }
         guard let text else {
             // A receipt/history may already have proved delivery while HTTP was still waiting.

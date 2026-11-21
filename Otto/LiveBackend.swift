@@ -59,7 +59,8 @@ import Foundation
 ///   GET  <server>/app/history?limit=  [{"dir":"in"|"out","text","ts","id"?,"kind":"terminal"?,"read"?, and on Otto's: "files","voice","reply_to","buttons"?,"src"?,"why"?}]   (X-Otto-Background: 1 from the background refresh)
 ///   GET  <server>/app/file/<id>  a file or voice clip from a message
 ///   POST <server>/app/photo?text=<caption>&id=<uuid>  JPEG body -> 204 once the server has it
-///   POST <server>/app/voice?id=<uuid>    m4a body -> {"text": "<transcript>"}
+///   POST <server>/app/voice?id=<uuid>&via=talk?    m4a body -> {"text": "<transcript>"}; an id the Mac already has
+///                   (a talk turn's, saved over the stream) is answered and not taken in twice
 ///   POST <server>/app/ask     {"id","text","via":"siri"|"here","place"?} -> {"reply"?:{"id","text","buttons"}}  (Siri; waits for Otto's first reply)
 ///   POST <server>/app/photo?snap=1&id=<uuid>  JPEG body -> the same answer, for the Snap intent
 ///   POST <server>/app/health  JSON {notifications, backgroundRefresh, keepAwake, shareConfigured, lastRefresh?, build, version, ios, reason} -> 204
@@ -346,9 +347,10 @@ final class LiveBackend: OttoBackend {
         }
     }
 
-    func sendVoice(_ m4a: Data, id: String, replyTo: String?) async -> String? {
+    func sendVoice(_ m4a: Data, id: String, replyTo: String?, via: String?) async -> String? {
         guard let data = await post("app/voice", m4a, query: [URLQueryItem(name: "id", value: id)]
-                                    + (replyTo.map { [URLQueryItem(name: "reply_to", value: $0)] } ?? [])) else { return nil }
+                                    + (replyTo.map { [URLQueryItem(name: "reply_to", value: $0)] } ?? [])
+                                    + (via.map { [URLQueryItem(name: "via", value: $0)] } ?? [])) else { return nil }
         return (try? JSONDecoder().decode([String: String].self, from: data))?["text"] ?? ""
     }
 

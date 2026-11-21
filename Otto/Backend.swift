@@ -95,6 +95,8 @@ struct Message: Identifiable, Codable {
     var read: Bool? = nil
     /// The wireID of the message this one answers (a swipe-reply, either way).
     var replyTo: String? = nil
+    /// Where a voice note of yours was said, for the Mac ("talk": a talk turn that went as a note).
+    var via: String? = nil
     /// The message it answers was deleted: its quote reads "Message deleted" (see `drop`).
     var replyGone: Bool? = nil
     /// Photos and files Otto sent, fetched on demand with `OttoBackend.file`.
@@ -311,7 +313,7 @@ protocol OttoBackend: AnyObject {
     func wallet(_ fields: [String: String], id: String) async -> Bool
     /// Uploads an m4a voice note and returns its transcript ("" when there is none),
     /// or nil when the upload didn't make it, so the note stays pending and is retried.
-    func sendVoice(_ m4a: Data, id: String, replyTo: String?) async -> String?
+    func sendVoice(_ m4a: Data, id: String, replyTo: String?, via: String?) async -> String?
     /// A file Otto sent (RemoteFile.id). Nil only when the server says it's gone (a 404); throws when
     /// it couldn't be asked or didn't hand it over (offline, a timeout, a 5xx), which a later try can fix.
     func file(_ id: String) async throws -> Data?
@@ -482,7 +484,7 @@ final class MockBackend: OttoBackend {
         return true
     }
 
-    func sendVoice(_ m4a: Data, id: String, replyTo: String?) async -> String? {
+    func sendVoice(_ m4a: Data, id: String, replyTo: String?, via: String?) async -> String? {
         out.yield(Message(from: .otto, text: "(mock) heard you"))
         return "(mock transcript)"
     }
