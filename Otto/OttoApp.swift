@@ -1248,6 +1248,9 @@ final class OttoStore {
                 if h.read == true { messages[i].read = true }
             } else if h.from == .otto {
                 if messages[i].isVoice && messages[i].audio == nil && h.audio != nil { messages[i].audio = h.audio }
+                // History says no voice is coming (its synthesis failed or is off, and the frame saying so was missed):
+                // stop waiting for one, or the thread shows a voice bar, and talk holds the reply back, for 90 s.
+                if messages[i].isVoice && messages[i].audio == nil && !h.isVoice { messages[i].isVoice = false }
                 // History is the latest text; only one cut at its 8000-character cap keeps the longer local copy.
                 if messages[i].text != h.text && !(h.text.count >= 8000 && messages[i].text.hasPrefix(h.text)) { messages[i].text = h.text }
             }

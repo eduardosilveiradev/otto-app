@@ -166,7 +166,7 @@ final class TalkMic: @unchecked Sendable {
 final class TalkSession {
     /// The talk under way, for its Live Activity's buttons.
     static weak var current: TalkSession?
-    /// While a talk holds the microphone: the background keepalive, the work activity and notifications stand aside.
+    /// While a talk holds the microphone: the background keepalive and Otto's reply banners stand aside.
     nonisolated(unsafe) static var active = false
 
     enum Mic: Equatable { case starting, on, denied, failed, paused }
@@ -210,6 +210,9 @@ final class TalkSession {
     /// Bumped whenever Otto's voice is stopped or replaced, so a late callback from the last one is ignored.
     @ObservationIgnored private var gen = 0
     @ObservationIgnored private let synth = AVSpeechSynthesizer()
+    @ObservationIgnored private let aloud = Aloud()
+    /// When talk first saw each of Otto's messages, for how long a clip has been waited for.
+    @ObservationIgnored private var seen: [Message.ID: Date] = [:]
     /// Messages there before the talk, and Otto's ones already said or skipped: none of these is said again.
     @ObservationIgnored private var heard: Set<Message.ID> = []
     @ObservationIgnored private var asked = Date.now
@@ -265,7 +268,7 @@ final class TalkSession {
         Self.active = true
         ended = false; endedAt = nil; started = .now; asked = .now; tried = .distantPast; stops = []; plain = false
         lines = []; steps = []; cutIn = false; awaiting = false; saying = nil; said = 0
-        heard = Set(store.messages.map(\.id))
+        heard = Set(store.messages.map(\.id)); seen = [:]
         AudioPlayer.shared.stop()   // a voice note playing in the thread
         UIApplication.shared.isIdleTimerDisabled = true
         #if DEBUG
@@ -492,17 +495,40 @@ final class TalkSession {
 
     // MARK: Otto's voice
 
-    /// Otto's next new message, said out loud. News it was sending anyway (a reminder, the brief: it has a
-    /// `src`) isn't said over the talk; it's in the thread.
+    /// How long a reply's own voice is waited for before its words go out in the phone's voice. The Mac sends a
+    /// reply's text first and its clip after; with its speech slow or off the clip is late or never comes, and
+    /// the store only gives up on it after 90 s, far too long to sit silent in a conversation.
+    static let clipWait: TimeInterval = 3
+
+    enum Say: Equatable { case clip, text, wait, skip }
+
+    /// What talk does with an Otto message that came in during it: play its clip, say its words, wait a moment
+    /// for its clip, or leave it to the thread. `waited`: seconds since the talk first saw it.
+    nonisolated static func say(_ m: Message, waited: TimeInterval) -> Say {
+        guard isReply(m), m.patch == nil else { return .skip }
+        if m.audio != nil { return .clip }
+        if m.isVoice && waited < clipWait { return .wait }
+        return m.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .skip : .text
+    }
+
+    /// Otto answering you, as against news it sends anyway (a reminder, the brief, a job: those carry a `src`).
+    /// A reply the Mac couldn't pin to your turn still comes as `src: "chat"`, and is still an answer.
+    nonisolated static func isReply(_ m: Message) -> Bool { m.from == .otto && (m.src == nil || m.src == "chat") }
+
+    /// Otto's next new message, said out loud, in the order they came.
     private func sayNext() {
         let since = started.addingTimeInterval(-30)   // history caught up after a reconnect is old news
-        guard let m = store.messages.first(where: { $0.from == .otto && !heard.contains($0.id) && $0.date >= since }) else { return }
-        if m.src != nil { heard.insert(m.id); return }
-        if m.audio == nil && m.isVoice { return }   // its voice is on the way (the store gives up on it after 90 s)
-        heard.insert(m.id)
-        awaiting = false
-        if let a = m.audio { sayClip(m, a) }
-        else if !m.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { sayText(m) }
+        let now = Date.now
+        for m in store.messages where m.from == .otto && !heard.contains(m.id) && m.date >= since {
+            let first = seen[m.id] ?? now
+            seen[m.id] = first
+            switch Self.say(m, waited: now.timeIntervalSince(first)) {
+            case .skip: heard.insert(m.id)
+            case .wait: return   // what Otto said after it waits behind it
+            case .clip: heard.insert(m.id); awaiting = false; return sayClip(m, m.audio!)
+            case .text: heard.insert(m.id); awaiting = false; return sayText(m)
+            }
+        }
     }
 
     private func sayClip(_ m: Message, _ clip: RemoteFile) {
@@ -528,14 +554,22 @@ final class TalkSession {
     private func sayText(_ m: Message) {
         let g = saying == m.id ? gen : begin(m)
         let box = Rendered()
-        synth.write(AVSpeechUtterance(string: m.text), toBufferCallback: Self.collect(box) { [weak self] in self?.playRendered(box.buffers, gen: g) })
+        synth.write(AVSpeechUtterance(string: m.text), toBufferCallback: Self.collect(box) { [weak self] in self?.playRendered(box.buffers, m, gen: g) })
+        // Nothing rendered in 3 s: the phone's voice straight out instead, so the reply is never left unsaid.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard let self, g == self.gen, self.saying == m.id, self.playing == nil, box.isEmpty else { return }
+            self.synth.stopSpeaking(at: .immediate)
+            self.sayAloud(m)
+        }
     }
 
-    private func playRendered(_ buffers: [AVAudioPCMBuffer], gen g: Int) {
-        guard g == gen, let engine, let first = buffers.first,
-              let f = AVAudioFormat(standardFormatWithSampleRate: first.format.sampleRate, channels: first.format.channelCount) else { return done(g) }
+    private func playRendered(_ buffers: [AVAudioPCMBuffer], _ m: Message, gen g: Int) {
+        guard g == gen else { return }
+        guard let engine, let first = buffers.first,
+              let f = AVAudioFormat(standardFormatWithSampleRate: first.format.sampleRate, channels: first.format.channelCount) else { return sayAloud(m) }
         let floats = buffers.compactMap { Self.float($0, f) }
-        guard !floats.isEmpty else { return done(g) }
+        guard !floats.isEmpty else { return sayAloud(m) }
         player.stop()
         engine.connect(player, to: engine.mainMixerNode, format: f)
         for (i, b) in floats.enumerated() {
@@ -543,6 +577,20 @@ final class TalkSession {
                                   completionHandler: i == floats.count - 1 ? Self.finished { [weak self] in self?.done(g) } : nil)
         }
         play(frames: floats.reduce(0) { $0 + Double($1.frameLength) }, gen: g)
+    }
+
+    /// The phone's voice spoken directly, for when rendering it gave nothing to play. It doesn't pass through the
+    /// engine, so the echo cancelling may not take it out of the microphone; that beats a reply left unsaid.
+    private func sayAloud(_ m: Message) {
+        gen += 1
+        let g = gen
+        saying = m.id; playing = nil
+        let n = Double(max(1, (m.text as NSString).length))
+        aloud.heard = { [weak self] range, over in
+            guard let self, g == self.gen else { return }
+            if over { self.done(g) } else { self.said = Double(range.upperBound) / n }
+        }
+        aloud.synth.speak(AVSpeechUtterance(string: m.text))
     }
 
     private func begin(_ m: Message) -> Int {
@@ -580,6 +628,7 @@ final class TalkSession {
         gen += 1
         player.stop()
         synth.stopSpeaking(at: .immediate)
+        aloud.synth.stopSpeaking(at: .immediate)
         playing = nil; saying = nil
     }
 
@@ -587,12 +636,32 @@ final class TalkSession {
         { _ in Task { @MainActor in then() } }
     }
 
-    final class Rendered: @unchecked Sendable { var buffers: [AVAudioPCMBuffer] = [] }
+    /// The phone's voice as it renders, filled on the synthesizer's thread.
+    final class Rendered: @unchecked Sendable {
+        private let lock = NSLock()
+        private var all: [AVAudioPCMBuffer] = []
+        var buffers: [AVAudioPCMBuffer] { lock.withLock { all } }
+        var isEmpty: Bool { lock.withLock { all.isEmpty } }
+        func add(_ b: AVAudioPCMBuffer) { lock.withLock { all.append(b) } }
+    }
+
+    /// The phone's voice spoken straight out, telling talk how far it has got and when it's done.
+    final class Aloud: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+        let synth = AVSpeechSynthesizer()
+        var heard: (@MainActor (NSRange, Bool) -> Void)?
+        override init() { super.init(); synth.delegate = self }
+        func speechSynthesizer(_ s: AVSpeechSynthesizer, willSpeakRangeOfSpeechString r: NSRange, utterance: AVSpeechUtterance) {
+            let f = heard; Task { @MainActor in f?(r, false) }
+        }
+        func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+            let f = heard; Task { @MainActor in f?(NSRange(), true) }
+        }
+    }
 
     private nonisolated static func collect(_ box: Rendered, then: @escaping @MainActor () -> Void) -> AVSpeechSynthesizer.BufferCallback {
         { buffer in
             guard let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 else { Task { @MainActor in then() }; return }
-            box.buffers.append(pcm)
+            box.add(pcm)
         }
     }
 
