@@ -832,8 +832,9 @@ struct TalkView: View {
                 Text(session.text(you.id)).font(size: 20, relativeTo: .title3).lineLimit(5)
             }
         case .working:
-            if let otto = session.lines.last(where: \.otto) {
-                Text(session.text(otto.id)).font(size: 20, weight: .semibold, relativeTo: .title3).lineLimit(4)
+            // Otto's answer to what you last said; until it has one, what you said (its last line answered something older).
+            if let line = session.lines.last, !session.text(line.id).isEmpty {
+                Text(session.text(line.id)).font(size: 20, weight: line.otto ? .semibold : .regular, relativeTo: .title3).lineLimit(4)
             }
         case .waiting:
             Text("Otto needs your OK. Approve it on this iPhone, not by voice.").font(size: 20, relativeTo: .title3).foregroundStyle(.secondary)
