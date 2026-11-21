@@ -214,12 +214,14 @@ shot talk muted 7 "Talk, muted" $O -demoThread -talk -talkState muted
 shot talk share 7 "Talk with your screen shared: Otto sees it, and the chip at the top stops it" $O -demoThread -talk -talkState share
 shot talk share-stopped 7 "Sharing just stopped (the red pill, the chip, or Share): said for a few seconds" $O -demoThread -talk -talkState share-stopped
 shot talk share-refused 7 "A Mac that can't take your screen yet: Share is off, the talk carries on" $O -demoThread -talk -talkState share-refused
-shot talk lean-left 7 "Talk, the screen turned 30° to your right: the ring leans left, back toward you (-talkLean fakes the turn)" $O -demoThread -talk -talkState hearing -talkLean 30
-shot talk lean-centre 7 "Talk, the phone held as it was when the talk started: no lean" $O -demoThread -talk -talkState hearing -talkLean 0
-shot talk lean-right 7 "Talk, the screen turned 30° to your left: the ring leans right" $O -demoThread -talk -talkState hearing -talkLean -30
+shot talk lean-left 7 "Talk in silence, the screen turned 30° to your right: the ring leans left, back toward you (-talkLean fakes the turn)" $O -demoThread -talk -talkState listening -talkLean 30
+shot talk lean-centre 7 "Talk in silence, the phone held as it was when the talk started: no lean" $O -demoThread -talk -talkState listening -talkLean 0
+shot talk lean-right 7 "Talk while Otto thinks, the screen turned 30° to your left: the ring leans right" $O -demoThread -talk -talkState thinking -talkLean -30
+shot talk lean-speaking 7 "Talk while Otto speaks, the screen turned 30° to your left: the ring leans right" $O -demoThread -talk -talkState speaking -talkLean -30
+shot talk lean-working 7 "Talk while Otto works, the screen turned 30° to your right: the small ring leans left" $O -demoThread -talk -talkState working -thinking -browserTile -talkLean 30
 # Reduce Motion on for this one shot only, and off again however the run ends (done_ resets it).
 [ $LIST = 0 ] && [[ talk-lean-reduce-motion =~ $FILTER ]] && xcrun simctl spawn "$DEV" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
-shot talk lean-reduce-motion 7 "Talk with Reduce Motion on: the same 30° turn, and the ring doesn't lean" $O -demoThread -talk -talkState hearing -talkLean 30
+shot talk lean-reduce-motion 7 "Talk with Reduce Motion on: the same 30° turn, and the ring doesn't lean" $O -demoThread -talk -talkState listening -talkLean 30
 [ $LIST = 0 ] && [[ talk-lean-reduce-motion =~ $FILTER ]] && xcrun simctl spawn "$DEV" defaults write com.apple.Accessibility ReduceMotionEnabled -bool false
 shot talk lost 7 "Talk with the Mac out of reach: what you say waits" $O -demoThread -talk -talkState listening -offline
 shot talk mic-blocked 7 "Talk with the microphone switched off for Otto" $O -demoThread -talk -talkState mic
