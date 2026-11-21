@@ -92,8 +92,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func post(_ m: Message) {
-        // Said out loud by a talk in progress: a banner's sound would land in its open microphone.
-        guard !TalkSession.active else { return }
+        // Said out loud by a talk in progress (Otto's own replies in its thread): a banner's sound would land in its
+        // open microphone. News (a `src`) and other threads aren't said, so they still come as banners.
+        guard !(TalkSession.active && m.src == nil && (m.thread ?? "otto") == "otto") else { return }
         // Time Sensitive needs an entitlement a free team can't have, so urgency rides on the
         // relevance score instead: it orders the scheduled summary, and may inform Priority Notifications.
         // One subject per stack, so an Apple Intelligence summary of the stack is about one thing.
