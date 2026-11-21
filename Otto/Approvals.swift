@@ -137,6 +137,17 @@ enum ApprovalCheck {
         assert(TalkSession.say(otto("Booked.", clip: true), waited: 0) == .clip, "a clip plays")
         assert(TalkSession.say(otto("Booked.", src: "chat"), waited: 0) == .text && TalkSession.say(otto("Dentist at 4", src: "reminders"), waited: 0) == .skip, "chat is a reply, news isn't")
         assert(TalkSession.say(otto("  ", voice: true), waited: 10) == .skip && TalkSession.say(Message(from: .me, text: "hi"), waited: 0) == .skip, "nothing to say")
+        // The talk stream: an answer it said isn't said again from the thread, whole or one bubble of it; another is.
+        let streamed = ["Two plus two is four.\n\nAnything else?"]
+        assert(TalkSession.streamed(otto("Anything else?"), in: streamed) && TalkSession.streamed(otto("Two plus two is four.\n\nAnything else?"), in: streamed)
+               && !TalkSession.streamed(otto("Dentist at 4"), in: streamed) && !TalkSession.streamed(otto(" "), in: streamed), "said once")
+        // Its clips: a 16-bit WAV (the Mac's are 24 kHz mono) read as floats; anything else isn't played.
+        var wav = Data("RIFF".utf8) + Data([0, 0, 0, 0]) + Data("WAVEfmt ".utf8)
+        for (v, n) in [(16, 4), (1, 2), (1, 2), (24_000, 4), (48_000, 4), (2, 2), (16, 2)] { wav += withUnsafeBytes(of: UInt32(v).littleEndian) { Data($0.prefix(n)) } }
+        wav += Data("data".utf8) + Data([4, 0, 0, 0]) + Data([0x00, 0x40, 0x00, 0xC0])   // +0.5, -0.5
+        let clip = TalkMic.wav(wav)
+        assert(clip?.format.sampleRate == 24_000 && clip?.frameLength == 2 && clip?.floatChannelData?[0][0] == 0.5 && clip?.floatChannelData?[0][1] == -0.5, "a clip")
+        assert(TalkMic.wav(Data("not a wav".utf8)) == nil && TalkMic.wav(wav.prefix(40)) == nil, "not a clip")
         // A PDF as pictures: every page up to the cap, none wider or taller than 1400 px whatever the screen's scale.
         let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 595, height: 842)).pdfData { ctx in for _ in 0..<3 { ctx.beginPage() } }
         let two = PDFPages.images(pdf, limit: 2)

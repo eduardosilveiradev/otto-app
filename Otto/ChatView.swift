@@ -499,6 +499,8 @@ struct ChatView: View {
                             .task {
                                 guard thread.isOtto, store.backend.canStop, !stopHintShown else { return }
                                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                                // Not under talk: a popover from the thread takes talk's full-screen cover down with it.
+                                guard !TalkLauncher.shared.open else { return }
                                 stopHintShown = true; stopHint = true
                                 try? await Task.sleep(for: .seconds(5))
                                 stopHint = false
@@ -845,6 +847,7 @@ struct ChatView: View {
                     #endif
                     guard due else { return }
                     try? await Task.sleep(for: .seconds(1.5))
+                    guard !TalkLauncher.shared.open else { return }   // under talk, it would take talk down
                     phoneHintAt = Date.now.timeIntervalSince1970
                     phoneHint = true
                     try? await Task.sleep(for: .seconds(6))
