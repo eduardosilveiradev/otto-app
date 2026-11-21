@@ -43,6 +43,7 @@ for rt in sorted((k for k in d if ".iOS-" in k), key=lambda k: [int(x) for x in 
   fi
   done_() {
     xcrun simctl terminate "$DEV" $ID >/dev/null 2>&1
+    [[ talk-lean-reduce-motion =~ $FILTER ]] && xcrun simctl spawn "$DEV" defaults write com.apple.Accessibility ReduceMotionEnabled -bool false
     [ $BOOTED_HERE = 1 ] && xcrun simctl shutdown "$DEV" >/dev/null 2>&1
     rm -rf "$LOCK"
   }
@@ -216,9 +217,10 @@ shot talk share-refused 7 "A Mac that can't take your screen yet: Share is off, 
 shot talk lean-left 7 "Talk, the screen turned 30° to your right: the ring leans left, back toward you (-talkLean fakes the turn)" $O -demoThread -talk -talkState hearing -talkLean 30
 shot talk lean-centre 7 "Talk, the phone held as it was when the talk started: no lean" $O -demoThread -talk -talkState hearing -talkLean 0
 shot talk lean-right 7 "Talk, the screen turned 30° to your left: the ring leans right" $O -demoThread -talk -talkState hearing -talkLean -30
-[ $LIST = 1 ] || xcrun simctl spawn "$DEV" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
+# Reduce Motion on for this one shot only, and off again however the run ends (done_ resets it).
+[ $LIST = 0 ] && [[ talk-lean-reduce-motion =~ $FILTER ]] && xcrun simctl spawn "$DEV" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
 shot talk lean-reduce-motion 7 "Talk with Reduce Motion on: the same 30° turn, and the ring doesn't lean" $O -demoThread -talk -talkState hearing -talkLean 30
-[ $LIST = 1 ] || xcrun simctl spawn "$DEV" defaults write com.apple.Accessibility ReduceMotionEnabled -bool false
+[ $LIST = 0 ] && [[ talk-lean-reduce-motion =~ $FILTER ]] && xcrun simctl spawn "$DEV" defaults write com.apple.Accessibility ReduceMotionEnabled -bool false
 shot talk lost 7 "Talk with the Mac out of reach: what you say waits" $O -demoThread -talk -talkState listening -offline
 shot talk mic-blocked 7 "Talk with the microphone switched off for Otto" $O -demoThread -talk -talkState mic
 shot talk paused 7 "Talk paused by a phone call or Siri" $O -demoThread -talk -talkState paused

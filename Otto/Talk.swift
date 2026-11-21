@@ -1888,7 +1888,8 @@ private struct LeaningRing: View {
 
     @MainActor @Observable final class Tilt {
         private(set) var direction = 0.0
-        @ObservationIgnored private let motion = CMMotionManager()
+        /// Made on first start: SwiftUI builds a `Tilt` each time the talk screen redraws and keeps only the first.
+        @ObservationIgnored private var motion: CMMotionManager?
         @ObservationIgnored private var turn = 0.0
         @ObservationIgnored private var last: TimeInterval?
         #if DEBUG
@@ -1897,8 +1898,11 @@ private struct LeaningRing: View {
 
         func start() {
             #if DEBUG
+            NSLog("talk lean: on")
             if let degrees = Self.fakeTurn { return startFake(degrees) }
             #endif
+            let motion = motion ?? CMMotionManager()
+            self.motion = motion
             guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
             turn = 0; last = nil; direction = 0
             motion.deviceMotionUpdateInterval = 1.0 / 30
@@ -1909,8 +1913,9 @@ private struct LeaningRing: View {
         }
 
         func stop() {
-            motion.stopDeviceMotionUpdates()
+            motion?.stopDeviceMotionUpdates()
             #if DEBUG
+            NSLog("talk lean: off")
             fake?.cancel(); fake = nil
             #endif
         }
