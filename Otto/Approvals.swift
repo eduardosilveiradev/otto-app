@@ -1,5 +1,6 @@
 import SwiftUI
 import LocalAuthentication
+import CoreImage
 
 /// A change to Otto's own core that needs your say-so — the in-app version of typing
 /// "i approve the otto core change". The server sends it (what, why, every file with its
@@ -137,6 +138,24 @@ enum ApprovalCheck {
         assert(TalkSession.say(otto("Booked.", clip: true), waited: 0) == .clip, "a clip plays")
         assert(TalkSession.say(otto("Booked.", src: "chat"), waited: 0) == .text && TalkSession.say(otto("Dentist at 4", src: "reminders"), waited: 0) == .skip, "chat is a reply, news isn't")
         assert(TalkSession.say(otto("  ", voice: true), waited: 10) == .skip && TalkSession.say(Message(from: .me, text: "hi"), waited: 0) == .skip, "nothing to say")
+        // The talk stream: an answer it said isn't said again from the thread, whole or one bubble of it; another is.
+        let streamed = ["Two plus two is four.\n\nAnything else?"]
+        assert(TalkSession.streamed(otto("Anything else?"), in: streamed) && TalkSession.streamed(otto("Two plus two is four.\n\nAnything else?"), in: streamed)
+               && !TalkSession.streamed(otto("Dentist at 4"), in: streamed) && !TalkSession.streamed(otto(" "), in: streamed), "said once")
+        // Its clips: a 16-bit WAV (the Mac's are 24 kHz mono) read as floats; anything else isn't played.
+        var wav = Data("RIFF".utf8) + Data([0, 0, 0, 0]) + Data("WAVEfmt ".utf8)
+        for (v, n) in [(16, 4), (1, 2), (1, 2), (24_000, 4), (48_000, 4), (2, 2), (16, 2)] { wav += withUnsafeBytes(of: UInt32(v).littleEndian) { Data($0.prefix(n)) } }
+        wav += Data("data".utf8) + Data([4, 0, 0, 0]) + Data([0x00, 0x40, 0x00, 0xC0])   // +0.5, -0.5
+        let clip = TalkMic.wav(wav)
+        assert(clip?.format.sampleRate == 24_000 && clip?.frameLength == 2 && clip?.floatChannelData?[0][0] == 0.5 && clip?.floatChannelData?[0][1] == -0.5, "a clip")
+        // Otto's streamed voice is held until there's enough to play through: half a second, a sentence's end, the
+        // answer's end, or a second with nothing new. Never with nothing held.
+        let hold = TalkSession.holdStart
+        assert(!TalkSession.release(held: 0.24, hold: hold, sentenceEnded: false, done: false, quiet: 0)
+               && TalkSession.release(held: 0.72, hold: hold, sentenceEnded: false, done: false, quiet: 0), "held until half a second")
+        assert(TalkSession.release(held: 0.1, hold: hold, sentenceEnded: true, done: false, quiet: 0) && TalkSession.release(held: 0.1, hold: hold, sentenceEnded: false, done: true, quiet: 0)
+               && TalkSession.release(held: 0.1, hold: hold, sentenceEnded: false, done: false, quiet: 1.2) && !TalkSession.release(held: 0, hold: hold, sentenceEnded: true, done: true, quiet: 9), "or a sentence's end")
+        assert(TalkMic.wav(Data("not a wav".utf8)) == nil && TalkMic.wav(wav.prefix(40)) == nil, "not a clip")
         // A PDF as pictures: every page up to the cap, none wider or taller than 1400 px whatever the screen's scale.
         let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 595, height: 842)).pdfData { ctx in for _ in 0..<3 { ctx.beginPage() } }
         let two = PDFPages.images(pdf, limit: 2)
@@ -164,6 +183,28 @@ enum ApprovalCheck {
         assert(OttoStore.savedUnconfirmed()["check"] == nil, "and gone once it's settled")
         // Pairing: only Otto's own answer counts, not any page that says 200.
         assert(ServerProblem.isOtto(Data(#"{"toggles":[]}"#.utf8)) && !ServerProblem.isOtto(Data("<html>Sign in to Wi-Fi</html>".utf8)) && !ServerProblem.isOtto(Data("[]".utf8)), "a 200 that isn't Otto's")
+        // Your screen for Otto, the extension's pipeline: a phone's screen comes down to a 1600 px long edge and under
+        // 1.5 MB (busier than that steps the quality down, and gives up rather than send an oversize one), a frame is
+        // due every 2 s and no sooner, and stopping leaves nothing behind.
+        let ctx = CIContext()
+        let noise = CIFilter(name: "CIRandomGenerator")!.outputImage!.cropped(to: CGRect(x: 0, y: 0, width: 1206, height: 2622))
+        let shot = ScreenShare.jpeg(noise, context: ctx) ?? Data()
+        let shotSize = ScreenShare.size(shot)
+        assert(shotSize?.width == 736 && shotSize?.height == 1600 && shot.count < ScreenShare.maxBytes, "a screen comes down to 1600 px")
+        let capped = ScreenShare.jpeg(noise, context: ctx, under: 400_000)
+        assert(shot.count > 400_000 && (capped?.count ?? .max) < 400_000, "over the cap steps the quality down")
+        assert(ScreenShare.jpeg(noise, context: ctx, under: 1_000) == nil, "and never makes one past it")
+        let small = ScreenShare.jpeg(noise.cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300)), context: ctx).flatMap(ScreenShare.size)
+        assert(small?.width == 400 && small?.height == 300, "a small screen isn't blown up")
+        let t0 = Date.now
+        assert(ScreenShare.due(nil, t0) && !ScreenShare.due(t0, t0.addingTimeInterval(1.9)) && ScreenShare.due(t0, t0.addingTimeInterval(2)), "one frame every 2 s")
+        assert(ScreenShare.dir != nil, "an app group container")
+        assert(ScreenShare.write(shot) && ScreenShare.latest()?.jpeg == shot && ScreenShare.frameDate() != nil, "the newest frame is kept")
+        ScreenShare.stamp(ScreenShare.appAlive)
+        assert((ScreenShare.age(ScreenShare.appAlive) ?? 99) < 1, "a side's stamp")
+        ScreenShare.clear()
+        assert(ScreenShare.latest() == nil && ScreenShare.frameDate() == nil && ScreenShare.age(ScreenShare.appAlive) == nil, "off leaves no frame behind")
+        assert(!FileManager.default.fileExists(atPath: ScreenShare.dir?.path ?? "/"), "nor the folder")
         print("approval check ok")
         // An answer given with no socket never leaves the phone: it's said as that, and nothing is queued to
         // go out on the next connect (a stale yes then would be the worst of both).
