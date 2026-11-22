@@ -26,37 +26,19 @@ struct CallActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         var started: Date
         var muted = false
+        /// Otto sees your screen (the talk's screen broadcast).
+        var sharing = false
     }
 }
 
-/// Otto at work on something that takes a while, on the Lock Screen and in the Dynamic Island. The app starts
-/// it and keeps it current (WorkActivity); nothing reaches it from outside, so past its stale date it says
-/// to open Otto instead of naming a step that may be over.
+/// What the removed "Otto is working" Live Activity carried. Nothing starts one any more; the type stays only so
+/// the app can end one an older build left running (OttoApp's launch). Its shape must match theirs to read them.
 struct WorkActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
-        /// What Otto is doing right now ("Reading mail", "Coding: fix the share sheet").
         var status: String
         var started: Date
-        /// Something is waiting on the owner (an approval, a job's question): the tangerine mark, and a tap opens it.
         var needsYou = false
         var done = false
-    }
-}
-
-/// The work activity's words for each of its states: working, waiting on you, done, and stale (the app was
-/// suspended, so what it last knew may be old: it says where to look, not what it was).
-struct WorkLine {
-    let title: String, detail: String
-    let needsYou: Bool, running: Bool
-    var url: URL? { URL(string: needsYou ? "otto://approval" : "otto://chat") }
-
-    init(_ s: WorkActivityAttributes.ContentState, stale: Bool) {
-        needsYou = s.needsYou
-        running = !s.done && !stale
-        if s.done { title = "Otto is done"; detail = "The answer is in the chat." }
-        else if stale { title = "Otto"; detail = "Open the app for where it’s got to." }
-        else if s.needsYou { title = "Otto needs you"; detail = s.status }
-        else { title = "Otto is working"; detail = s.status }
     }
 }
 
@@ -76,10 +58,42 @@ struct HangUpOttoCall: LiveActivityIntent {
     @MainActor func perform() async throws -> some IntentResult { Self.run(); return .result() }
 }
 
-/// The Control Center (and Lock Screen) button: opens the app on the walkie-talkie. In both targets, as a
-/// control's intent must be; with openAppWhenRun it runs in the app, which points `run` at the walkie.
+/// A talk with Otto while it lasts, on the Lock Screen and in the Dynamic Island. The app starts it and keeps
+/// it current from its own process (TalkSession; the microphone keeps the app running), so it needs no push.
+struct TalkActivityAttributes: ActivityAttributes {
+    struct ContentState: Codable, Hashable {
+        /// Where the talk is ("Listening", "Working"), and the words that go with it: what Otto said, or its latest step.
+        var title: String
+        var line: String
+        /// The SF Symbol for the island's compact side.
+        var symbol: String
+        var started: Date
+        var muted = false
+        /// Otto sees your screen (the talk's screen broadcast).
+        var sharing = false
+    }
+}
+
+/// The talk's own buttons on its Live Activity, run in the app (the app points `run` at the talk).
+struct MuteOttoTalk: LiveActivityIntent {
+    static let title: LocalizedStringResource = "Mute or unmute the talk with Otto"
+    static let isDiscoverable = false
+    @MainActor static var run: () -> Void = {}
+    @MainActor func perform() async throws -> some IntentResult { Self.run(); return .result() }
+}
+
+struct EndOttoTalk: LiveActivityIntent {
+    static let title: LocalizedStringResource = "End the talk with Otto"
+    static let isDiscoverable = false
+    @MainActor static var run: () -> Void = {}
+    @MainActor func perform() async throws -> some IntentResult { Self.run(); return .result() }
+}
+
+/// The Control Center (and Lock Screen) button: opens the app on talk mode. In both targets, as a control's
+/// intent must be; with openAppWhenRun it runs in the app, which points `run` at talk. Still named for the
+/// walkie-talkie it replaced, so controls already placed keep working.
 struct OpenWalkieControl: AppIntent {
-    static let title: LocalizedStringResource = "Otto walkie-talkie"
+    static let title: LocalizedStringResource = "Talk with Otto"
     static let isDiscoverable = false
     static let openAppWhenRun = true
     @MainActor static var run: () -> Void = {}

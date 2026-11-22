@@ -92,6 +92,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func post(_ m: Message) {
+        // Said out loud by a talk in progress (Otto's replies): a banner's sound would land in its open microphone.
+        // News (a `src` other than "chat") isn't said, so it still comes as a banner.
+        guard !(TalkSession.active && TalkSession.isReply(m)) else { return }
         // Time Sensitive needs an entitlement a free team can't have, so urgency rides on the
         // relevance score instead: it orders the scheduled summary, and may inform Priority Notifications.
         // One subject per stack, so an Apple Intelligence summary of the stack is about one thing.
@@ -258,7 +261,7 @@ enum Keepalive {
 
     static func update(background: Bool) {
         // Dictation's warm mic already keeps the app alive, and owns the session.
-        if background && enabled && !CallManager.active && !VoiceRecorder.active && !Dictation.active { start() } else { stop() }
+        if background && enabled && !CallManager.active && !VoiceRecorder.active && !Dictation.active && !TalkSession.active { start() } else { stop() }
     }
 
     private static func start() {
@@ -277,7 +280,7 @@ enum Keepalive {
             guard type == .ended else { return }
             MainActor.assumeIsolated {
                 guard UIApplication.shared.applicationState == .background, enabled,
-                      !CallManager.active, !VoiceRecorder.active, !Dictation.active else { return }
+                      !CallManager.active, !VoiceRecorder.active, !Dictation.active, !TalkSession.active else { return }
                 player?.play()
             }
         }

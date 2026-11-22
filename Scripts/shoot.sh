@@ -66,7 +66,7 @@ clean() {
   local data; data=$(xcrun simctl get_app_container "$DEV" $ID data 2>/dev/null) || return 0
   rm -rf "$data/Library/Application Support/"* "$data/Library/Caches/"* 2>/dev/null
   xcrun simctl spawn "$DEV" defaults delete $ID >/dev/null 2>&1
-  # the walkie hint pops on any launch more than two months after the last; only -walkieHint shows it
+  # the phone button's hint pops on any launch more than two months after the last; only -phoneHint shows it
   xcrun simctl spawn "$DEV" defaults write $ID walkieHintAt -float "$(date +%s)" >/dev/null 2>&1
 }
 
@@ -154,7 +154,8 @@ shot chat no-network 6 "This phone has no network at all: the header says so, no
 shot chat offline-pending 13 "Dead server with a send waiting: Will send when back online" $DEAD $N -longThread b
 shot chat offline-empty 15 "Real dead server: empty thread, asleep" $DEAD $N -emptyThread
 shot chat update-available 6 "Update button in the header" $O -demoThread -fakeUpdate
-shot chat walkie-hint 7 "Hold-for-walkie-talkie hint" $O -demoThread -walkieHint
+shot chat phone-hint 7 "The phone button's hint: hold for Call Otto or Talk" $O -demoThread -phoneHint
+shot chat phone-talk 6 "Talk picked last from the phone button's menu: a tap opens talk, and the button says so" $O -demoThread -phoneButton talk
 shot chat call-row 6 "A call with Otto that just ended: its line in the thread, with how long it ran" $O -demoThread -callRow
 shot sheet call-transcript 7 "The call's line tapped: what was said" $O -demoThread -callRow -callTranscript
 shot chat flight-banner 6 "Flight-day card under the header" $O -demoThread -mockGate
@@ -199,7 +200,24 @@ shot chat jobs 6 "Coding jobs under Otto's messages: one at work, one waiting on
 shot sheet job 7 "Job detail sheet: a job up for review, with its pull request" $O -jobsThread -jobOpen demo-review
 shot chat jobs-worst 6 "Worst case: a long title and question with five answers, a state this build doesn't know, a job the Mac no longer lists" $O -jobsThread worst
 shot sheet job-worst 7 "Worst case opened: a failure with a long error, thirty steps and a pull request in the thousands" $O -jobsThread worst -jobOpen worst-failed
-shot walkie open 9 "Walkie-talkie" $O -demoThread -walkie
+shot talk listening 7 "Talk, listening: nothing said yet" $O -demoThread -talk -talkState listening
+shot talk hearing 7 "Talk, your turn: your words as the Mac hears them, the last one still a guess" $O -demoThread -talk -talkState hearing
+shot talk missed 7 "Talk, the Mac heard nothing it could write down" $O -demoThread -talk -talkState missed
+shot talk thinking 7 "Talk, thinking: what you said, once the Mac has written it down" $O -demoThread -talk -talkState thinking
+shot talk speaking 7 "Talk, Otto speaking: its words light up as it says them" $O -demoThread -talk -talkState speaking
+shot talk cut-in 7 "Talk, you cut in: Otto stopped where it was, and your words come in under it" $O -demoThread -talk -talkState cutin
+shot talk working 7 "Talk, Otto working: its steps and the page it has open" $O -demoThread -talk -talkState working -thinking -browserTile
+shot talk working-private 7 "Talk, working on a sign-in page: caption only" $O -demoThread -talk -talkState working -thinking -browserTile private
+shot talk long 7 "Worst case: a long answer, part said" $O -demoThread -talk -talkState long
+shot talk muted 7 "Talk, muted" $O -demoThread -talk -talkState muted
+shot talk share 7 "Talk with your screen shared: Otto sees it, and the chip at the top stops it" $O -demoThread -talk -talkState share
+shot talk share-stopped 7 "Sharing just stopped (the red pill, the chip, or Share): said for a few seconds" $O -demoThread -talk -talkState share-stopped
+shot talk share-refused 7 "A Mac that can't take your screen yet: Share is off, the talk carries on" $O -demoThread -talk -talkState share-refused
+shot talk lost 7 "Talk with the Mac out of reach: what you say waits" $O -demoThread -talk -talkState listening -offline
+shot talk mic-blocked 7 "Talk with the microphone switched off for Otto" $O -demoThread -talk -talkState mic
+shot talk paused 7 "Talk paused by a phone call or Siri" $O -demoThread -talk -talkState paused
+shot talk mic-failed 7 "The microphone wouldn't start" $O -demoThread -talk -talkState failed
+shot talk ended 7 "Talk ended: what was said, with where you cut in" $O -demoThread -talk -talkState ended
 shot call web-call-failed 25 "Web call that couldn't connect" $O -demoThread -call -vapiPublicKey demo -vapiAssistantId demo -vapiHost 127.0.0.1
 
 # --- Search ---------------------------------------------------------------------------

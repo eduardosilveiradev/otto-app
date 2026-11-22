@@ -2,8 +2,8 @@ import SwiftUI
 import WidgetKit
 
 /// Otto outside the app: a Home Screen tile that opens the conversation (and says when an approval
-/// is waiting on you), a Lock Screen one that opens the walkie-talkie, and a call in progress on the
-/// Lock Screen and in the Dynamic Island. The tiles go through the app's own otto:// links (OttoApp's onOpenURL).
+/// is waiting on you), a Lock Screen one that opens talk mode, and a call or a talk in progress on the Lock
+/// Screen and in the Dynamic Island. The tiles go through the app's own otto:// links (OttoApp's onOpenURL).
 @main
 struct OttoWidgets: WidgetBundle {
     var body: some Widget {
@@ -11,7 +11,7 @@ struct OttoWidgets: WidgetBundle {
         OttoWalkieWidget()
         OttoWalkieControl()
         OttoCallActivity()
-        OttoWorkActivity()
+        OttoTalkActivity()
     }
 }
 
@@ -56,8 +56,8 @@ struct OttoWalkieWidget: Widget {
                 .containerBackground(for: .widget) { AccessoryWidgetBackground() }
                 .widgetURL(URL(string: "otto://walkie"))
         }
-        .configurationDisplayName("Otto walkie-talkie")
-        .description("Opens the walkie-talkie.")
+        .configurationDisplayName("Talk with Otto")
+        .description("Opens talk mode: talk hands-free, and Otto answers out loud.")
         .supportedFamilies([.accessoryCircular])
     }
 }
@@ -133,16 +133,17 @@ struct DoorLabel: ViewModifier {
     }
 }
 
-/// Control Center and the Lock Screen's control slots: the walkie-talkie, one press away.
+/// Control Center and the Lock Screen's control slots: talk mode, one press away. Kinds keep the walkie-talkie's
+/// names, so the widgets and controls people already placed open talk now.
 struct OttoWalkieControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: "dev.otto.walkie.control") {
             ControlWidgetButton(action: OpenWalkieControl()) {
-                Label("Otto walkie-talkie", systemImage: "waveform")
+                Label("Talk with Otto", systemImage: "waveform")
             }
         }
-        .displayName("Otto walkie-talkie")
-        .description("Opens the walkie-talkie.")
+        .displayName("Talk with Otto")
+        .description("Opens talk mode.")
     }
 }
 
@@ -182,47 +183,90 @@ struct OttoCallActivity: Widget {
     }
 }
 
-/// Otto working on something that takes a while: the face, the step it's on and how long it's been at it. A tap
-/// opens the chat, or the approval when one is waiting.
-struct OttoWorkActivity: Widget {
+/// A talk with Otto while you're elsewhere: where it's got to, Otto's words or its latest step, how long it's
+/// run, and Mute and End. A tap brings the talk back up (otto://walkie, talk's door).
+struct OttoTalkActivity: Widget {
     var body: some WidgetConfiguration {
-        ActivityConfiguration(for: WorkActivityAttributes.self) { context in
-            let line = WorkLine(context.state, stale: context.isStale)
+        ActivityConfiguration(for: TalkActivityAttributes.self) { context in
             HStack(spacing: 12) {
                 OttoFace(size: 40)
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        if line.needsYou { Circle().fill(Color.tangerine).frame(width: 7, height: 7).accessibilityHidden(true) }
-                        Text(line.title).font(.headline)
+                    HStack(spacing: 8) {
+                        Text(context.state.title).font(.headline).lineLimit(1)
+                        if context.state.sharing { Sees() }
+                        CallTime(started: context.state.started, alignment: .leading).font(.subheadline).foregroundStyle(.secondary)
                     }
-                    // The step can name what Otto is reading or searching for: hidden while the phone is locked.
-                    Text(line.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(2).privacySensitive()
+                    // Otto's words can name what it's reading or buying: hidden while the phone is locked.
+                    if !context.state.line.isEmpty {
+                        Text(context.state.line).font(.subheadline).foregroundStyle(.secondary).lineLimit(2).privacySensitive()
+                    }
                 }
                 Spacer(minLength: 8)
-                if line.running { CallTime(started: context.state.started).font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: 64) }
+                TalkButtons(muted: context.state.muted)
             }
             .padding(16)
-            .widgetURL(line.url)
+            .environment(\.colorScheme, .dark)
+            .activityBackgroundTint(.black)
+            .activitySystemActionForegroundColor(.white)
+            .widgetURL(URL(string: "otto://walkie"))
         } dynamicIsland: { context in
-            let line = WorkLine(context.state, stale: context.isStale)
-            return DynamicIsland {
+            DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) { OttoFace(size: 36) }
-                DynamicIslandExpandedRegion(.center) { Text(line.title).font(.headline) }
-                DynamicIslandExpandedRegion(.trailing) { if line.running { CallTime(started: context.state.started).font(.headline) } }
+                DynamicIslandExpandedRegion(.center) {
+                    HStack(spacing: 6) {
+                        Text(context.state.title).font(.headline).lineLimit(1)
+                        if context.state.sharing { Sees() }
+                    }
+                }
+                DynamicIslandExpandedRegion(.trailing) { CallTime(started: context.state.started).font(.headline) }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Text(line.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading).privacySensitive()
+                    HStack(alignment: .center, spacing: 12) {
+                        Text(context.state.line).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading).privacySensitive()
+                        TalkButtons(muted: context.state.muted)
+                    }
                 }
             } compactLeading: {
                 OttoFace(size: 22)
             } compactTrailing: {
-                if line.needsYou { Circle().fill(Color.tangerine).frame(width: 8, height: 8).accessibilityLabel("Otto needs you") }
-                else if line.running { CallTime(started: context.state.started).font(.footnote).minimumScaleFactor(0.75).frame(maxWidth: 56) }
-                else { Image(systemName: context.state.done ? "checkmark" : "ellipsis").accessibilityLabel(line.title) }
+                Image(systemName: context.state.symbol).accessibilityLabel(context.state.title)
             } minimal: {
                 OttoFace(size: 22)
             }
-            .widgetURL(line.url)
+            .widgetURL(URL(string: "otto://walkie"))
+        }
+    }
+}
+
+/// Otto sees your screen: a phone beside the talk's title, as the compact island shows it.
+struct Sees: View {
+    var body: some View {
+        Image(systemName: "iphone").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            .accessibilityLabel("Otto sees your screen")
+    }
+}
+
+/// Mute and End for a talk, drawn as the call's are.
+struct TalkButtons: View {
+    let muted: Bool
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(intent: MuteOttoTalk()) {
+                Image(systemName: muted ? "mic.slash.fill" : "mic.fill")
+                    .font(.title3).foregroundStyle(muted ? Color.black : Color.white)
+                    .frame(width: 44, height: 44)
+                    .background(muted ? Color.white : Color.white.opacity(0.2), in: .circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(muted ? "Unmute" : "Mute")
+            Button(intent: EndOttoTalk()) {
+                Image(systemName: "xmark")
+                    .font(.title3.weight(.semibold)).foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(Color.red, in: .circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("End talk")
         }
     }
 }
@@ -268,7 +312,7 @@ struct CallTime: View {
 struct WalkieDoor: View {
     var body: some View {
         OttoEyes(size: 44, colour: .primary)
-            .accessibilityLabel("Walkie-talkie with Otto")
+            .accessibilityLabel("Talk with Otto")
     }
 }
 

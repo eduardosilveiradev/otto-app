@@ -200,7 +200,8 @@ struct OttoShortcuts: AppShortcutsProvider {
                     phrases: ["Start a call with \(.applicationName)", "\(.applicationName) call"],
                     shortTitle: "Call Otto", systemImageName: "phone")
         AppShortcut(intent: OpenWalkie(),
-                    phrases: ["Walkie-talkie with \(.applicationName)", "\(.applicationName) walkie-talkie", "Start \(.applicationName) walkie-talkie"],
-                    shortTitle: "Walkie-talkie", systemImageName: "waveform")
+                    // Not "Talk to Otto": that one is Message Otto's.
+                    phrases: ["Talk with \(.applicationName)", "\(.applicationName) talk mode", "Start talk mode in \(.applicationName)"],
+                    shortTitle: "Talk with Otto", systemImageName: "waveform")
     }
 }

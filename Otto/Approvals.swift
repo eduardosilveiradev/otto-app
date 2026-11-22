@@ -1,5 +1,6 @@
 import SwiftUI
 import LocalAuthentication
+import CoreImage
 
 /// A change to Otto's own core that needs your say-so — the in-app version of typing
 /// "i approve the otto core change". The server sends it (what, why, every file with its
@@ -110,16 +111,51 @@ enum ApprovalCheck {
         }
         assert(ids(["x", "y"], ["y", "z"]) == ["y", "z"] && ids(["x"], []) == [] && ids([], ["z"]) == ["z"], "reconcile")
         assert(ids(["x"], [], keep: ["x"]) == ["x"] && ids([], ["x"], decided: ["x"]) == [], "a receipt stays; an answered one doesn't come back")
-        // The walkie's answer: the reply that names the note, else the first thing Otto said that wasn't news it was sending anyway.
-        func said(_ text: String, src: String? = nil, replyTo: String? = nil, at: TimeInterval) -> Message {
-            var m = Message(from: .otto, text: text, date: now.addingTimeInterval(at)); m.src = src; m.replyTo = replyTo; return m
+        // Talk's turns: a held voice starts one, a pause ends it; a blip never starts one, a short one isn't sent,
+        // talking over Otto needs longer, and a steady noise becomes the room's floor instead of a voice.
+        func turns(_ run: [(Float, Double)], speaking: Bool = false) -> [TurnDetector.Event] {
+            var d = TurnDetector(), out: [TurnDetector.Event] = []
+            for (level, seconds) in run { for _ in 0..<Int((seconds / 0.05).rounded()) { if let e = d.step(level: level, dt: 0.05, ottoSpeaking: speaking) { out.append(e) } } }
+            return out
         }
-        let thread = [said("old", at: -5), said("reminder", src: "reminders", at: 1), said("answer", at: 2), said("named", replyTo: "n1", at: 3)]
-        assert(WalkieView.answer(in: thread, to: nil, since: now)?.text == "answer" && WalkieView.answer(in: thread, to: "n1", since: now)?.text == "named", "walkie answer")
-        assert(WalkieView.answer(in: Array(thread.prefix(2)), to: "n1", since: now) == nil, "news isn't an answer")
-        // Work on the Lock Screen: only once it has lasted, and only started from the front.
-        assert(!WorkActivity.starts(after: 19, foreground: true) && WorkActivity.starts(after: 20, foreground: true) && !WorkActivity.starts(after: 300, foreground: false), "work activity start")
-        assert(WorkLine(.init(status: "Reading mail", started: now), stale: true).detail != "Reading mail" && WorkLine(.init(status: "x", started: now, needsYou: true), stale: false).url?.host() == "approval", "work line")
+        assert(turns([(0.002, 2)]).isEmpty && turns([(0.002, 1), (0.08, 0.1), (0.002, 2)]).isEmpty, "a blip isn't a turn")
+        assert(turns([(0.002, 1), (0.08, 1.5), (0.002, 1)]) == [.start, .end(send: true)], "a turn, then a pause sends it")
+        assert(turns([(0.002, 1), (0.08, 0.25), (0.002, 1)]) == [.start, .end(send: false)], "too short to send")
+        assert(turns([(0.002, 1), (0.08, 0.25), (0.002, 1)], speaking: true).isEmpty && turns([(0.002, 1), (0.08, 0.5)], speaking: true) == [.start], "cutting in takes longer")
+        assert(turns([(0.002, 1), (0.08, 0.5), (0.002, 0.5), (0.08, 0.5), (0.002, 1)]) == [.start, .end(send: true)], "a short breath doesn't end it")
+        assert(turns([(0.002, 1), (0.03, 40)]).count <= 2 && turns([(0.002, 1), (0.03, 40)]) == turns([(0.002, 1), (0.03, 60)]), "a steady fan becomes the floor")
+        // What talk says out loud. A text-only reply (the Mac's speech off: no voice, sent quiet because a desktop
+        // was focused) is said in the phone's voice at once; one whose clip is on its way waits only a moment for
+        // it; a reply the Mac tagged "chat" is still a reply; news isn't said.
+        func otto(_ text: String, voice: Bool = false, clip: Bool = false, src: String? = nil, quiet: Bool? = nil) -> Message {
+            var m = Message(from: .otto, text: text); m.isVoice = voice || clip; m.src = src; m.quiet = quiet
+            if clip { m.audio = RemoteFile(id: "c", name: "reply.wav", kind: "audio") }
+            return m
+        }
+        assert(TalkSession.say(otto("Booked.", quiet: true), waited: 0) == .text, "a text-only quiet reply is said")
+        assert(TalkSession.say(otto("Booked.", voice: true), waited: 0) == .wait
+               && TalkSession.say(otto("Booked.", voice: true), waited: TalkSession.clipWait) == .text, "a clip that doesn't come isn't waited for long")
+        assert(TalkSession.say(otto("Booked.", clip: true), waited: 0) == .clip, "a clip plays")
+        assert(TalkSession.say(otto("Booked.", src: "chat"), waited: 0) == .text && TalkSession.say(otto("Dentist at 4", src: "reminders"), waited: 0) == .skip, "chat is a reply, news isn't")
+        assert(TalkSession.say(otto("  ", voice: true), waited: 10) == .skip && TalkSession.say(Message(from: .me, text: "hi"), waited: 0) == .skip, "nothing to say")
+        // The talk stream: an answer it said isn't said again from the thread, whole or one bubble of it; another is.
+        let streamed = ["Two plus two is four.\n\nAnything else?"]
+        assert(TalkSession.streamed(otto("Anything else?"), in: streamed) && TalkSession.streamed(otto("Two plus two is four.\n\nAnything else?"), in: streamed)
+               && !TalkSession.streamed(otto("Dentist at 4"), in: streamed) && !TalkSession.streamed(otto(" "), in: streamed), "said once")
+        // Its clips: a 16-bit WAV (the Mac's are 24 kHz mono) read as floats; anything else isn't played.
+        var wav = Data("RIFF".utf8) + Data([0, 0, 0, 0]) + Data("WAVEfmt ".utf8)
+        for (v, n) in [(16, 4), (1, 2), (1, 2), (24_000, 4), (48_000, 4), (2, 2), (16, 2)] { wav += withUnsafeBytes(of: UInt32(v).littleEndian) { Data($0.prefix(n)) } }
+        wav += Data("data".utf8) + Data([4, 0, 0, 0]) + Data([0x00, 0x40, 0x00, 0xC0])   // +0.5, -0.5
+        let clip = TalkMic.wav(wav)
+        assert(clip?.format.sampleRate == 24_000 && clip?.frameLength == 2 && clip?.floatChannelData?[0][0] == 0.5 && clip?.floatChannelData?[0][1] == -0.5, "a clip")
+        // Otto's streamed voice is held until there's enough to play through: half a second, a sentence's end, the
+        // answer's end, or a second with nothing new. Never with nothing held.
+        let hold = TalkSession.holdStart
+        assert(!TalkSession.release(held: 0.24, hold: hold, sentenceEnded: false, done: false, quiet: 0)
+               && TalkSession.release(held: 0.72, hold: hold, sentenceEnded: false, done: false, quiet: 0), "held until half a second")
+        assert(TalkSession.release(held: 0.1, hold: hold, sentenceEnded: true, done: false, quiet: 0) && TalkSession.release(held: 0.1, hold: hold, sentenceEnded: false, done: true, quiet: 0)
+               && TalkSession.release(held: 0.1, hold: hold, sentenceEnded: false, done: false, quiet: 1.2) && !TalkSession.release(held: 0, hold: hold, sentenceEnded: true, done: true, quiet: 9), "or a sentence's end")
+        assert(TalkMic.wav(Data("not a wav".utf8)) == nil && TalkMic.wav(wav.prefix(40)) == nil, "not a clip")
         // A PDF as pictures: every page up to the cap, none wider or taller than 1400 px whatever the screen's scale.
         let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 595, height: 842)).pdfData { ctx in for _ in 0..<3 { ctx.beginPage() } }
         let two = PDFPages.images(pdf, limit: 2)
@@ -147,6 +183,28 @@ enum ApprovalCheck {
         assert(OttoStore.savedUnconfirmed()["check"] == nil, "and gone once it's settled")
         // Pairing: only Otto's own answer counts, not any page that says 200.
         assert(ServerProblem.isOtto(Data(#"{"toggles":[]}"#.utf8)) && !ServerProblem.isOtto(Data("<html>Sign in to Wi-Fi</html>".utf8)) && !ServerProblem.isOtto(Data("[]".utf8)), "a 200 that isn't Otto's")
+        // Your screen for Otto, the extension's pipeline: a phone's screen comes down to a 1600 px long edge and under
+        // 1.5 MB (busier than that steps the quality down, and gives up rather than send an oversize one), a frame is
+        // due every 2 s and no sooner, and stopping leaves nothing behind.
+        let ctx = CIContext()
+        let noise = CIFilter(name: "CIRandomGenerator")!.outputImage!.cropped(to: CGRect(x: 0, y: 0, width: 1206, height: 2622))
+        let shot = ScreenShare.jpeg(noise, context: ctx) ?? Data()
+        let shotSize = ScreenShare.size(shot)
+        assert(shotSize?.width == 736 && shotSize?.height == 1600 && shot.count < ScreenShare.maxBytes, "a screen comes down to 1600 px")
+        let capped = ScreenShare.jpeg(noise, context: ctx, under: 400_000)
+        assert(shot.count > 400_000 && (capped?.count ?? .max) < 400_000, "over the cap steps the quality down")
+        assert(ScreenShare.jpeg(noise, context: ctx, under: 1_000) == nil, "and never makes one past it")
+        let small = ScreenShare.jpeg(noise.cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300)), context: ctx).flatMap(ScreenShare.size)
+        assert(small?.width == 400 && small?.height == 300, "a small screen isn't blown up")
+        let t0 = Date.now
+        assert(ScreenShare.due(nil, t0) && !ScreenShare.due(t0, t0.addingTimeInterval(1.9)) && ScreenShare.due(t0, t0.addingTimeInterval(2)), "one frame every 2 s")
+        assert(ScreenShare.dir != nil, "an app group container")
+        assert(ScreenShare.write(shot) && ScreenShare.latest()?.jpeg == shot && ScreenShare.frameDate() != nil, "the newest frame is kept")
+        ScreenShare.stamp(ScreenShare.appAlive)
+        assert((ScreenShare.age(ScreenShare.appAlive) ?? 99) < 1, "a side's stamp")
+        ScreenShare.clear()
+        assert(ScreenShare.latest() == nil && ScreenShare.frameDate() == nil && ScreenShare.age(ScreenShare.appAlive) == nil, "off leaves no frame behind")
+        assert(!FileManager.default.fileExists(atPath: ScreenShare.dir?.path ?? "/"), "nor the folder")
         print("approval check ok")
         // An answer given with no socket never leaves the phone: it's said as that, and nothing is queued to
         // go out on the next connect (a stale yes then would be the worst of both).
@@ -820,7 +878,7 @@ struct PrintedReceipt: View {
     }
 }
 
-/// Puts an approval's sheet over whatever is on top: the thread, the contact card, a call, the walkie-talkie, a
+/// Puts an approval's sheet over whatever is on top: the thread, the contact card, a call, a talk, a
 /// picture, the page Otto has open. One presenter for all of them, from UIKit: a SwiftUI sheet can only come up
 /// from a view that isn't already presenting, so one raised while a cover was up waited behind it unseen (and two
 /// presentations asked for at once left neither on screen). Asked again every second by the store's tick, so a
@@ -857,7 +915,7 @@ struct PrintedReceipt: View {
         guard var top = scene?.keyWindow?.rootViewController else { return nil }
         while let next = top.presentedViewController { top = next }
         guard !top.isBeingPresented, !top.isBeingDismissed, top.transitionCoordinator == nil, !(top is UIAlertController) else { return nil }
-        // Not while a voice note or a walkie press is recording: a sheet coming up under the finger could leave the
+        // Not while a voice note is recording (a talk's open microphone doesn't count: nothing is held there): a sheet coming up under the finger could leave the
         // hold never ended and the microphone open. It goes up when the recording stops (and the Mac's own push
         // covers the wait, since nothing is said to have been alerted).
         guard !VoiceRecorder.active else { return nil }
