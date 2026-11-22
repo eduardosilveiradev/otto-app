@@ -119,10 +119,10 @@ enum ApprovalCheck {
             return out
         }
         assert(turns([(0.002, 2)]).isEmpty && turns([(0.002, 1), (0.08, 0.1), (0.002, 2)]).isEmpty, "a blip isn't a turn")
-        assert(turns([(0.002, 1), (0.08, 1.5), (0.002, 1)]) == [.start, .end(send: true)], "a turn, then a pause sends it")
-        assert(turns([(0.002, 1), (0.08, 0.25), (0.002, 1)]) == [.start, .end(send: false)], "too short to send")
+        assert(turns([(0.002, 1), (0.08, 1.5), (0.002, 1.5)]) == [.start, .end(send: true)], "a turn, then a pause sends it")
+        assert(turns([(0.002, 1), (0.08, 0.25), (0.002, 1.5)]) == [.start, .end(send: false)], "too short to send")
         assert(turns([(0.002, 1), (0.08, 0.25), (0.002, 1)], speaking: true).isEmpty && turns([(0.002, 1), (0.08, 0.5)], speaking: true) == [.start], "cutting in takes longer")
-        assert(turns([(0.002, 1), (0.08, 0.5), (0.002, 0.5), (0.08, 0.5), (0.002, 1)]) == [.start, .end(send: true)], "a short breath doesn't end it")
+        assert(turns([(0.002, 1), (0.08, 0.5), (0.002, 0.5), (0.08, 0.5), (0.002, 1.5)]) == [.start, .end(send: true)], "a short breath doesn't end it")
         assert(turns([(0.002, 1), (0.03, 40)]).count <= 2 && turns([(0.002, 1), (0.03, 40)]) == turns([(0.002, 1), (0.03, 60)]), "a steady fan becomes the floor")
         // Talk's ring: no lean straight on; back toward you as the screen turns to your right (counter-clockwise from
         // above), clear by 20–30°, never past full. The centre catches up when the phone is held still, not mid-turn.
