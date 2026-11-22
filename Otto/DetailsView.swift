@@ -36,6 +36,8 @@ struct DetailsView: View {
     /// where a lasting yes is taken back (its page shows the kept list, or says it can't reach the Mac).
     @AppStorage("otto.rulesSeen") private var rulesSeen = false
     @State private var scanning = false
+    /// A watch is connected on the Mac: only then is there a Health row (most people running this have none).
+    @State private var hasHealth = false
     enum ServerCheck: Equatable { case checking, connected, failed(String) }
     #if DEBUG
     /// `-details -checkServer` opens scrolled to the server fields and submits them, for screenshots.
@@ -76,6 +78,9 @@ struct DetailsView: View {
                     NavigationLink { MemoryScreen() } label: { Label("Memory", systemImage: "brain") }
                     NavigationLink { PeopleScreen() } label: { Label("People", systemImage: "person.2") }
                     NavigationLink { MoneyScreen() } label: { Label("Money", systemImage: "creditcard") }
+                    if hasHealth {
+                        NavigationLink { HealthScreen() } label: { Label("Health", systemImage: "heart") }
+                    }
                     NavigationLink { TripsScreen() } label: { Label("Trips", systemImage: "airplane") }
                     NavigationLink { PassportScreen() } label: { Label("Passport", systemImage: "globe.europe.africa") }
                     NavigationLink { PackagesScreen() } label: { Label("Packages", systemImage: "shippingbox") }
@@ -193,6 +198,11 @@ struct DetailsView: View {
                 if hasRules { rulesSeen = true }
                 await s
             }
+            // Once per opening. No watch, a 404, an error, or show-off mode's veil (hidden: true): no row.
+            .task {
+                let probe: DashHealth.Probe? = await store.backend.dash("health")
+                hasHealth = probe.map { $0.connected && $0.hidden != true } ?? false
+            }
             .navigationDestination(item: $screen) { name in
                 switch name {
                 case "Loops": LoopsScreen()
@@ -201,6 +211,8 @@ struct DetailsView: View {
                 case "Memory": MemoryScreen()
                 case "People": PeopleScreen()
                 case "Money": MoneyScreen()
+                case "Health": HealthScreen()
+                case "Sleep": Loaded(path: "health") { (h: DashHealth, _) in SleepScreen(h: h) }
                 case "Trips": TripsScreen()
                 case "Passport": PassportScreen()
                 case "Packages": PackagesScreen()

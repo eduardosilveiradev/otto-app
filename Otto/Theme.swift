@@ -101,6 +101,11 @@ extension Color {
     /// Status fills: a wrong and a right answer, a removed and an added line.
     static let redTint = pair(dark: 0xFF453A, light: 0xFF3B30, darkAlpha: 0.22, lightAlpha: 0.14)
     static let greenTint = pair(dark: 0x30D158, light: 0x34C759, darkAlpha: 0.2, lightAlpha: 0.16)
+    /// Sleep stages, the Health screens' only colours (every other mark there is the text colour).
+    static let sleepDeep = pair(dark: 0x3987E5, light: 0x2A78D6)
+    static let sleepLight = pair(dark: 0x199E70, light: 0x1BAF7A)
+    static let sleepREM = pair(dark: 0xC98500, light: 0xEDA100)
+    static let sleepAwake = pair(dark: 0xD55181, light: 0xE87BA4)
 }
 
 /// The tangerine mark for anything waiting on you: a dot and a word, never a filled capsule
