@@ -64,6 +64,38 @@ struct PairingLink: Equatable {
     var link: PairingLink?
 }
 
+/// Whether this phone is set up, and what undoes it. A paired phone stays paired through any network failure
+/// (no signal, a Mac asleep or out of reach, a timeout): it opens on the thread and keeps trying. Only the Mac
+/// refusing its token sends it back to setup.
+enum Pairing {
+    /// As OttoApp's @AppStorage reads it: never written means set up already if there's a server (an install
+    /// from before onboarding existed). bool(forKey:) also takes a launch argument's "YES", which arrives as a string.
+    static func setUp(_ d: UserDefaults = .standard) -> Bool {
+        d.object(forKey: "onboarded") == nil ? d.string(forKey: "serverURL")?.isEmpty == false : d.bool(forKey: "onboarded")
+    }
+
+    /// Refusals in a row before the pair is forgotten (about seven seconds of retries): the Mac refuses every token
+    /// for as long as it can't read its token file, and a moment's blip there mustn't cost a token shown only once.
+    static let refusalsToForget = 3
+
+    /// The socket's handshake turned down with a 401 or 403, or the socket closed for a token revoked while it
+    /// was open (otto/server.ts closes with 4401). Not a timeout, a lost network or any other status.
+    static func refused(status: Int?, close: Int) -> Bool {
+        ServerProblem(status: status, error: nil) == .refused || close == 4401 || close == 4403
+    }
+
+    /// Posted once a refused pair is forgotten: OttoApp then opens setup.
+    static let forgotten = Notification.Name("otto.pairingForgotten")
+
+    /// The Mac refused `token`: forget the pair, so the next launch opens setup too. Not when a newer pair has been
+    /// saved since (a pairing link's Connect), which the Mac hasn't refused. True when it forgot.
+    @discardableResult static func forget(token: String, in d: UserDefaults = .standard) -> Bool {
+        guard d.string(forKey: "serverToken")?.trimmingCharacters(in: .whitespaces) == token else { return false }
+        d.removeObject(forKey: "serverURL"); d.removeObject(forKey: "serverToken"); d.set(false, forKey: "onboarded")
+        return true
+    }
+}
+
 struct OnboardingFlow: View {
     let finish: () -> Void
     @State private var step = Step.hello

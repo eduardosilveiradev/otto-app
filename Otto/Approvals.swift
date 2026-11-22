@@ -205,6 +205,34 @@ enum ApprovalCheck {
         ScreenShare.clear()
         assert(ScreenShare.latest() == nil && ScreenShare.frameDate() == nil && ScreenShare.age(ScreenShare.appAlive) == nil, "off leaves no frame behind")
         assert(!FileManager.default.fileExists(atPath: ScreenShare.dir?.path ?? "/"), "nor the folder")
+        // Launch: a paired phone stays paired through any network failure; only the Mac refusing its token
+        // unpairs it. In a scratch domain, so the app's own pair is never touched.
+        let d = UserDefaults(suiteName: "otto.pairingCheck")!
+        d.removePersistentDomain(forName: "otto.pairingCheck")
+        assert(!Pairing.setUp(d), "no pairing: onboarding")
+        func pair(_ token: String = "tok") { d.set("http://mac.example:4589", forKey: "serverURL"); d.set(token, forKey: "serverToken"); d.set(true, forKey: "onboarded") }
+        // What the socket loop does with a failed connect: its status (nil without an answer) and close code (0 when none).
+        var refusals = 0
+        func fail(_ status: Int?, close: Int = 0) {
+            refusals = Pairing.refused(status: status, close: close) ? refusals + 1 : 0
+            if refusals >= Pairing.refusalsToForget { Pairing.forget(token: "tok", in: d) }
+        }
+        pair()
+        for (status, close) in [(nil, 0), (nil, 1001), (nil, 1006), (500, 0), (502, 0), (404, 0), (200, 1000)] as [(Int?, Int)] {
+            for _ in 0..<Pairing.refusalsToForget { fail(status, close: close) }
+        }
+        assert(Pairing.setUp(d) && d.string(forKey: "serverToken") == "tok", "a network error, a timeout or a server error stays paired")
+        fail(401); fail(401); fail(nil); fail(401)
+        assert(Pairing.setUp(d), "a refusal between failures of another kind is a blip, not a revoked token")
+        for (status, close) in [(401, 0), (403, 0), (nil, 4401)] as [(Int?, Int)] {
+            pair(); refusals = 0
+            for _ in 0..<Pairing.refusalsToForget { fail(status, close: close) }
+            assert(!Pairing.setUp(d) && d.string(forKey: "serverToken") == nil && d.string(forKey: "serverURL") == nil, "a refused token unpairs")
+        }
+        pair("newer"); refusals = 0
+        for _ in 0..<Pairing.refusalsToForget { fail(401) }
+        assert(Pairing.setUp(d), "a pair saved since the refusal is kept")
+        d.removePersistentDomain(forName: "otto.pairingCheck")
         print("approval check ok")
         // An answer given with no socket never leaves the phone: it's said as that, and nothing is queued to
         // go out on the next connect (a stale yes then would be the worst of both).

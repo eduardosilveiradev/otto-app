@@ -90,8 +90,11 @@ final class LiveBackend: OttoBackend {
     let notifies: AsyncStream<(String, String)>
     let conversationEvents: AsyncStream<ConversationEvent>
 
-    private let base: URL       // http(s)://host:port
-    private let token: String
+    /// The pair in use: http(s)://host:port and its token. Replaced only once the Mac has refused the token
+    /// and setup has saved a new pair (setup runs in this same process, and the store keeps this backend).
+    private var base: URL { lock.withLock { pair.base } }
+    private var token: String { lock.withLock { pair.token } }
+    private var pair: (base: URL, token: String)
     private let out: AsyncStream<Message>.Continuation
     private let reacted: AsyncStream<(String, String)>.Continuation
     private let status: AsyncStream<String>.Continuation
@@ -144,12 +147,8 @@ final class LiveBackend: OttoBackend {
     }
 
     init(serverURL: URL, token: String) {
-        var c = URLComponents(url: serverURL, resolvingAgainstBaseURL: false)!
-        if c.scheme == "ws" { c.scheme = "http" }
-        if c.scheme == "wss" { c.scheme = "https" }
-        c.path = ""
-        base = c.url!
-        self.token = token
+        let base = Self.origin(serverURL)
+        pair = (base, token)
         desktopSync = DesktopSync(key: "otto.desktopSync.\(base.absoluteString)")
         defer { sweepKept() }
         (incoming, out) = AsyncStream.makeStream()
@@ -172,16 +171,29 @@ final class LiveBackend: OttoBackend {
 
     deinit { loop?.cancel(); socket?.cancel(with: .goingAway, reason: nil); wsSession.invalidateAndCancel() }
 
+    private static func origin(_ url: URL) -> URL {
+        var c = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        if c.scheme == "ws" { c.scheme = "http" }
+        if c.scheme == "wss" { c.scheme = "https" }
+        c.path = ""
+        return c.url!
+    }
+
     /// Reads `serverURL` (e.g. "https://mac.tailnet.ts.net" or "http://100.x.y.z:4589")
     /// and `serverToken` from UserDefaults. Nil when either is unset.
-    static func fromDefaults() -> LiveBackend? {
+    static func stored() -> (server: URL, token: String)? {
         let d = UserDefaults.standard
         guard let s = d.string(forKey: "serverURL")?.trimmingCharacters(in: .whitespaces), !s.isEmpty,
               let url = URL(string: s), url.host != nil,
               let t = d.string(forKey: "serverToken")?.trimmingCharacters(in: .whitespaces), !t.isEmpty
         else { return nil }
-        ShareDirect.save(serverURL: s, token: t)   // the share sheet's way in on builds without an app group
-        return LiveBackend(serverURL: url, token: t)
+        return (url, t)
+    }
+
+    static func fromDefaults() -> LiveBackend? {
+        guard let p = stored() else { return nil }
+        ShareDirect.save(serverURL: p.server.absoluteString, token: p.token)   // the share sheet's way in on builds without an app group
+        return LiveBackend(serverURL: p.server, token: p.token)
     }
 
     // MARK: OttoBackend
@@ -406,6 +418,7 @@ final class LiveBackend: OttoBackend {
 
     private func run() async {
         var delay: Double = 1
+        var refusals = 0
         while !Task.isCancelled {
             var url = URLComponents(url: base.appendingPathComponent("app"), resolvingAgainstBaseURL: false)!
             url.scheme = url.scheme == "https" ? "wss" : "ws"
@@ -427,7 +440,7 @@ final class LiveBackend: OttoBackend {
                 lock.withLock { socket = task; live = true; connects += 1; acksOn = nil; acked = []; appAlerts = []; canStopTurn = false }
                 // A live tile comes again right after connect; a `done` missed while away must not leave one up.
                 browserOut.yield(nil)
-                delay = 1
+                delay = 1; refusals = 0
                 // Not awaited: the flush waits on acks, which only the loop below reads.
                 Task { [weak self] in await self?.flush(task) }
                 // Proxies (Funnel) cut idle sockets; a ping every 20s keeps it open
@@ -444,6 +457,7 @@ final class LiveBackend: OttoBackend {
             } catch {
                 let why = "\(Date.now.formatted(date: .omitted, time: .shortened)): \(error.localizedDescription)"
                     + (task.closeCode != .invalid ? " (close \(task.closeCode.rawValue))" : "")
+                refusals = Pairing.refused(status: (task.response as? HTTPURLResponse)?.statusCode, close: task.closeCode.rawValue) ? refusals + 1 : 0
                 lock.withLock { if socket === task { socket = nil }; live = false; drop = why }
                 task.cancel(with: .goingAway, reason: nil)
                 let stale = lock.withLock { () -> URLSession in
@@ -451,6 +465,24 @@ final class LiveBackend: OttoBackend {
                     return wsSession
                 }
                 stale.invalidateAndCancel()
+                // The Mac turned this token down, try after try: back to setup, and no more tries with it until a new
+                // pair is saved. Anything else (no network, a Mac asleep or out of reach, a timeout) only waits for the next try.
+                if refusals >= Pairing.refusalsToForget {
+                    let gone = lock.withLock { pair }
+                    await MainActor.run { if Pairing.forget(token: gone.token) { NotificationCenter.default.post(name: Pairing.forgotten, object: nil) } }
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(2))
+                        guard let s = LiveBackend.stored() else { continue }
+                        let next = (base: Self.origin(s.server), token: s.token)
+                        if next.base != gone.base || next.token != gone.token {
+                            lock.withLock { pair = next }
+                            ShareDirect.save(serverURL: s.server.absoluteString, token: s.token)
+                            break
+                        }
+                    }
+                    delay = 1; refusals = 0
+                    continue
+                }
             }
             try? await Task.sleep(for: .seconds(delay))
             // Short cap: the usual drop is iOS suspending the app, and coming back
