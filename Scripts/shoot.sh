@@ -258,7 +258,7 @@ shot details snoozed 6 "Snoozed, with what's held" $O -details -snoozed
 shot details pair-link-pasted 16 "A pairing link pasted into the address: both fields filled and checked at once; the call keys it carried wait for a Mac that answers" $O -details -pasteLink 'otto://pair?server=http://127.0.0.1:9&token=demo-token&vapiKey=pk_demo&vapiAssistant=asst_demo'
 shot details notifications-off 9 "Notifications refused on this phone: the card says so beside its settings, with the way to turn them on" $O -details -notificationsOff
 shot details server-check-failed 13 "Server check under the token: can't reach" $DEAD $N -details -checkServer
-for s in Loops Schedules Calls Memory People Money Trips Passport Packages Status Devices Rules Glasses Settings; do
+for s in Loops Schedules Calls Memory People Money Health Sleep Trips Passport Packages Status Devices Rules Glasses Settings; do
   l=$(echo $s | tr A-Z a-z)
   extra=""; [ $s = Calls ] && extra=-mockCalls
   shot "$l" list 6 "$s screen" $O -details -screen $s $extra
@@ -269,6 +269,9 @@ done
 for s in Loops Schedules Calls Memory People Trips Packages Rules; do
   shot "$(echo $s | tr A-Z a-z)" empty 6 "$s with nothing in it" $O -details -screen $s -emptyDash
 done
+shot health stale 6 "The watch hasn't synced: the numbers stay, named for their day, with the waiting mark" $O -details -screen Health -healthStale
+shot health worst 6 "Worst case: no sleep, no readings, a long activity name, not synced since Friday" $O -details -screen Health -healthWorst
+shot sleep worst 6 "No sleep recorded, and gaps in the two weeks" $O -details -screen Sleep -healthWorst
 shot rules worst 6 "Worst case: the longest rule, one used once, one used 1,284 times, one with no dates" $O -details -screen Rules -rulesWorst
 shot activity jobs-empty 6 "No background jobs" $O -details -screen Activity -activityTab Jobs -emptyDash
 shot calls error 6 "Can't reach your Mac (no callbot)" $O -details -screen Calls
