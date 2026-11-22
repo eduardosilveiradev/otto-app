@@ -81,7 +81,8 @@ import UIKit
 
     static func greeting(at date: Date = .now) -> String {
         let h = Calendar.current.component(.hour, from: date)
-        return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
+        // Past midnight is still the evening until 5.
+        return h < 5 ? "Good evening" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
     }
 
     /// Each letter of the short line paired with one of the long line's: the same letter where the long line has it within
@@ -126,8 +127,8 @@ import UIKit
             let got = pair(Array(s), Array(l))
             print("LAUNCHCHECK \(got == want ? "PASS" : "FAIL") \(s.isEmpty ? "(empty)" : s) -> \(l): \(got)")
         }
-        let hours = [0, 11, 12, 17, 18, 23].map { greeting(at: Calendar.current.date(bySettingHour: $0, minute: 0, second: 0, of: .now)!) }
-        let want = ["Good morning", "Good morning", "Good afternoon", "Good afternoon", "Good evening", "Good evening"]
+        let hours = [0, 4, 5, 11, 12, 17, 18, 23].map { greeting(at: Calendar.current.date(bySettingHour: $0, minute: 0, second: 0, of: .now)!) }
+        let want = ["Good evening", "Good evening", "Good morning", "Good morning", "Good afternoon", "Good afternoon", "Good evening", "Good evening"]
         print("LAUNCHCHECK \(hours == want ? "PASS" : "FAIL") greeting by hour: \(hours)")
     }
     #endif
