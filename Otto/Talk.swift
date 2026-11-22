@@ -43,8 +43,8 @@ struct TurnDetector {
     static let startAfter = 0.15
     /// Seconds of voice over Otto before it stops: longer, since some of its own voice leaks past the echo cancelling.
     static let cutInAfter = 0.35
-    /// Seconds of quiet that end your turn.
-    static let endAfter = 0.8
+    /// Seconds of quiet that end your turn. Pauses inside a sentence run up to about 0.9 s, so it waits past that.
+    static let endAfter = 1.0
     /// Seconds of voice a turn needs to be sent at all: a cough or a door is dropped.
     static let minVoiced = 0.4
     /// A turn this long is sent as it stands, so a radio left on can't hold the microphone forever.
