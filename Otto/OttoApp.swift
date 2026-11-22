@@ -366,6 +366,7 @@ final class OttoStore {
             else { try? FileManager.default.moveItem(at: file, to: file.appendingPathExtension("unreadable-\(Int(Date().timeIntervalSince1970))")) }
         }
         pips.store = self   // a background wake or a notification reply can come before start()
+        _ = KeyboardCode.current()   // removes a lapsed code nobody read
     }
 
     private func checkForUpdate() async {
@@ -717,10 +718,13 @@ final class OttoStore {
                         Message(from: .otto, text: "here, cards first and then a quiz.",
                                 files: [RemoteFile(id: "demo-study", name: "Photosynthesis.study.json", kind: "file")])]
         }
-        // `-otpDemo`: a code arriving, drawer open, for screenshots.
-        if ProcessInfo.processInfo.arguments.contains("-otpDemo") {
-            let m = Message(from: .otto, text: "Clerk code", serverID: "demo-otp", otp: .init(code: "482915", sender: "Clerk"))
+        // `-otpDemo [long]`: a code arriving, drawer open and offered to the keyboard, for screenshots.
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-otpDemo") {
+            let args = ProcessInfo.processInfo.arguments
+            let sender = i + 1 < args.count && args[i + 1] == "long" ? "Northside Regional Credit Union of the Valley" : "Northside Bank"
+            let m = Message(from: .otto, text: "\(sender) code", serverID: "demo-otp", otp: .init(code: "123456", sender: sender))
             messages.append(m); otpDrawer = m
+            offerToKeyboard(m.otp!, sent: m.date)
         }
         // `-demoThread`: the conversation the website shows, for screen recordings.
         if ProcessInfo.processInfo.arguments.contains("-demoThread") {
@@ -1006,7 +1010,10 @@ final class OttoStore {
         }
         Task {
             for await (id, text) in backend.edits {
-                if let i = messages.firstIndex(where: { $0.wireID == id }) { messages[i].text = text; messages[i].otp = nil }
+                if let i = messages.firstIndex(where: { $0.wireID == id }) {
+                    if let o = messages[i].otp { KeyboardCode.clear(o.code) }
+                    messages[i].text = text; messages[i].otp = nil
+                }
                 if otpDrawer?.wireID == id { otpDrawer = nil }
             }
         }
@@ -1031,12 +1038,12 @@ final class OttoStore {
             // history first, then the socket flushes the held copy.
             if let i = messages.firstIndex(where: { $0.wireID == m.wireID }) {
                 // History already brought a code's masked line; the live copy carries the code.
-                if let otp = m.otp, messages[i].otp == nil { messages[i].otp = otp; otpDrawer = messages[i] }
+                if let otp = m.otp, messages[i].otp == nil { messages[i].otp = otp; otpDrawer = messages[i]; offerToKeyboard(otp, sent: m.date) }
                 continue
             }
             messages.append(m)
             reconcileDesktop()
-            if m.otp != nil { otpDrawer = m }
+            if let otp = m.otp { otpDrawer = m; offerToKeyboard(otp, sent: m.date) }
             if !foreground && m.from == .otto && m.quiet != true && backend.desktopSync?.snapshot.read.contains(m.wireID) != true { Notifier.shared.post(m) }
         }
     }
@@ -1242,10 +1249,18 @@ final class OttoStore {
 
     /// Otto deleted these (a live "delete" frame, or history on reconnect): out of the thread and the
     /// saved copy, with what pointed at them. An id that isn't here changes nothing.
+    /// A live code goes to the keyboard's suggestion bar too, and is taken off disk once it lapses
+    /// (if the app is still running then; otherwise the next read or launch removes it).
+    private func offerToKeyboard(_ otp: OTPCode, sent: Date) {
+        KeyboardCode.offer(otp.code, sender: otp.sender, sent: sent)
+        Task { try? await Task.sleep(for: .seconds(KeyboardCode.lifetime + 1)); _ = KeyboardCode.current() }
+    }
+
     private func drop(_ gone: Set<String>) {
         var kept = messages
         guard kept.drop(gone) else { return }
         if otpDrawer.map({ gone.contains($0.wireID) }) == true { otpDrawer = nil }
+        for m in messages where gone.contains(m.wireID) { if let o = m.otp { KeyboardCode.clear(o.code) } }
         if let r = replyingTo, !kept.contains(where: { $0.id == r }) { replyingTo = nil }
         messages = kept
     }
@@ -1272,7 +1287,7 @@ final class OttoStore {
             if let kind = h.patch {   // an edit or tapback for a message older than the page
                 guard let i = index[h.wireID] else { continue }
                 // Otto's tapback, only ever on yours: the one on Otto's is your own, and one you took off stays off.
-                if kind == "reaction" { if messages[i].from == .me { messages[i].reaction = h.reaction } } else if messages[i].text != h.text { messages[i].text = h.text; messages[i].otp = nil }
+                if kind == "reaction" { if messages[i].from == .me { messages[i].reaction = h.reaction } } else if messages[i].text != h.text { if let o = messages[i].otp { KeyboardCode.clear(o.code) }; messages[i].text = h.text; messages[i].otp = nil }
                 continue
             }
             guard let i = index[h.wireID] else {
