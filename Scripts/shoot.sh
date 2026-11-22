@@ -150,6 +150,15 @@ shot chat todos-while-typing 6 "Otto working: the list is in the bubble, the pil
 shot chat browser-tile 6 "Otto in Chrome: the live page tile over the thinking orb" $O -demoThread -thinking -browserTile
 shot chat browser-tile-private 6 "Sign-in page: caption only, no picture" $O -demoThread -thinking -browserTile private
 shot chat browser-tile-long 6 "Worst case: the server's 100-character caption, two lines kept" $O -demoThread -thinking -todos -browserTile long
+# Helpers (Helpers.swift): the rows in the thinking bubble, the capsule after the reply, and its sheet.
+shot chat helpers-working 6 "Otto working with three helpers: a row each under its step" $O -demoThread -helpers live
+shot chat helpers-after 6 "The reply is in, three helpers still at work: the capsule over the composer" $O -demoThread -helpers after
+shot chat helpers-mixed 6 "One done (dimmed, leaving), one stopped, one at work: the capsule counts the last two" $O -demoThread -helpers mixed
+shot chat helpers-sheet 6 "The capsule tapped: the same rows in a sheet" $O -demoThread -helpers mixed -helpersOpen
+shot chat helpers-steps 6 "A row tapped in the sheet: its steps so far" $O -demoThread -helpers mixed -helpersOpen -helpersStepsOpen
+shot chat helpers-one 6 "One helper left" $O -demoThread -helpers one
+shot chat helpers-eight 6 "Eight helpers in the bubble" $O -demoThread -helpers eight -thinking
+shot chat helpers-worst 6 "Worst case in the bubble: long names and steps, an hour-long run, a state this build doesn't know, no start time, Japanese" $O -demoThread -helpers worst
 shot chat browser-tile-idle 6 "Tile still up after the reply ended (done comes 20 s later)" $O -demoThread -browserTile
 shot media browser-full 6 "Browser tile tapped: the page full screen" $O -demoThread -thinking -browserTile -browserOpen
 shot media browser-take-over 6 "A page the Mac will hand over: Take over, behind Face ID" $O -demoThread -thinking -browserTile control -browserOpen
