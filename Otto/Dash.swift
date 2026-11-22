@@ -116,14 +116,15 @@ struct DashHealth: Decodable {
     struct Probe: Decodable { let connected: Bool; var hidden: Bool? = nil }
     struct Stages: Decodable { let deep: Int; let light: Int; let rem: Int; let awake: Int }
     struct Sleep: Decodable {
-        let minutes: Int; let score: Int?; let qualifier: String?; let from: String; let to: String
-        let stages: Stages; let awakeCount: Int?; let respiration: Double?; let spo2: Int?
+        let minutes: Int; let score: Int?; let qualifier: String?; let from: String?; let to: String?
+        let stages: Stages; let awakeCount: Int?; let respiration: Double?; let spo2: Double?
     }
     struct Battery: Decodable { let now: Int }
-    struct Today: Decodable { let sleep: Sleep?; let bodyBattery: Battery?; let steps: Int?; let stepGoal: Int; let restingHr: Int? }
+    struct Today: Decodable { let sleep: Sleep?; let bodyBattery: Battery?; let steps: Int?; let stepGoal: Int; let restingHr: Int? }   // stepGoal 0: unknown
     struct Day: Decodable { let date: String; let sleepHours: Double?; let steps: Int? }
     struct Activity: Decodable { let date: String; let label: String; let km: Double; let minutes: Int }
-    let syncedAt: String; let day: String; let stale: Bool
+    /// Nil when the watch has never sent anything, or Garmin couldn't be reached and nothing was saved.
+    let syncedAt: String?; let day: String; let stale: Bool
     let today: Today
     /// 14 days, oldest first; the last one is `day`.
     let days: [Day]

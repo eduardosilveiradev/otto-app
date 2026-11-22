@@ -26,6 +26,19 @@ if worst {
     assert(!h.stale && s.minutes == s.stages.deep + s.stages.light + s.stages.rem)
     assert(h.days.allSatisfy { $0.sleepHours != nil && $0.steps != nil } && h.days.last!.date == h.day)
 }
+// What the live server (otto-core's WatchHealth) can also send: never synced, a night with no times, a
+// fractional blood oxygen, no step goal, 14 days of nothing.
+let live = #"""
+{"connected":true,"source":"Garmin","syncedAt":null,"day":"2026-11-22","stale":true,
+ "today":{"sleep":{"minutes":400,"score":null,"qualifier":null,"from":null,"to":null,"stages":{"deep":60,"light":280,"rem":55,"awake":5},
+          "awakeCount":null,"respiration":13.5,"spo2":91.5},
+          "bodyBattery":{"now":20,"high":40,"highAt":null,"low":12},"steps":0,"stepGoal":0,"restingHr":null,"restingHr7d":null},
+ "days":[\#((0..<14).map { #"{"date":"2026-11-\#(String(format: "%02d", 9 + $0))","sleepHours":null,"sleepScore":null,"steps":null,"bodyBattery":null}"# }.joined(separator: ","))],
+ "heartRate":[],"activity":[{"date":"2026-11-21","label":"Ride","km":3.25,"minutes":14,"avgHr":null}],"lastWorkout":null}
+"""#
+let l = try! JSONDecoder().decode(DashHealth.self, from: Data(live.utf8))
+assert(l.syncedAt == nil && l.today.sleep!.from == nil && l.today.sleep!.to == nil && l.today.sleep!.spo2 == 91.5)
+assert(l.today.stepGoal == 0 && l.days.count == 14 && l.days.allSatisfy { $0.sleepHours == nil && $0.steps == nil })
 print("health ok\(worst ? " (worst)" : "")")
 SWIFT
 } > "$D/check.swift"

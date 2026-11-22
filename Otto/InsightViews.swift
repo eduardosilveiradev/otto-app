@@ -282,7 +282,7 @@ private struct HealthList: View {
                     LabeledContent("Sleep") { Text(t.sleep.map { hm($0.minutes) } ?? "Not recorded").monospacedDigit() }
                 }
                 LabeledContent("Body battery") { reading(t.bodyBattery.map { "\($0.now)" }) }
-                LabeledContent("Steps") { reading(t.steps.map { "\($0.formatted()) of \(t.stepGoal.formatted())" }) }
+                LabeledContent("Steps") { reading(t.steps.map { t.stepGoal > 0 ? "\($0.formatted()) of \(t.stepGoal.formatted())" : $0.formatted() }) }
                 LabeledContent("Resting heart rate") { reading(t.restingHr.map { "\($0) bpm" }) }
             } header: {
                 if h.stale { Text(day(h.day)) }   // the numbers belong to that day, not today
@@ -290,7 +290,7 @@ private struct HealthList: View {
 
             Section("Steps · 14 days") {
                 DayBars(days: h.days, name: "Steps, last 14 days", value: { $0.steps.map(Double.init) },
-                        rule: Double(t.stepGoal), ruleLabel: "goal",
+                        rule: t.stepGoal > 0 ? Double(t.stepGoal) : nil, ruleLabel: "goal",
                         format: { Int($0).formatted() }, tick: { $0 >= 1000 ? "\(($0 / 1000).formatted())k" : Int($0).formatted() })
             }
 
@@ -331,7 +331,7 @@ struct SleepScreen: View {
                     VStack(alignment: .leading, spacing: 16) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(hm(s.minutes)).monospacedDigit().font(size: 40, weight: .semibold, relativeTo: .largeTitle)
-                            Text("\(night) · \(s.from) to \(s.to)").monospacedDigit().font(.subheadline).foregroundStyle(.secondary)
+                            Text(s.from.flatMap { f in s.to.map { "\(night) · \(f) to \($0)" } } ?? night).monospacedDigit().font(.subheadline).foregroundStyle(.secondary)
                             if let score = s.score {
                                 Text("Score \(score)\(s.qualifier.map { ", \($0)" } ?? "")").font(.footnote).foregroundStyle(.secondary)
                             }
@@ -358,7 +358,7 @@ struct SleepScreen: View {
                 if let s {
                     if let n = s.awakeCount { LabeledContent("Woke up", value: n == 0 ? "Not once" : n == 1 ? "Once" : n == 2 ? "Twice" : "\(n) times") }
                     if let r = s.respiration { LabeledContent("Breathing", value: "\(Int(r.rounded())) a minute") }
-                    if let o = s.spo2 { LabeledContent("Blood oxygen", value: "\(o)% average") }
+                    if let o = s.spo2 { LabeledContent("Blood oxygen", value: "\(Int(o.rounded()))% average") }
                 } else if let last = h.days.last(where: { $0.sleepHours != nil }) {
                     LabeledContent("Last recorded night", value: day(last.date))
                 }
@@ -379,14 +379,14 @@ private struct SyncedLine: View {
                 // NeedsMark's dot and ink, as words that can wrap at large sizes (NeedsMark is fixed to one line).
                 HStack(spacing: 6) {
                     Circle().fill(Color.otto).frame(width: 7, height: 7)
-                    Text("Not synced since \(at.map { clock($0, weekday: true) } ?? h.syncedAt)")
+                    Text(at.map { "Not synced since \(clock($0, weekday: true))" } ?? "Not synced yet")
                         .font(.footnote.weight(.semibold)).foregroundStyle(Color.ottoInk)
                 }
                 Text("Open Garmin Connect on your phone and the watch catches up.")
             }
             .accessibilityElement(children: .combine)
         } else {
-            Text("Watch synced \(at.map { clock($0) } ?? h.syncedAt)").monospacedDigit()
+            Text(at.map { "Watch synced \(clock($0))" } ?? "Not synced yet").monospacedDigit()
         }
     }
 }
@@ -397,7 +397,8 @@ private struct DayBars: View {
     let days: [DashHealth.Day]
     let name: String
     let value: (DashHealth.Day) -> Double?
-    let rule: Double
+    /// The dashed line (the step goal, 8 h), or none: a goal of 0 means the server doesn't know it.
+    let rule: Double?
     let ruleLabel: String
     let format: (Double) -> String
     let tick: (Double) -> String
@@ -412,10 +413,12 @@ private struct DayBars: View {
                         .cornerRadius(5)
                 }
             }
-            RuleMark(y: .value(ruleLabel, rule))
-                .foregroundStyle(Color.primary.opacity(0.5))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                .annotation(position: .top, alignment: .leading, spacing: 2) { Text(ruleLabel).font(.caption2).foregroundStyle(.secondary) }
+            if let rule {
+                RuleMark(y: .value(ruleLabel, rule))
+                    .foregroundStyle(Color.primary.opacity(0.5))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .annotation(position: .top, alignment: .leading, spacing: 2) { Text(ruleLabel).font(.caption2).foregroundStyle(.secondary) }
+            }
         }
         .chartXScale(domain: days.map(\.date))   // every day keeps its slot, read or not
         .chartXAxis {
@@ -434,7 +437,7 @@ private struct DayBars: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(name)
         .accessibilityValue(days.map { "\(day($0.date)), \(value($0).map(format) ?? "no reading")" }.joined(separator: "; ")
-                            + "; \(ruleLabel == "goal" ? "goal \(format(rule))" : "line at \(ruleLabel)")")
+                            + (rule.map { "; \(ruleLabel == "goal" ? "goal \(format($0))" : "line at \(ruleLabel)")" } ?? ""))
     }
 }
 
