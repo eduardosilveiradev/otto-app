@@ -3,7 +3,7 @@
  * design/hillclimb-2026-11-16/server-contract.md, so the app's side of them can be checked on a
  * simulator before the server has them. Delete it once otto-core does: its apptwin.ts then covers this.
  *
- *   bun Scripts/contract-server.ts <port> [connect-delay-ms] [old]
+ *   bun Scripts/contract-server.ts <port> [connect-delay-ms] [old|noscreen|noimage]
  *
  * `old` answers as today's server does (none of the contract). `connect-delay-ms` holds the socket back,
  * for timing a launch through a slow tunnel. Launch the app at it with
@@ -24,8 +24,11 @@
  * turns go as otto-core's do: one still being said or written down is dropped, one already written down gets its answer
  * as a thread message only. POST /app/voice takes a note in once per id. Every turn Otto takes in is logged as
  * "TURN <n>", and one refused as already in as "deduped": one utterance should make exactly one TURN.
+ * talk.screen is logged by size, never the picture. `noscreen` answers it as otto-core's talk.ts did before it knew
+ * the frame, talk.error "unknown talk frame"; `noimage` takes `off` and refuses only a picture, so the refusal
+ * lands in the middle of a turn.
  */
-const port = Number(process.argv[2] ?? 4599), delay = Number(process.argv[3] ?? 0), old = process.argv[4] === 'old'
+const port = Number(process.argv[2] ?? 4599), delay = Number(process.argv[3] ?? 0), old = process.argv[4] === 'old', noscreen = process.argv[4] === 'noscreen', noimage = process.argv[4] === 'noimage'
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 23), ...a)
 const sockets = new Set<any>()
 import { readdirSync, readFileSync } from 'fs'
@@ -164,6 +167,11 @@ Bun.serve({
         if (f.type === 'talk.audio') {   // the turn's audio: counted, not kept
           const t = talks.get(ws)
           if (t?.phase === 'mic' && ++t.audio === 8) drop(ws, 'speaking')
+          return
+        }
+        if (f.type === 'talk.screen') {   // your screen: its size logged, never the picture
+          log('frame talk.screen', f.off ? 'off' : `${f.width}x${f.height} ${Math.round(Buffer.from(f.image ?? '', 'base64').length / 1024)} KB jpeg=${String(f.image).startsWith('/9j/')}`)
+          if (!old && (noscreen || (noimage && !f.off))) ws.send(JSON.stringify({ type: 'talk.error', turn: talks.get(ws)?.turn, error: 'unknown talk frame' }))
           return
         }
         log('frame', String(m).slice(0, 300))
