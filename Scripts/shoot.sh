@@ -110,6 +110,8 @@ shot onboarding talk 4 "Talk / Siri step" -onboarding -onboardingStep 3 $N
 shot onboarding share 4 "Share-sheet step" -onboarding -onboardingStep 4 $N
 shot onboarding awake 4 "Stay-connected step" -onboarding -onboardingStep 5 $N
 shot onboarding done 4 "All set" -onboarding -onboardingStep 6 $N
+shot microphone-check ready 3 "Instructions before recording the first configuration" -stereoMicCheck
+shot microphone-check measuring 7 "Simulator report and recording prompts" -stereoMicCheck -runStereoMicCheck
 shot launch connecting 4 "Splash while the Mac is being reached" $DEAD $N -holdSplash
 
 # --- Otto's thread -------------------------------------------------------------------

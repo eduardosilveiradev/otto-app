@@ -13,6 +13,7 @@ struct OttoApp: App {
 
     init() {
         #if DEBUG
+        if StereoMicCheck.requested { return }
         // `-wipeDefaults` (Scripts/shoot.sh, on every launch): start from no saved settings, so what one
         // screenshot's state left behind (a draft in the composer, a pasted pairing link) can't show in the next.
         if CommandLine.arguments.contains("-wipeDefaults"), let id = Bundle.main.bundleIdentifier { UserDefaults.standard.removePersistentDomain(forName: id) }
@@ -47,25 +48,33 @@ struct OttoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            // The store is made only once onboarding is over, so it starts on the server just paired.
-            Group {
-                if onboarded { MainRoot() } else { OnboardingFlow { withAnimation { onboarded = true } } }
-            }
-            .onOpenURL { url in
-                if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
-                // The widgets: Otto's thread, talk mode (still at its walkie-talkie address), or an approval put off with Later.
-                if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval"].contains(door) { Doors.open(door); return }
-                // A pairing link from the Camera's QR banner, AirDrop or a message. Anyone can make one, so it is
-                // only held here: onboarding and the main screen each ask, naming the Mac, before any of it is used.
-                if let link = PairingLink(url.absoluteString) { PairInbox.shared.link = link; return }
-                // A bare otto:// (what the Mac's Bark alerts open): Otto's own thread, where a waiting approval shows.
-                if url.scheme == "otto", (url.host ?? "").isEmpty, url.query() == nil { Doors.open("chat"); return }
-                // Meta AI comes back here after connecting the glasses; anything else isn't the SDK's.
-                guard url.query()?.contains("metaWearablesAction") == true else { return }
-                Task { _ = try? await Wearables.shared.handleUrl(url) }
-            }
-            .modifier(DictationCover())
+            #if DEBUG
+            if StereoMicCheck.requested { StereoMicCheck() } else { appContent }
+            #else
+            appContent
+            #endif
         }
+    }
+
+    private var appContent: some View {
+        // The store is made only once onboarding is over, so it starts on the server just paired.
+        Group {
+            if onboarded { MainRoot() } else { OnboardingFlow { withAnimation { onboarded = true } } }
+        }
+        .onOpenURL { url in
+            if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
+            // The widgets: Otto's thread, talk mode (still at its walkie-talkie address), or an approval put off with Later.
+            if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval"].contains(door) { Doors.open(door); return }
+            // A pairing link from the Camera's QR banner, AirDrop or a message. Anyone can make one, so it is
+            // only held here: onboarding and the main screen each ask, naming the Mac, before any of it is used.
+            if let link = PairingLink(url.absoluteString) { PairInbox.shared.link = link; return }
+            // A bare otto:// (what the Mac's Bark alerts open): Otto's own thread, where a waiting approval shows.
+            if url.scheme == "otto", (url.host ?? "").isEmpty, url.query() == nil { Doors.open("chat"); return }
+            // Meta AI comes back here after connecting the glasses; anything else isn't the SDK's.
+            guard url.query()?.contains("metaWearablesAction") == true else { return }
+            Task { _ = try? await Wearables.shared.handleUrl(url) }
+        }
+        .modifier(DictationCover())
     }
 }
 
