@@ -303,7 +303,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         let lapse = DispatchWorkItem { [weak self] in self?.refreshSuggestions() }
         codeLapse = lapse
         DispatchQueue.main.asyncAfter(deadline: .now() + c.expires.timeIntervalSinceNow, execute: lapse)
-        return .init(text: c.sender.map { "Code from \($0)" } ?? "Verification code", primary: true, code: c.code)
+        return .init(text: c.sender.flatMap { $0.isEmpty ? nil : "Code from \($0)" } ?? "Verification code", primary: true, code: c.code)
     }
 
     private func matchCase(_ word: String, _ typed: String) -> String {
