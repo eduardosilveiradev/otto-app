@@ -22,6 +22,11 @@ what Otto knows about your day.
 - Coding jobs Otto hands to an agent on the Mac: a card under the message that
   started each one, and a sheet to answer its question, steer or stop it, and
   merge its pull request
+- Otto's helpers (the subagents it hands parts of a job to): a row each in
+  the typing bubble with what it's doing and for how long. If they're still
+  going after Otto replies, a small "3 working" capsule over the composer
+  opens them in a sheet. Waiting on the server's `helpers` frame; until a
+  server sends it, nothing new shows
 - The day at a glance: calendar, inbox, open loops, armed triggers
 - The web dashboard's pages, in the contact card: loops and tonight's hygiene
   pass, memory (search, topics, the summary), people, money, trips, activity,
@@ -110,7 +115,9 @@ Debug builds accept a few arguments for checking layout without a server:
 `-seedAttachments`, `-approvalDemo` (an approval sheet; `-approvalDemo scopes` for one
 that offers a longer yes, `-approvalScope always` to open with it picked,
 `-approvalDemo draft` for an email to approve), `-jobsThread` (coding jobs; `-jobsThread worst` for the
-awkward ones, `-jobOpen <id>` to open one), and `-details -screen <Loops|Memory|People|Money|Trips|Activity|Status|Devices|Rules>`
+awkward ones, `-jobOpen <id>` to open one), `-helpers <live|after|mixed|one|eight|worst|sequence>`
+(Otto's helpers; `-helpersOpen` opens their sheet, `-helpersStepsOpen` one row's steps, `sequence`
+plays a turn through), and `-details -screen <Loops|Memory|People|Money|Trips|Activity|Status|Devices|Rules>`
 to open the contact card on one of its pages, or `-details -checkServer` to open it on the
 server fields and check them. For recording motion: `-faceBeat glance` or `-faceBeat cheer` (Otto's face
 does that on every idle beat), `-drowsy YES` or `NO` (the quiet-hours face, whatever the clock says),

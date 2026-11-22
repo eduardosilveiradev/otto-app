@@ -343,6 +343,10 @@ protocol OttoBackend: AnyObject {
     func jobs() async -> [CodeJob]?
     /// POST /app/jobs/<verb> {id, text}: the job as it now is, or the server's words for why not.
     func jobAction(_ verb: JobVerb, id: String, text: String?) async -> JobOutcome
+    /// Otto's helpers, whole each time (the socket's "helpers" frame); never sent by an older server.
+    var helperLists: AsyncStream<[Helper]> { get }
+    /// A stopped helper has been seen: the Mac lets it go.
+    func seen(helper id: String) async
 }
 
 struct PipResponse { let status: Int; let data: Data }
@@ -381,6 +385,8 @@ extension OttoBackend {
     var conversationEvents: AsyncStream<ConversationEvent> { AsyncStream { _ in } }
     var jobLists: AsyncStream<[CodeJob]> { AsyncStream { _ in } }
     func jobs() async -> [CodeJob]? { nil }
+    var helperLists: AsyncStream<[Helper]> { AsyncStream { _ in } }
+    func seen(helper id: String) async {}
     func jobAction(_ verb: JobVerb, id: String, text: String?) async -> JobOutcome { .failed(String(localized: "This is sample data: there’s no Mac to tell.")) }
     func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse? { nil }
 }

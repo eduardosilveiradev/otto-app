@@ -222,6 +222,26 @@ final class OttoStore {
     var ottoTodos: [TodoItem] = []
     /// Otto's open to-dos while it isn't working: the pill over the composer.
     var openTodos: [TodoItem] = []
+    /// Otto's helpers (Helpers.swift), as the Mac last listed them less the done ones past their 6 s. Not tied to
+    /// the dots: they keep working after the reply, and their frames say nothing about the turn.
+    var helpers: [Helper] = []
+    @ObservationIgnored private var helperSweep: Task<Void, Never>?
+    func showHelpers(_ list: [Helper]) {
+        // Animated here rather than by the thread: its modifier chain is already all the type checker will take.
+        // Rows coming, going or wrapping to a new step move the bubble's height, and the thread with it.
+        withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .spring(response: 0.3, dampingFraction: 0.8)) { helpers = Helper.shown(list, at: .now) }
+        helperSweep?.cancel()
+        guard let next = helpers.compactMap(\.leavesAt).min() else { return }
+        helperSweep = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(0, next.timeIntervalSinceNow)))
+            guard !Task.isCancelled, let self else { return }
+            showHelpers(helpers)
+        }
+    }
+    /// The sheet is open: every stopped one is seen, and the Mac can let it go.
+    func sawHelpers() {
+        for h in helpers where h.state == .failed { Task { await backend.seen(helper: h.id) } }
+    }
     /// What Otto is doing in Chrome: the tile over the thinking orb. Memory only, like the frames
     /// it comes from; the picture is decoded once here, not on every pass of the thread.
     var browser: LiveBrowser?
@@ -843,6 +863,8 @@ final class OttoStore {
         if ProcessInfo.processInfo.arguments.contains("-spinnerCheck") { OttoThinkingSpinnerCheck.run() }
         // `-approvalCheck`: the approval clock's rounding, and the forget message's name filter.
         if ProcessInfo.processInfo.arguments.contains("-approvalCheck") { ApprovalCheck.run() }
+        // `-helpersCheck`: the helpers frame, the capsule's words and the 6 s a done one stays (Helpers.swift).
+        if ProcessInfo.processInfo.arguments.contains("-helpersCheck") { HelpersCheck.run() }
         // `-searchCheck`: the drawer's search filter (Pips.swift).
         if ProcessInfo.processInfo.arguments.contains("-searchCheck") { PipSearchCheck.run() }
         #endif
@@ -853,6 +875,16 @@ final class OttoStore {
                              TodoItem(text: "Echoing shares to the open app", status: .in_progress),
                              TodoItem(text: "Build and push", status: .pending)]
             } }
+        // `-helpers <live|after|mixed|one|eight|worst>`: Otto's helpers (Helper.sample); live and worst with Otto at work,
+        // the rest after its reply. `-helpersOpen` opens the sheet, `-helpersStepsOpen` one row's steps in it.
+        // `-helpers sequence` plays it out: three at work, one done, one stopped, the reply, one still at it.
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-helpers") {
+            let args = ProcessInfo.processInfo.arguments, kind = i + 1 < args.count ? args[i + 1] : "live"
+            if kind == "sequence" { Task { await helperSequence() } } else {
+                showHelpers(Helper.sample(kind))
+                if kind == "live" || kind == "worst" { ottoTyping = true; ottoStatus = "Reading the notes from Tuesday" }
+            }
+        }
         // `-browserTile`: Otto in Chrome, over the thinking orb; `-browserTile private` caption only (a sign-in page),
         // `-browserTile long` the server's 100-character caption. `-browserOpen` opens it full screen.
         if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-browserTile") {
@@ -901,6 +933,7 @@ final class OttoStore {
         }
         Task { for await items in backend.openTodoLists { openTodos = items } }
         Task { for await list in backend.jobLists { jobs.set(list) } }
+        Task { for await list in backend.helperLists { showHelpers(list) } }
         Task { for await tile in backend.browserTiles { browser = tile.map { LiveBrowser(tile: $0, shot: $0.image.flatMap(UIImage.init(data:))) } } }
         Task {
             for await items in backend.todoLists {
@@ -1042,6 +1075,22 @@ final class OttoStore {
     #endif
 
     #if DEBUG
+    /// `-helpers sequence`: three helpers through a turn as the Mac would send them. Each one's step moves on;
+    /// one finishes at 6 s (and leaves at 12), one stops at 9, Otto answers at 11, and the last works on until 30.
+    private func helperSequence() async {
+        var list = Helper.sample("live")
+        func at(_ s: Double, _ change: () -> Void) async {
+            try? await Task.sleep(for: .seconds(s)); change(); showHelpers(list)
+        }
+        ottoTyping = true; ottoStatus = "Reading the notes from Tuesday"; showHelpers(list)
+        await at(3) { list[0].step = "Writing up the action items"; list[1].step = "Comparing the two cheapest" }
+        await at(3) { list[0].state = .done; list[0].endedAt = .now }
+        await at(3) { list[2].state = .failed; list[2].endedAt = .now; list[2].error = "the test machine didn’t answer" }
+        await at(2) { ottoTyping = false; messages.append(Message(from: .otto, text: "the notes are done. flights are still being checked, and the tests stopped.")) }
+        await at(5) { list[1].step = "Checking the bag allowance" }
+        await at(14) { list[1].state = .done; list[1].endedAt = .now }
+    }
+
     /// A booking page as Chrome would screenshot it, 600×375 like the server's, for `-browserTile`.
     static func fakePage() -> UIImage {
         let r = UIGraphicsImageRendererFormat(); r.scale = 1
