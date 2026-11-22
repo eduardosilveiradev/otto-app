@@ -14,6 +14,7 @@
 		0A000000000000000000003B /* OttoShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000030 /* OttoShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0A0000000000000000000069 /* OttoKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000060 /* OttoKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0A00000000000000000000D9 /* OttoWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0A00000000000000000000D0 /* OttoWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		0A00000000000000000001A9 /* OttoScreen.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0A00000000000000000001A0 /* OttoScreen.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0A00000000000000000000C0 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0A00000000000000000000C2 /* MWDATCore */; };
 		0A00000000000000000000C1 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 0A00000000000000000000C3 /* MWDATCamera */; };
 /* End PBXBuildFile section */
@@ -22,10 +23,11 @@
 		0A000000000000000000003C /* PBXContainerItemProxy */ = {isa = PBXContainerItemProxy; containerPortal = 0A000000000000000000000A /* Project object */; proxyType = 1; remoteGlobalIDString = 0A0000000000000000000033; remoteInfo = OttoShare; };
 		0A000000000000000000006A /* PBXContainerItemProxy */ = {isa = PBXContainerItemProxy; containerPortal = 0A000000000000000000000A /* Project object */; proxyType = 1; remoteGlobalIDString = 0A0000000000000000000062; remoteInfo = OttoKeyboard; };
 		0A00000000000000000000DA /* PBXContainerItemProxy */ = {isa = PBXContainerItemProxy; containerPortal = 0A000000000000000000000A /* Project object */; proxyType = 1; remoteGlobalIDString = 0A00000000000000000000D2; remoteInfo = OttoWidget; };
+		0A00000000000000000001AA /* PBXContainerItemProxy */ = {isa = PBXContainerItemProxy; containerPortal = 0A000000000000000000000A /* Project object */; proxyType = 1; remoteGlobalIDString = 0A00000000000000000001A2; remoteInfo = OttoScreen; };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		0A000000000000000000003A /* Embed Foundation Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (0A000000000000000000003B /* OttoShare.appex in Embed Foundation Extensions */, 0A0000000000000000000069 /* OttoKeyboard.appex in Embed Foundation Extensions */, 0A00000000000000000000D9 /* OttoWidget.appex in Embed Foundation Extensions */); name = "Embed Foundation Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+		0A000000000000000000003A /* Embed Foundation Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (0A000000000000000000003B /* OttoShare.appex in Embed Foundation Extensions */, 0A0000000000000000000069 /* OttoKeyboard.appex in Embed Foundation Extensions */, 0A00000000000000000000D9 /* OttoWidget.appex in Embed Foundation Extensions */, 0A00000000000000000001A9 /* OttoScreen.appex in Embed Foundation Extensions */); name = "Embed Foundation Extensions"; runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -33,6 +35,7 @@
 		0A0000000000000000000030 /* OttoShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OttoShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A0000000000000000000060 /* OttoKeyboard.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OttoKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A00000000000000000000D0 /* OttoWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OttoWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		0A00000000000000000001A0 /* OttoScreen.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OttoScreen.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -42,6 +45,7 @@
 		0A0000000000000000000061 /* OttoKeyboard */ = {isa = PBXFileSystemSynchronizedRootGroup; path = OttoKeyboard; sourceTree = "<group>"; };
 		0A00000000000000000000D1 /* OttoWidget */ = {isa = PBXFileSystemSynchronizedRootGroup; path = OttoWidget; sourceTree = "<group>"; };
 		0A00000000000000000000E0 /* WidgetData */ = {isa = PBXFileSystemSynchronizedRootGroup; path = WidgetData; sourceTree = "<group>"; };
+		0A00000000000000000001A1 /* OttoScreen */ = {isa = PBXFileSystemSynchronizedRootGroup; path = OttoScreen; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -49,11 +53,12 @@
 		0A0000000000000000000038 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0A0000000000000000000067 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0A00000000000000000000D7 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		0A00000000000000000001A7 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		0A0000000000000000000004 = {isa = PBXGroup; children = (0A0000000000000000000002 /* Otto */, 0A0000000000000000000031 /* OttoShare */, 0A0000000000000000000061 /* OttoKeyboard */, 0A00000000000000000000D1 /* OttoWidget */, 0A00000000000000000000E0 /* WidgetData */, 0A0000000000000000000032 /* Shared */, 0A0000000000000000000005 /* Products */); sourceTree = "<group>"; };
-		0A0000000000000000000005 /* Products */ = {isa = PBXGroup; children = (0A0000000000000000000001 /* Otto.app */, 0A0000000000000000000030 /* OttoShare.appex */, 0A0000000000000000000060 /* OttoKeyboard.appex */, 0A00000000000000000000D0 /* OttoWidget.appex */); name = Products; sourceTree = "<group>"; };
+		0A0000000000000000000004 = {isa = PBXGroup; children = (0A0000000000000000000002 /* Otto */, 0A0000000000000000000031 /* OttoShare */, 0A0000000000000000000061 /* OttoKeyboard */, 0A00000000000000000000D1 /* OttoWidget */, 0A00000000000000000000E0 /* WidgetData */, 0A00000000000000000001A1 /* OttoScreen */, 0A0000000000000000000032 /* Shared */, 0A0000000000000000000005 /* Products */); sourceTree = "<group>"; };
+		0A0000000000000000000005 /* Products */ = {isa = PBXGroup; children = (0A0000000000000000000001 /* Otto.app */, 0A0000000000000000000030 /* OttoShare.appex */, 0A0000000000000000000060 /* OttoKeyboard.appex */, 0A00000000000000000000D0 /* OttoWidget.appex */, 0A00000000000000000001A0 /* OttoScreen.appex */); name = Products; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -62,7 +67,7 @@
 			buildConfigurationList = 0A0000000000000000000007;
 			buildPhases = (0A0000000000000000000008 /* Sources */, 0A0000000000000000000003 /* Frameworks */, 0A0000000000000000000009 /* Resources */, 0A000000000000000000003A /* Embed Foundation Extensions */);
 			buildRules = ();
-			dependencies = (0A000000000000000000003D /* PBXTargetDependency */, 0A000000000000000000006B /* PBXTargetDependency */, 0A00000000000000000000DB /* PBXTargetDependency */);
+			dependencies = (0A000000000000000000003D /* PBXTargetDependency */, 0A000000000000000000006B /* PBXTargetDependency */, 0A00000000000000000000DB /* PBXTargetDependency */, 0A00000000000000000001AB /* PBXTargetDependency */);
 			fileSystemSynchronizedGroups = (0A0000000000000000000002 /* Otto */, 0A0000000000000000000032 /* Shared */, 0A00000000000000000000E0 /* WidgetData */);
 			packageProductDependencies = (0A0000000000000000000021 /* Vapi */, 0A0000000000000000000053 /* ThinkingOrbsKit */, 0A0000000000000000000054 /* VoiceGlowKit */, 0A00000000000000000000F6 /* VoiceRingKit */, 0A00000000000000000000C2 /* MWDATCore */, 0A00000000000000000000C3 /* MWDATCamera */);
 			name = Otto;
@@ -106,6 +111,18 @@
 			productReference = 0A00000000000000000000D0 /* OttoWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		0A00000000000000000001A2 /* OttoScreen */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0A00000000000000000001A3;
+			buildPhases = (0A00000000000000000001A6 /* Sources */, 0A00000000000000000001A7 /* Frameworks */, 0A00000000000000000001A8 /* Resources */);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (0A00000000000000000001A1 /* OttoScreen */, 0A0000000000000000000032 /* Shared */);
+			name = OttoScreen;
+			productName = OttoScreen;
+			productReference = 0A00000000000000000001A0 /* OttoScreen.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -123,7 +140,7 @@
 			productRefGroup = 0A0000000000000000000005 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (0A0000000000000000000006 /* Otto */, 0A0000000000000000000033 /* OttoShare */, 0A0000000000000000000062 /* OttoKeyboard */, 0A00000000000000000000D2 /* OttoWidget */);
+			targets = (0A0000000000000000000006 /* Otto */, 0A0000000000000000000033 /* OttoShare */, 0A0000000000000000000062 /* OttoKeyboard */, 0A00000000000000000000D2 /* OttoWidget */, 0A00000000000000000001A2 /* OttoScreen */);
 		};
 /* End PBXProject section */
 
@@ -132,6 +149,7 @@
 		0A0000000000000000000039 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0A0000000000000000000068 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0A00000000000000000000D8 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		0A00000000000000000001A8 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -139,12 +157,14 @@
 		0A0000000000000000000037 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0A0000000000000000000066 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0A00000000000000000000D6 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		0A00000000000000000001A6 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
 		0A000000000000000000003D /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 0A0000000000000000000033 /* OttoShare */; targetProxy = 0A000000000000000000003C /* PBXContainerItemProxy */; };
 		0A000000000000000000006B /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 0A0000000000000000000062 /* OttoKeyboard */; targetProxy = 0A000000000000000000006A /* PBXContainerItemProxy */; };
 		0A00000000000000000000DB /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 0A00000000000000000000D2 /* OttoWidget */; targetProxy = 0A00000000000000000000DA /* PBXContainerItemProxy */; };
+		0A00000000000000000001AB /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 0A00000000000000000001A2 /* OttoScreen */; targetProxy = 0A00000000000000000001AA /* PBXContainerItemProxy */; };
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -350,6 +370,46 @@
 			};
 			name = Release;
 		};
+		0A00000000000000000001A4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = OttoScreen.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "OttoScreen-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Otto;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.otto.app.screen;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		0A00000000000000000001A5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = OttoScreen.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "OttoScreen-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Otto;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.otto.app.screen;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -409,6 +469,7 @@
 		0A0000000000000000000034 /* OttoShare */ = {isa = XCConfigurationList; buildConfigurations = (0A0000000000000000000035, 0A0000000000000000000036); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
 		0A0000000000000000000063 /* OttoKeyboard */ = {isa = XCConfigurationList; buildConfigurations = (0A0000000000000000000064, 0A0000000000000000000065); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
 		0A00000000000000000000D3 /* OttoWidget */ = {isa = XCConfigurationList; buildConfigurations = (0A00000000000000000000D4, 0A00000000000000000000D5); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		0A00000000000000000001A3 /* OttoScreen */ = {isa = XCConfigurationList; buildConfigurations = (0A00000000000000000001A4, 0A00000000000000000001A5); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
 /* End XCConfigurationList section */
 	};
 	rootObject = 0A000000000000000000000A /* Project object */;

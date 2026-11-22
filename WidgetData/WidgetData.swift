@@ -26,6 +26,8 @@ struct CallActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         var started: Date
         var muted = false
+        /// Otto sees your screen (the talk's screen broadcast).
+        var sharing = false
     }
 }
 
@@ -67,6 +69,8 @@ struct TalkActivityAttributes: ActivityAttributes {
         var symbol: String
         var started: Date
         var muted = false
+        /// Otto sees your screen (the talk's screen broadcast).
+        var sharing = false
     }
 }
 
