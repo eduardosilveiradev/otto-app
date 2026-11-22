@@ -260,6 +260,236 @@ private struct MoneyList: View {
     }
 }
 
+// MARK: - Health
+
+/// What the watch sent: today's four numbers, two weeks of steps, the walks. Laid out like Money.
+struct HealthScreen: View {
+    var body: some View {
+        Loaded(path: "health") { (h: DashHealth, reload) in
+            HealthList(h: h).refreshable { await reload() }
+        }
+        .navigationTitle("Health").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct HealthList: View {
+    let h: DashHealth
+    var body: some View {
+        let t = h.today
+        List {
+            Section {
+                NavigationLink { SleepScreen(h: h) } label: {
+                    LabeledContent("Sleep") { Text(t.sleep.map { hm($0.minutes) } ?? "Not recorded").monospacedDigit() }
+                }
+                LabeledContent("Body battery") { reading(t.bodyBattery.map { "\($0.now)" }) }
+                LabeledContent("Steps") { reading(t.steps.map { "\($0.formatted()) of \(t.stepGoal.formatted())" }) }
+                LabeledContent("Resting heart rate") { reading(t.restingHr.map { "\($0) bpm" }) }
+            } header: {
+                if h.stale { Text(day(h.day)) }   // the numbers belong to that day, not today
+            } footer: { SyncedLine(h: h) }
+
+            Section("Steps · 14 days") {
+                DayBars(days: h.days, name: "Steps, last 14 days", value: { $0.steps.map(Double.init) },
+                        rule: Double(t.stepGoal), ruleLabel: "goal",
+                        format: { Int($0).formatted() }, tick: { $0 >= 1000 ? "\(($0 / 1000).formatted())k" : Int($0).formatted() })
+            }
+
+            if !h.activity.isEmpty {
+                Section("Walks") {
+                    ForEach(Array(h.activity.enumerated()), id: \.offset) { _, a in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(a.label).lineLimit(1)
+                                Text("\(a.date == Date.now.formatted(.iso8601.year().month().day()) ? "Today" : day(a.date)) · \(hm(a.minutes))")
+                                    .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                            }
+                            Spacer(minLength: 12)
+                            Text("\(a.km.formatted(.number.precision(.fractionLength(1)))) km").monospacedDigit().foregroundStyle(.secondary).fixedSize()
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+        }
+    }
+
+    /// A number, or a dash that says "No reading" aloud.
+    @ViewBuilder private func reading(_ s: String?) -> some View {
+        if let s { Text(s).monospacedDigit() } else { Text("—").accessibilityLabel("No reading") }
+    }
+}
+
+/// Last night, split into its stages, against the last two weeks.
+struct SleepScreen: View {
+    let h: DashHealth
+    var body: some View {
+        let s = h.today.sleep
+        let night = h.stale ? day(h.day) : "Last night"
+        List {
+            Section {
+                if let s {
+                    VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(hm(s.minutes)).monospacedDigit().font(size: 40, weight: .semibold, relativeTo: .largeTitle)
+                            Text("\(night) · \(s.from) to \(s.to)").monospacedDigit().font(.subheadline).foregroundStyle(.secondary)
+                            if let score = s.score {
+                                Text("Score \(score)\(s.qualifier.map { ", \($0)" } ?? "")").font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+                        SleepStages(stages: s.stages)
+                    }
+                    .padding(.vertical, 4)
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("No sleep recorded").font(.title2.weight(.semibold))
+                        Text(night).font(.subheadline).foregroundStyle(.secondary)
+                        Text("The watch may have been off your wrist.").font(.footnote).foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+
+            Section("Hours · 14 nights") {
+                DayBars(days: h.days, name: "Hours asleep, last 14 nights", value: \.sleepHours, rule: 8, ruleLabel: "8 h",
+                        format: { hm(Int(($0 * 60).rounded())) }, tick: { "\(Int($0)) h" })
+            }
+
+            Section {
+                if let s {
+                    if let n = s.awakeCount { LabeledContent("Woke up", value: n == 0 ? "Not once" : n == 1 ? "Once" : n == 2 ? "Twice" : "\(n) times") }
+                    if let r = s.respiration { LabeledContent("Breathing", value: "\(Int(r.rounded())) a minute") }
+                    if let o = s.spo2 { LabeledContent("Blood oxygen", value: "\(o)% average") }
+                } else if let last = h.days.last(where: { $0.sleepHours != nil }) {
+                    LabeledContent("Last recorded night", value: day(last.date))
+                }
+            }
+            .monospacedDigit()
+        }
+        .navigationTitle("Sleep").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// "Last synced" under today's numbers; when the watch has gone quiet, the waiting mark and what to do.
+private struct SyncedLine: View {
+    let h: DashHealth
+    var body: some View {
+        let at = dashDate(h.syncedAt)
+        if h.stale {
+            VStack(alignment: .leading, spacing: 4) {
+                // NeedsMark's dot and ink, as words that can wrap at large sizes (NeedsMark is fixed to one line).
+                HStack(spacing: 6) {
+                    Circle().fill(Color.otto).frame(width: 7, height: 7)
+                    Text("Not synced since \(at.map { clock($0, weekday: true) } ?? h.syncedAt)")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(Color.ottoInk)
+                }
+                Text("Open Garmin Connect on your phone and the watch catches up.")
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            Text("Watch synced \(at.map { clock($0) } ?? h.syncedAt)").monospacedDigit()
+        }
+    }
+}
+
+/// One bar a day, today's at full strength: Money's "By month" chart, with a dashed line for the goal.
+/// A day without a reading leaves its slot empty, never a zero.
+private struct DayBars: View {
+    let days: [DashHealth.Day]
+    let name: String
+    let value: (DashHealth.Day) -> Double?
+    let rule: Double
+    let ruleLabel: String
+    let format: (Double) -> String
+    let tick: (Double) -> String
+
+    var body: some View {
+        let last = days.last?.date
+        Chart {
+            ForEach(days, id: \.date) { d in
+                if let v = value(d) {
+                    BarMark(x: .value("Day", d.date), y: .value("Value", v), width: .ratio(0.45))
+                        .foregroundStyle(d.date == last ? Color.primary : Color.primary.opacity(0.3))
+                        .cornerRadius(5)
+                }
+            }
+            RuleMark(y: .value(ruleLabel, rule))
+                .foregroundStyle(Color.primary.opacity(0.5))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                .annotation(position: .top, alignment: .leading, spacing: 2) { Text(ruleLabel).font(.caption2).foregroundStyle(.secondary) }
+        }
+        .chartXScale(domain: days.map(\.date))   // every day keeps its slot, read or not
+        .chartXAxis {
+            AxisMarks(values: days.map(\.date)) { v in
+                AxisValueLabel { Text(dashDate(v.as(String.self))?.formatted(.dateTime.weekday(.narrow)) ?? "") }
+            }
+        }
+        .chartYAxis {
+            AxisMarks { v in
+                AxisGridLine()
+                AxisValueLabel { Text(v.as(Double.self).map(tick) ?? "") }
+            }
+        }
+        .frame(height: 160)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(name)
+        .accessibilityValue(days.map { "\(day($0.date)), \(value($0).map(format) ?? "no reading")" }.joined(separator: "; ")
+                            + "; \(ruleLabel == "goal" ? "goal \(format(rule))" : "line at \(ruleLabel)")")
+    }
+}
+
+/// The night as one bar split by stage, with a two-column legend under it.
+private struct SleepStages: View {
+    let stages: DashHealth.Stages
+    var body: some View {
+        let parts: [(name: String, minutes: Int, color: Color)] = [
+            ("Deep", stages.deep, .sleepDeep), ("Light", stages.light, .sleepLight),
+            ("REM", stages.rem, .sleepREM), ("Awake", stages.awake, .sleepAwake)]
+        let shown = parts.filter { $0.minutes > 0 }
+        let total = CGFloat(shown.reduce(0) { $0 + $1.minutes })
+        VStack(alignment: .leading, spacing: 12) {
+            GeometryReader { g in
+                let room = g.size.width - CGFloat(max(shown.count - 1, 0)) * 2   // 2pt gaps between stages
+                HStack(spacing: 2) {
+                    ForEach(shown, id: \.name) { p in
+                        Rectangle().fill(p.color).frame(width: total > 0 ? room * CGFloat(p.minutes) / total : 0)
+                    }
+                }
+            }
+            .frame(height: 10)
+            .clipShape(.rect(cornerRadius: 3))   // not a capsule: it would swallow a few minutes awake at the end
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Sleep stages")
+            .accessibilityValue(parts.map { "\($0.name) \(hm($0.minutes))" }.joined(separator: ", "))
+
+            LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 10) {
+                ForEach(parts, id: \.name) { p in
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 6) {
+                            Circle().fill(p.color).frame(width: 7, height: 7)
+                            Text(p.name).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Text(hm(p.minutes)).font(.subheadline).monospacedDigit()
+                    }
+                }
+            }
+            .accessibilityHidden(true)   // the bar above says the same
+        }
+    }
+}
+
+/// "7 h 42 min", "5 h 02 min", "6 min".
+private func hm(_ minutes: Int) -> String {
+    minutes >= 60 ? "\(minutes / 60) h \(String(format: "%02d", minutes % 60)) min" : "\(minutes) min"
+}
+
+/// "14:52", or "Fri 23:10": the watch's own 24-hour clock, as the server sends sleep times.
+private func clock(_ d: Date, weekday: Bool = false) -> String {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = weekday ? "EEE HH:mm" : "HH:mm"
+    return f.string(from: d)
+}
+
 // MARK: - Trips
 
 /// Bookings Otto has on file. Times are where they happen, never converted.

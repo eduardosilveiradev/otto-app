@@ -17,6 +17,17 @@ enum MockDash {
               {"id":"x","label":"Überweisungsvorlagen für Aleksandra Wiśniewska-Kowalczyk vorbereiten","created":"not a date"}]}
             """#.utf8)
         }
+        // `-healthOff`: no watch (the contact card has no Health row). `-healthWorst`: no sleep, no readings, a
+        // long activity name, not synced since Friday. `-healthStale`: the sample, but the watch went quiet.
+        if path == "health" {
+            let args = CommandLine.arguments
+            if args.contains("-healthOff") { return Data(#"{"connected":false}"#.utf8) }
+            if args.contains("-healthWorst") { return Data(healthWorst.utf8) }
+            if args.contains("-healthStale"), let h = json["health"] {
+                return Data(h.replacingOccurrences(of: #""stale":false"#, with: #""stale":true"#)
+                    .replacingOccurrences(of: "2026-11-22T14:52:00+01:00", with: "2026-11-21T23:10:00+01:00").utf8)
+            }
+        }
         #endif
         return json[path].map { Data($0.utf8) }
     }
@@ -28,10 +39,33 @@ enum MockDash {
     private static let empty: [String: String] = [
         "loops": #"{"open":[],"plan":{"close":[],"propose":[],"avoidance":[]},"recent":[]}"#,
         "jobs": #"{"jobs":[]}"#, "capabilities": #"{"entries":[]}"#, "triggers": #"{"triggers":[]}"#,
-        "calls": #"{"calls":[]}"#, "packages": #"{"packages":[]}"#, "rules": #"{"rules":[]}"#,
+        "calls": #"{"calls":[]}"#, "health": #"{"connected":false}"#, "packages": #"{"packages":[]}"#, "rules": #"{"rules":[]}"#,
         "trips": #"{"trips":[],"current":null,"problems":{}}"#, "people": #"{"cards":[]}"#,
         "memory": #"{"items":[],"summary":{"text":"","note":"Rewritten nightly from what Otto keeps."},"generatedAt":"2026-11-04T03:00:00Z","graph":{"c":[],"clusters":[]}}"#,
     ]
+
+    /// health.worst.json from the mockup: every number invented.
+    private static let healthWorst = """
+        {"connected":true,"source":"Garmin","syncedAt":"2026-11-20T23:10:00+01:00","day":"2026-11-20","stale":true,"today":{"sleep":null,"bodyBattery":null,"steps":0,"stepGoal":7500,"restingHr":null,"restingHr7d":56},"lastWorkout":null,
+         "days":[
+          {"date":"2026-11-09","sleepHours":6.4,"sleepScore":48,"steps":11240,"bodyBattery":[22,44]},
+          {"date":"2026-11-10","sleepHours":null,"sleepScore":null,"steps":4310,"bodyBattery":[9,58]},
+          {"date":"2026-11-11","sleepHours":6.9,"sleepScore":50,"steps":25480,"bodyBattery":[6,34]},
+          {"date":"2026-11-12","sleepHours":13.2,"sleepScore":100,"steps":7480,"bodyBattery":[5,100]},
+          {"date":"2026-11-13","sleepHours":7.1,"sleepScore":52,"steps":7215,"bodyBattery":[10,46]},
+          {"date":"2026-11-14","sleepHours":9.6,"sleepScore":81,"steps":9340,"bodyBattery":[35,72]},
+          {"date":"2026-11-15","sleepHours":9.2,"sleepScore":66,"steps":1420,"bodyBattery":[31,66]},
+          {"date":"2026-11-16","sleepHours":5.5,"sleepScore":58,"steps":8010,"bodyBattery":[8,23]},
+          {"date":"2026-11-17","sleepHours":6.3,"sleepScore":47,"steps":5630,"bodyBattery":[6,38]},
+          {"date":"2026-11-18","sleepHours":6.8,"sleepScore":49,"steps":10760,"bodyBattery":null},
+          {"date":"2026-11-19","sleepHours":6.0,"sleepScore":45,"steps":6890,"bodyBattery":[6,35]},
+          {"date":"2026-11-20","sleepHours":7.4,"sleepScore":74,"steps":9905,"bodyBattery":[10,48]},
+          {"date":"2026-11-21","sleepHours":9.1,"sleepScore":55,"steps":7260,"bodyBattery":[14,51]},
+          {"date":"2026-11-22","sleepHours":null,"sleepScore":null,"steps":0,"bodyBattery":null}],
+         "activity":[
+          {"date":"2026-11-21","label":"Trail run to the lighthouse and back along the old coast road","km":21.1,"minutes":134,"avgHr":171},
+          {"date":"2026-11-20","label":"14 walks","km":0.1,"minutes":1,"avgHr":null}]}
+        """
 
     private static var calls: String {
         let now = Date().timeIntervalSince1970 * 1000
@@ -133,6 +167,31 @@ enum MockDash {
           {"id":"d3","name":"Dashboard","created":"2026-09-02T10:00:00Z","lastUsed":"2026-09-20T19:00:00Z","scope":"read","origin":"https://dash.example.com","ua":"Chrome on Windows","expires":"2026-10-02T10:00:00Z"}]}
         """,
         "me": #"{"id":"d1"}"#,
+        // health.sample.json from the mockup, heart rate left out (the phone doesn't draw it). Every number invented.
+        "health": """
+        {"connected":true,"source":"Garmin","syncedAt":"2026-11-22T14:52:00+01:00","day":"2026-11-22","stale":false,"today":{"sleep":{"minutes":462,"score":52,"qualifier":"poor","from":"23:41","to":"07:29","stages":{"deep":82,"light":302,"rem":78,"awake":6},"awakeCount":1,"respiration":12,"spo2":91},"bodyBattery":{"now":33,"high":49,"highAt":"07:10","low":33},"steps":3540,"stepGoal":7500,"restingHr":58,"restingHr7d":56},"lastWorkout":{"date":"2026-09-13","label":"Ride","km":1.6,"minutes":22},
+         "days":[
+          {"date":"2026-11-09","sleepHours":6.4,"sleepScore":48,"steps":11240,"bodyBattery":[22,44]},
+          {"date":"2026-11-10","sleepHours":6.0,"sleepScore":45,"steps":4310,"bodyBattery":[9,58]},
+          {"date":"2026-11-11","sleepHours":6.9,"sleepScore":50,"steps":12105,"bodyBattery":[6,34]},
+          {"date":"2026-11-12","sleepHours":6.3,"sleepScore":46,"steps":7480,"bodyBattery":[5,40]},
+          {"date":"2026-11-13","sleepHours":7.1,"sleepScore":52,"steps":7215,"bodyBattery":[10,46]},
+          {"date":"2026-11-14","sleepHours":9.6,"sleepScore":81,"steps":9340,"bodyBattery":[35,72]},
+          {"date":"2026-11-15","sleepHours":9.2,"sleepScore":66,"steps":1420,"bodyBattery":[31,66]},
+          {"date":"2026-11-16","sleepHours":5.5,"sleepScore":58,"steps":8010,"bodyBattery":[8,23]},
+          {"date":"2026-11-17","sleepHours":6.3,"sleepScore":47,"steps":5630,"bodyBattery":[6,38]},
+          {"date":"2026-11-18","sleepHours":6.8,"sleepScore":49,"steps":10760,"bodyBattery":[5,26]},
+          {"date":"2026-11-19","sleepHours":6.0,"sleepScore":45,"steps":6890,"bodyBattery":[6,35]},
+          {"date":"2026-11-20","sleepHours":7.4,"sleepScore":74,"steps":9905,"bodyBattery":[10,48]},
+          {"date":"2026-11-21","sleepHours":9.1,"sleepScore":55,"steps":7260,"bodyBattery":[14,51]},
+          {"date":"2026-11-22","sleepHours":7.7,"sleepScore":52,"steps":3540,"bodyBattery":[33,49]}],
+         "activity":[
+          {"date":"2026-11-22","label":"1 walk","km":1.1,"minutes":12,"avgHr":98},
+          {"date":"2026-11-21","label":"3 walks","km":1.8,"minutes":27,"avgHr":104},
+          {"date":"2026-11-20","label":"2 walks","km":2.4,"minutes":29,"avgHr":118},
+          {"date":"2026-11-19","label":"1 walk","km":1.3,"minutes":16,"avgHr":121},
+          {"date":"2026-11-18","label":"3 walks","km":2.5,"minutes":34,"avgHr":115}]}
+        """,
         "memory/item": #"{"body":"Flat white, **oat milk**. No sugar.\n\nOrders it at Bar Luce most mornings."}"#,
         "proactivity": """
         {"stats":[

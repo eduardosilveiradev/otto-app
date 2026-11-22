@@ -110,6 +110,27 @@ struct Device: Decodable, Identifiable {
     let scope: String?; let origin: String?; let expires: String?; let ua: String?
 }
 
+/// GET health: what the watch sent. `{connected: false}` without a watch; a null reading is no reading, never a zero.
+struct DashHealth: Decodable {
+    /// All the contact card asks before it offers the row. Show-off mode answers `hidden: true` (otto/showoff.ts).
+    struct Probe: Decodable { let connected: Bool; var hidden: Bool? = nil }
+    struct Stages: Decodable { let deep: Int; let light: Int; let rem: Int; let awake: Int }
+    struct Sleep: Decodable {
+        let minutes: Int; let score: Int?; let qualifier: String?; let from: String; let to: String
+        let stages: Stages; let awakeCount: Int?; let respiration: Double?; let spo2: Int?
+    }
+    struct Battery: Decodable { let now: Int }
+    struct Today: Decodable { let sleep: Sleep?; let bodyBattery: Battery?; let steps: Int?; let stepGoal: Int; let restingHr: Int? }
+    struct Day: Decodable { let date: String; let sleepHours: Double?; let steps: Int? }
+    struct Activity: Decodable { let date: String; let label: String; let km: Double; let minutes: Int }
+    let syncedAt: String; let day: String; let stale: Bool
+    let today: Today
+    /// 14 days, oldest first; the last one is `day`.
+    let days: [Day]
+    /// Newest first; walks already rolled up per day.
+    let activity: [Activity]
+}
+
 // MARK: - Calls
 
 extension OttoBackend {
