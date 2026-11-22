@@ -45,6 +45,9 @@ import Foundation
 ///                   and whenever one changes (Jobs.swift). A "message" (and its history row) may carry "jobs":["<job id>"]
 ///                   (or "job", the first of them): each draws as a card under that message. GET /app/jobs is the same list;
 ///                   POST /app/jobs/<answer|steer|stop|merge|resolve> {"id","text"?} acts on one and answers with it.
+///                  {"type":"helpers","helpers":[{"id","label","state":"working"|"done"|"failed","step"?,"startedAt","endedAt"?,"error"?,
+///                   "steps":[{"label","ts"}]}]}   Otto's helpers (subagents), whole: on connect, and on change during and after a turn.
+///                   A done one leaves 6 s after it ended; a failed one stays until we send {"type":"helpers.seen","id"} (Helpers.swift)
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
 ///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
 ///   talk mode, on the same socket (otto-core's otto/talk.ts has the whole protocol; Talk.swift speaks it):
@@ -80,6 +83,7 @@ final class LiveBackend: OttoBackend {
     let openTodoLists: AsyncStream<[TodoItem]>
     let browserTiles: AsyncStream<BrowserTile?>
     let jobLists: AsyncStream<[CodeJob]>
+    let helperLists: AsyncStream<[Helper]>
     let desktopSync: DesktopSync?
     let reads: AsyncStream<[String]>
     let typing: AsyncStream<Bool>
@@ -99,6 +103,7 @@ final class LiveBackend: OttoBackend {
     private let openTodosOut: AsyncStream<[TodoItem]>.Continuation
     private let browserOut: AsyncStream<BrowserTile?>.Continuation
     private let jobsOut: AsyncStream<[CodeJob]>.Continuation
+    private let helpersOut: AsyncStream<[Helper]>.Continuation
     private let readIDs: AsyncStream<[String]>.Continuation
     private let typingOn: AsyncStream<Bool>.Continuation
     private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
@@ -159,6 +164,7 @@ final class LiveBackend: OttoBackend {
         (openTodoLists, openTodosOut) = AsyncStream.makeStream()
         (browserTiles, browserOut) = AsyncStream.makeStream()
         (jobLists, jobsOut) = AsyncStream.makeStream()
+        (helperLists, helpersOut) = AsyncStream.makeStream()
         (reads, readIDs) = AsyncStream.makeStream()
         (typing, typingOn) = AsyncStream.makeStream()
         (approvalUpdates, approvalOut) = AsyncStream.makeStream()
@@ -260,9 +266,12 @@ final class LiveBackend: OttoBackend {
     /// Straight onto the socket, once, with no op. It only means anything inside the Mac's five seconds, so it
     /// is never queued or sent again; and the outbox waits for an ack per frame, which this one never gets:
     /// queued there, the first alert held up every frame behind it (the next approval's alert among them).
-    func alerted(approval id: String) async {
+    func alerted(approval id: String) async { await sendOnce(["type": "approval_alerted", "id": id]) }
+    /// The same way: the sheet says it again each time it opens, so a lost one is sent again then.
+    func seen(helper id: String) async { await sendOnce(["type": "helpers.seen", "id": id]) }
+    private func sendOnce(_ frame: [String: String]) async {
         guard let task = lock.withLock({ socket }),
-              let json = try? JSONSerialization.data(withJSONObject: ["type": "approval_alerted", "id": id]),
+              let json = try? JSONSerialization.data(withJSONObject: frame),
               let s = String(data: json, encoding: .utf8) else { return }
         try? await task.send(.string(s))
     }
@@ -499,6 +508,7 @@ final class LiveBackend: OttoBackend {
             // Here, not below: its `ts` is a number, which WireMessage would refuse.
             if k.type == "browser" { if let f = BrowserFrame(json: data) { browserOut.yield(f.tile) }; return }
             // The coding jobs, whole: on connect when the Mac has them, and whenever one changes.
+            if k.type == "helpers" { if let f = try? JSONDecoder().decode(HelperFrame.self, from: data) { helpersOut.yield(f.helpers) }; return }
             if k.type == "jobs" { if let w = try? JSONDecoder().decode(CodeJobs.self, from: data) { jobsOut.yield(w.jobs) }; return }
             if k.type == "hello" {
                 struct Hello: Decodable { let alerts: [String]?; let stop: Bool? }

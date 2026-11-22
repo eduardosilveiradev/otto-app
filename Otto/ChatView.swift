@@ -53,6 +53,8 @@ struct ChatView: View {
     @State private var browserOpen = ProcessInfo.processInfo.arguments.contains("-browserOpen")
     /// Otto's Chrome tile, in its own thread and only while the server can be heard (a stale one would mislead).
     private var browser: LiveBrowser? { thread.isOtto && thread.connected ? store.browser : nil }
+    /// Otto's helpers, for the rows in its thinking bubble (Helpers.swift).
+    private var helpers: [Helper] { thread.isOtto ? store.helpers : [] }
     /// `-call` (with `-vapiPublicKey`, `-vapiAssistantId` and, in DEBUG, `-vapiHost`): open straight into a web call.
     private var webCall: Binding<Bool> { Binding(get: { CallLauncher.shared.open }, set: { CallLauncher.shared.open = $0 }) }
     /// Calls Otto is placing for you; a live one shows as a banner under the header.
@@ -484,7 +486,7 @@ struct ChatView: View {
                                                     removal: .opacity))
                     }
                     if thread.typing {
-                        Typing(status: thread.typingStatus, todos: thread.typingTodos, connected: thread.connected).padding(.top, 10).id("typing")
+                        Typing(status: thread.typingStatus, todos: thread.typingTodos, helpers: helpers, connected: thread.connected).padding(.top, 10).id("typing")
                             // Touch and hold what Otto is doing to stop it: only with a Mac that can (its hello says so).
                             .contextMenu { stopMenu }
                             .accessibilityActions { stopMenu }
@@ -899,6 +901,10 @@ struct Composer: View {
     @State private var todosOpen = ProcessInfo.processInfo.arguments.contains("-todosOpen")
     /// Otto's open to-dos, over the box while it isn't working; the thinking bubble has them while it is.
     private var todos: [TodoItem] { thread.isOtto && !thread.typing && recorder.started == nil ? store.openTodos : [] }
+    /// Otto's helpers still at it after the reply: the capsule over the box. The bubble has them while Otto works.
+    private var helpers: [Helper] { thread.isOtto && !thread.typing && recorder.started == nil ? store.helpers : [] }
+    private var capsule: Bool { Helper.summary(helpers) != nil }
+    @State private var helpersOpen = false
     /// An approval put off with Later. It needs you, so it takes the to-dos' place until it's answered.
     private var waiting: ApprovalRequest? { thread.isOtto && recorder.started == nil ? store.waitingApproval : nil }
     /// One the Mac let lapse before an answer: said once, in the same place, until tapped away.
@@ -937,8 +943,9 @@ struct Composer: View {
             ApprovalPill(request: waiting, waiting: store.approvals.count { store.hiddenApprovals.contains($0.id) }) { store.reopenApproval(waiting.id) }.transition(.opacity)
         } else if let lapsed {
             ApprovalPill(request: lapsed, lapsed: true) { store.lapsedApproval = nil }.transition(.opacity)
-        } else if !todos.isEmpty {
-            TodoPill(items: todos, open: $todosOpen).transition(.opacity)
+        } else {
+            if capsule { HelperCapsule(helpers: helpers) { helpersOpen = true }.transition(.opacity) }
+            if !todos.isEmpty { TodoPill(items: todos, open: $todosOpen).transition(.opacity) }
         }
         HStack(alignment: .bottom, spacing: 12) {
             if thread.isOtto {
@@ -1034,6 +1041,7 @@ struct Composer: View {
         .animation(.snappy(duration: 0.22), value: mentionMatches.map(\.id))
         .animation(.snappy(duration: 0.22), value: todos)
         .animation(.snappy(duration: 0.22), value: todosOpen)
+        .animation(.snappy(duration: 0.22), value: capsule)
         }
         // Messages pulls the bar in toward the edges while the keyboard is up.
         .padding(.horizontal, focused ? 15 : 27)
@@ -1054,6 +1062,9 @@ struct Composer: View {
         .onChange(of: focused) { ui.focused = focused; if focused { todosOpen = false } }
         .onChange(of: todos) { if todos.isEmpty { todosOpen = false }; ui.relayout() }
         .onChange(of: todosOpen) { ui.relayout() }
+        .onChange(of: capsule) { ui.relayout() }
+        // On the composer, not the capsule: the capsule goes when Otto starts typing or the last one finishes.
+        .sheet(isPresented: $helpersOpen) { HelperSheet() }
         .onChange(of: draft) { ui.relayout() }
         #if DEBUG
         .onChange(of: store.demoDraft) { if let d = store.demoDraft { draft = d } }
@@ -2627,6 +2638,8 @@ struct Typing: View {
     let status: String?
     /// The list Otto is working through, under the step; empty shows nothing.
     var todos: [TodoItem] = []
+    /// Otto's helpers, a row each under the step (Helpers.swift).
+    var helpers: [Helper] = []
     /// Off while the server is unreachable: the orb shows it's reconnecting instead of thinking.
     let connected: Bool
 
@@ -2657,6 +2670,7 @@ struct Typing: View {
                         .contentTransition(.numericText())
                         .transition(.opacity.combined(with: .offset(y: 6)))
                 }
+                if connected && !helpers.isEmpty { HelperList(helpers: helpers).transition(.opacity) }
                 if connected && !todos.isEmpty { TodoList(items: todos).transition(.opacity) }
             }
         }
@@ -2672,6 +2686,7 @@ struct Typing: View {
         // the step and the bubble change at once; these would otherwise override the thread's nil.
         .animation(still ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: status)
         .animation(still ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: todos)
+        .animation(still ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: helpers)
         .animation(still ? nil : .snappy(duration: 0.25), value: connected)
         .onChange(of: status, initial: true) { _, s in if let k = OttoThinkingSpinner.Kind(step: s) { kind = k } }
     }
