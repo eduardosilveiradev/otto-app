@@ -6,7 +6,8 @@ final class BoardModel: ObservableObject {
     enum Mode { case keys, emoji, settings, clipboard }
     /// `retry`: the ask didn't get through and can go again as it was.
     enum Otto: Equatable { case closed, composing, thinking, done(String), failed(String, retry: Bool = false) }
-    struct Suggestion: Hashable { var text: String; var literal = false; var primary = false }
+    /// `code`: the app's login code, inserted as is; `text` then names where it came from.
+    struct Suggestion: Hashable { var text: String; var literal = false; var primary = false; var code: String? = nil }
 
     @Published var mode: Mode = .keys
     @Published var otto: Otto = .closed
@@ -24,14 +25,16 @@ final class BoardModel: ObservableObject {
     var style: KeyStyle { settings.style.followsSystem ? .system(dark: dark) : settings.style }
     /// iOS 26 pads ~16pt above any third-party keyboard, so a 28pt bar puts the keys where Apple's are.
     /// Three slots or none, like iOS: blanks keep the dividers where they belong.
+    /// A login code takes the whole row, as iOS's own AutoFill does.
     var paddedSuggestions: [Suggestion] {
-        suggestions.isEmpty ? [] : Array((suggestions + Array(repeating: Suggestion(text: ""), count: 3)).prefix(3))
+        suggestions.isEmpty || suggestions[0].code != nil ? suggestions : Array((suggestions + Array(repeating: Suggestion(text: ""), count: 3)).prefix(3))
     }
-    /// iOS 27 draws the keyboard as a rounded sheet with no band, so the bar brings its own inset.
+    /// iOS 27 draws the keyboard as a rounded sheet.
     static let sheet = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
-    static let barInset: CGFloat = sheet ? 12 : 0
+    /// Room above the bar where iOS leaves none, so the sheet's top edge and corners don't crowd it (set by the controller).
+    @Published var topInset: CGFloat = 0
     var barHeight: CGFloat {
-        mode == .settings || mode == .emoji || mode == .clipboard ? 0 : (otto == .closed ? 28 : 76) + Self.barInset
+        mode == .settings || mode == .emoji || mode == .clipboard ? 0 : (otto == .closed ? 28 : 76) + topInset
     }
     /// Panels own the bar's space too; settings also get room to breathe instead of a cramped scroll.
     var extraHeight: CGFloat { mode == .settings ? 170 : mode == .keys ? 0 : 28 }
@@ -51,7 +54,8 @@ final class BoardModel: ObservableObject {
     /// Newest first, no repeats, 25 kept.
     func remember(clip: String) {
         let c = clip.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !c.isEmpty else { return }
+        // A login code pasted from the app's drawer stays out of the history.
+        guard !c.isEmpty, c != KeyboardCode.current()?.code else { return }
         clips = Array(([clip] + clips.filter { $0 != clip }).prefix(25))
         UserDefaults.standard.set(clips, forKey: "clipHistory")
     }
@@ -94,7 +98,7 @@ struct TopBar: View {
             else if m.otto == .closed { suggestionRow(s) } else { ottoRows(s) }
         }
         .plainScrollEdges()
-        .padding(.top, BoardModel.barInset)
+        .padding(.top, m.topInset)
         .padding(.horizontal, BoardModel.sheet ? 8 : 0)   // clear of the sheet's curved corners
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(s.text.color)
@@ -120,13 +124,29 @@ struct TopBar: View {
                 ForEach(Array(m.paddedSuggestions.enumerated()), id: \.offset) { i, sug in
                     if i > 0 { Rectangle().fill(s.text.color.opacity(0.18)).frame(width: 1, height: 24) }
                     Button { m.pick(sug) } label: {
-                        Text(sug.literal ? "“\(sug.text)”" : sug.text)
-                            .font(Font(s.uiFont(16, weight: sug.primary ? .semibold : .regular)))
-                            .lineLimit(1).minimumScaleFactor(0.6)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(sug.primary ? RoundedRectangle(cornerRadius: 8).fill(s.key.color.opacity(0.7)).padding(4) : nil)
-                            .contentShape(Rectangle())
+                        Group {
+                            if sug.code != nil {
+                                // Whole if it fits, a size down if that fits, else a long sender gives way before "tap to insert" does.
+                                ViewThatFits(in: .horizontal) {
+                                    Text(sug.text + ": tap to insert")
+                                    Text(sug.text + ": tap to insert").font(Font(s.uiFont(14, weight: .semibold)))
+                                    HStack(spacing: 0) { Text(sug.text); Text(": tap to insert").fixedSize() }
+                                        .font(Font(s.uiFont(14, weight: .semibold)))
+                                }
+                                .padding(.horizontal, 12)
+                            } else {
+                                Text(sug.literal ? "“\(sug.text)”" : sug.text).minimumScaleFactor(0.6)
+                            }
+                        }
+                        .font(Font(s.uiFont(16, weight: sug.primary ? .semibold : .regular)))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(sug.primary ? RoundedRectangle(cornerRadius: 8).fill(s.key.color.opacity(0.7)).padding(4) : nil)
+                        .contentShape(Rectangle())
                     }
+                    // Names the sender, never the digits: VoiceOver can be heard by anyone nearby.
+                    .accessibilityLabel(sug.literal ? "“\(sug.text)”" : sug.text)
+                    .accessibilityHint(sug.code != nil ? "Types the code into this field" : "")
                 }
             }
             .frame(maxWidth: .infinity)   // keeps Otto left and settings right with nothing to suggest

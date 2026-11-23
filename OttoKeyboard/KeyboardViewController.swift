@@ -94,6 +94,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         model.copyField = { [weak self] in self?.copyField() }
         model.toggleDictation = { [weak self] in self?.toggleDictation() }
         DictationBridge.observe(DictationBridge.toKeyboard) { [weak self] in self?.dictationChanged() }
+        DictationBridge.observe(KeyboardCode.changed) { [weak self] in self?.refreshSuggestions() }
         // SwiftUI changes the mode and the Otto state; the UIKit side follows once they've landed.
         DispatchQueue.global(qos: .utility).async { _ = Emoji.categories }   // first tap shouldn't pay for the Unicode scan
         watch = model.$mode.combineLatest(model.$otto).receive(on: DispatchQueue.main)
@@ -115,7 +116,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         }
         refreshContext()
         // Back from the app, possibly in a fresh process: pick up a dictation that finished meanwhile.
+        shown = true
+        handingOff = false
         dictationChanged()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        shown = false
+        // Put away mid-dictation: tell the app to let the mic go. Not when this keyboard is opening Otto to start one.
+        if handingOff { handingOff = false } else if model.dictation == .listening, let id = dictationID {
+            DictationBridge.write(.init(action: .cancel, id: id))
+            DictationBridge.post(DictationBridge.toApp)
+        }
     }
 
     override func viewDidLayoutSubviews() {
@@ -150,6 +163,20 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     func previewApplySettings() { applySettings() }
     func previewSwipe(_ word: String) { swiped(board.demoTrail(through: word)) }
     func previewPress(_ ch: String) { board.demoPress(ch) }
+    func previewZones() {
+        refreshLikely()
+        var out = board.zoneMaps()
+        // What the lean costs: building the word lists (off the main thread) and a lookup per key (on it).
+        let t0 = CACurrentMediaTime()
+        let all = Lexicon(langs: [.en, .it, .pt])
+        out += String(format: "Lexicon(en, it, pt): %.0f ms\n", (CACurrentMediaTime() - t0) * 1000)
+        for p in ["", "s", "co", "pre", "cons"] {
+            let t1 = CACurrentMediaTime()
+            _ = all.nextLetters(after: p)
+            out += "nextLetters(\"\(p)\"): \(String(format: "%.2f", (CACurrentMediaTime() - t1) * 1000)) ms\n"
+        }
+        try? out.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("kbd-zones.txt"), atomically: true, encoding: .utf8)
+    }
     #endif
 
     // MARK: settings and look
@@ -180,7 +207,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         layoutForModel()
     }
 
+    /// iOS 27 pads ~17pt above a third-party keyboard over plain text fields in portrait (Messages, Settings and
+    /// Contacts search, Otto's composer), but not over URL or web-search fields (Safari's address bar, Otto's server
+    /// field) nor in landscape. The bar's own inset on top of iOS's showed as an empty band; where iOS's isn't
+    /// known to be there (other keyboard types are untried), the bar keeps its inset, clear of the sheet's corners.
+    private var iOSPadsAbove: Bool {
+        !BoardModel.sheet || traitCollection.verticalSizeClass != .compact && (textDocumentProxy.keyboardType ?? .default) == .default
+    }
+
     private func layoutForModel() {
+        let inset: CGFloat = iOSPadsAbove ? 0 : 12
+        if model.topInset != inset { model.topInset = inset }
+        // Under iOS's strip the sheet's rounded top is above the view: rounding it too cut notches into a coloured style.
+        if BoardModel.sheet { view.layer.cornerRadius = iOSPadsAbove ? 0 : 34 }
         let newBar = model.barHeight, newHeight = model.barHeight + Self.keysHeight + model.extraHeight
         if newBar != barHeight.constant || newHeight != height.constant {
             barHeight.constant = newBar
@@ -244,6 +283,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         default: "return"
         }
         board.returnIsAccent = board.returnTitle != "return"
+        layoutForModel()   // another field may want the bar's own top inset, or not
         board.extraKeys = switch textDocumentProxy.keyboardType {
         case .emailAddress: ["@", "."]
         case .URL, .webSearch: ["."]
@@ -251,12 +291,27 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         }
         refreshClipboard()
         updateShift()
+        // Out of date the moment the text changes: a lean toward the letter just typed is worse than none.
+        board.likely = [:]
         // Suggestions run the lexicon and the spell checker; once per burst of keys is enough.
         guard !suggestionsQueued else { return }
         suggestionsQueued = true
-        DispatchQueue.main.async { [weak self] in self?.suggestionsQueued = false; self?.refreshSuggestions() }
+        DispatchQueue.main.async { [weak self] in self?.suggestionsQueued = false; self?.refreshSuggestions(); self?.refreshLikely() }
     }
     private var suggestionsQueued = false
+
+    /// Leans the tap zones toward the letters likely next in the word being typed, from the word lists on the
+    /// phone; nothing typed is kept. None where the text isn't words or can't be read.
+    private func refreshLikely() {
+        let t = textDocumentProxy
+        let words: Set<UIKeyboardType> = [.default, .asciiCapable, .twitter]
+        let notWords: Set<UITextContentType> = [.URL, .emailAddress, .username, .password, .newPassword, .oneTimeCode]
+        guard model.otto == .closed, let lex = lexicon, let ctx = t.documentContextBeforeInput,
+              words.contains(t.keyboardType ?? .default), t.isSecureTextEntry != true,
+              (t.textContentType ?? nil).map({ !notWords.contains($0) }) ?? true else { board.likely = [:]; return }
+        // A swiped word's space is still to come, so the next letter starts a word.
+        board.likely = lex.nextLetters(after: pendingSpace ? "" : String(ctx.reversed().prefix { $0.isLetter || $0 == "'" }.reversed()))
+    }
 
     private func updateShift() {
         guard board.shift != .locked else { return }
@@ -281,7 +336,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
             return
         }
         let w = currentWord
-        guard !w.isEmpty else { model.suggestions = []; return }
+        guard !w.isEmpty else { model.suggestions = liveCode().map { [$0] } ?? []; return }
         var out: [BoardModel.Suggestion] = [.init(text: w, literal: true)]
         if model.settings.autocorrect, !keptAsTyped.contains(w.lowercased()), let fix = lex.correction(for: w) {
             out.append(.init(text: matchCase(fix, w), primary: true))
@@ -290,6 +345,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
             out.append(.init(text: matchCase(c, w)))
         }
         model.suggestions = Array(out.prefix(3))
+    }
+
+    private var codeLapse: DispatchWorkItem?
+
+    /// The app's login code while it lasts, checked on every refresh and again the moment it lapses.
+    /// Only with Full Access: without it the keyboard can't clear a code it used, so it doesn't offer one.
+    private func liveCode() -> BoardModel.Suggestion? {
+        codeLapse?.cancel()
+        guard hasFullAccess, let c = KeyboardCode.current() else { return nil }
+        let lapse = DispatchWorkItem { [weak self] in self?.refreshSuggestions() }
+        codeLapse = lapse
+        DispatchQueue.main.asyncAfter(deadline: .now() + c.expires.timeIntervalSinceNow, execute: lapse)
+        return .init(text: c.sender.flatMap { $0.isEmpty ? nil : "Code from \($0)" } ?? "Verification code", primary: true, code: c.code)
     }
 
     private func matchCase(_ word: String, _ typed: String) -> String {
@@ -449,6 +517,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     }
 
     private func pick(_ s: BoardModel.Suggestion) {
+        // Used once: gone for the app and every keyboard before it lands, and never into clip history.
+        if let code = s.code { KeyboardCode.clear(code); insert(code); return }
         if let swipe = lastSwipe, before.hasSuffix(swipe.word) {
             for _ in swipe.word { textDocumentProxy.deleteBackward() }
             textDocumentProxy.insertText(s.text)
@@ -503,6 +573,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         set { UserDefaults.standard.set(newValue, forKey: "dictationID") }
     }
 
+    private var shown = false
+    /// Set while this keyboard is opening Otto to start a dictation, so going away for it doesn't cancel it.
+    private var handingOff = false
+
     private func toggleDictation() {
         guard hasFullAccess else { model.flash = "Needs Allow Full Access"; return }
         if model.dictation == .listening, let id = dictationID {
@@ -514,12 +588,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         dictationID = id
         DictationBridge.write(.init(action: .start, id: id, preceding: String(before.suffix(200)),
                                     langs: model.settings.languages.map(\.rawValue)))
-        if DictationBridge.readState().appIsWarm {
-            DictationBridge.post(DictationBridge.toApp)
-        } else {
-            // iOS won't let a backgrounded app turn the mic on: open it, as Raycast's keyboard does.
-            openContainingApp(DictationBridge.openURL)
-        }
+        // iOS won't let a backgrounded app turn the mic on: open it, as Raycast's keyboard does.
+        handingOff = true
+        openContainingApp(DictationBridge.openURL)
     }
 
     private func dictationChanged() {
@@ -544,6 +615,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         default:
             model.dictation = s.phase
         }
+        // On screen and listening: tell the app someone is still dictating, or it lets the mic go.
+        if shown, model.dictation == .listening { DictationBridge.post(DictationBridge.seen) }
     }
 
     /// Keyboards aren't given `open(_:)`, but the UIApplication at the end of the responder

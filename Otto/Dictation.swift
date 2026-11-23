@@ -6,9 +6,10 @@ import FoundationModels
 #endif
 
 /// The microphone half of the Otto keyboard's dictation (the keyboard can't record; see
-/// Shared/DictationBridge.swift). The keyboard opens `otto://dictate` the first time, the
-/// app starts listening, and they go back to where they were typing. The app stays warm
-/// for `warmFor` afterwards, so the next dictations start without leaving the keyboard.
+/// Shared/DictationBridge.swift). The keyboard opens `otto://dictate`, the app starts
+/// listening, and they go back to where they were typing. The microphone and the audio
+/// session are held only while a dictation records: `begin()` takes them, `end()` gives
+/// them back, and every way a dictation finishes goes through `end()`.
 ///
 /// Cleanup is Gaithano Speak's on the Mac (`/app/dictate`); when the Mac can't answer, the
 /// phone's own recognizer and Apple Intelligence do it with the same prompt.
@@ -16,8 +17,6 @@ import FoundationModels
 final class Dictation: ObservableObject {
     static let shared = Dictation()
     static var active: Bool { shared.engine.isRunning }
-    // ponytail: one fixed warm window; the orange mic dot stays on for it, so keep it short.
-    static let warmFor: TimeInterval = 180
 
     @Published var phase: DictationBridge.State.Phase = .idle
     @Published var showListening = false
@@ -27,14 +26,19 @@ final class Dictation: ObservableObject {
     private var file: AVAudioFile?
     private var fileURL: URL?
     private var request: DictationBridge.Request?
-    private var warmUntil = Date.distantPast
     private var heartbeat: Timer?
+    /// The session as it was before `begin()`; non-nil exactly while dictation holds it.
+    private var prior: (category: AVAudioSession.Category, mode: AVAudioSession.Mode, options: AVAudioSession.CategoryOptions)?
+    private var started = Date.distantPast
+    /// Last time the keyboard (or Otto's own listening screen) was in front of someone.
+    private var seen = Date.distantPast
 
     func setUp() {
         DictationBridge.observe(DictationBridge.toApp) { [weak self] in self?.handleRequest() }
+        DictationBridge.observe(DictationBridge.seen) { [weak self] in self?.seen = Date() }
     }
 
-    /// `otto://dictate`: the keyboard couldn't reach a warm app, so it opened this one.
+    /// `otto://dictate`: the keyboard opened this app to start listening.
     func openedFromKeyboard() {
         showListening = true
         handleRequest()
@@ -58,7 +62,7 @@ final class Dictation: ObservableObject {
         Task {
             guard await AVAudioApplication.requestRecordPermission() else { return publish(.failed, text: "Otto needs the microphone.") }
             do {
-                try warmUp()
+                try begin()
                 let url = FileManager.default.temporaryDirectory.appending(path: "dictation-\(r.id).m4a")
                 let input = engine.inputNode.outputFormat(forBus: 0)
                 file = try AVAudioFile(forWriting: url, settings: [
@@ -68,17 +72,23 @@ final class Dictation: ObservableObject {
                 fileURL = url
                 publish(.listening)
             } catch {
+                end()
                 publish(.failed, text: "Couldn’t start the microphone.")
             }
         }
     }
 
-    private func warmUp() throws {
-        warmUntil = Date().addingTimeInterval(Self.warmFor)
-        guard !engine.isRunning else { return }
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothHFP])
-        try session.setActive(true)
+    /// The only place dictation takes the audio session and the microphone.
+    private func begin() throws {
+        guard prior == nil else { return }
+        let s = AVAudioSession.sharedInstance()
+        prior = (s.category, s.mode, s.categoryOptions)
+        // Record only: with no output side, Otto changes nothing about where other audio plays or how loud.
+        // Other audio pauses while the mic is on; `end()` tells it to resume. HFP so AirPods' mics work.
+        try s.setCategory(.record, mode: .default, options: [.allowBluetoothHFP])
+        try s.setActive(true)
+        started = Date()
+        seen = started
         let input = engine.inputNode
         input.installTap(onBus: 0, bufferSize: 2048, format: input.outputFormat(forBus: 0)) { [weak self] buf, _ in
             let peak = (0..<Int(buf.frameLength)).reduce(Float(0)) { max($0, abs(buf.floatChannelData![0][$1])) }
@@ -95,33 +105,36 @@ final class Dictation: ObservableObject {
         beat()
     }
 
-    /// Tells the keyboard the app can start without being opened, and cools down when idle long enough.
-    private func beat() {
-        if file == nil, Date() > warmUntil { return coolDown() }
-        var s = DictationBridge.readState()
-        s.alive = Date().timeIntervalSince1970
-        s.level = level
-        DictationBridge.write(s)
-        if file != nil { DictationBridge.post(DictationBridge.toKeyboard) }
-    }
-
-    private func coolDown() {
+    /// The only place dictation gives the session and the microphone back. Safe to call twice.
+    private func end() {
+        guard let prior else { return }
+        self.prior = nil
         heartbeat?.invalidate()
         heartbeat = nil
         engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        engine.stop()   // before deactivating: a session with I/O still running won't let go
+        let s = AVAudioSession.sharedInstance()
+        try? s.setActive(false, options: .notifyOthersOnDeactivation)
+        try? s.setCategory(prior.category, mode: prior.mode, options: prior.options)
+        Keepalive.update(background: UIApplication.shared.applicationState == .background)
+    }
+
+    /// Feeds the keyboard's level meter, and finishes a recording nobody is attending to.
+    private func beat() {
+        let now = Date()
+        if UIApplication.shared.applicationState != .background { seen = now }
+        if DictationBridge.shouldEnd(now: now, started: started, seen: seen, micRunning: engine.isRunning) { return stop() }
         var s = DictationBridge.readState()
-        s.alive = 0
+        s.level = level
         DictationBridge.write(s)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        Keepalive.update(background: UIApplication.shared.applicationState != .active)
+        DictationBridge.post(DictationBridge.toKeyboard)
     }
 
     private func stop() {
+        end()
         guard let url = fileURL, let r = request else { showListening = false; return }   // nothing was recording: the screen goes all the same
         file = nil            // closes the file
         fileURL = nil
-        warmUntil = Date().addingTimeInterval(Self.warmFor)
         publish(.working)
         Task {
             let text = await Self.transcribe(url, preceding: r.preceding, langs: r.langs)
@@ -132,6 +145,7 @@ final class Dictation: ObservableObject {
     }
 
     private func cancel() {
+        end()
         file = nil
         if let url = fileURL { try? FileManager.default.removeItem(at: url) }
         fileURL = nil
@@ -145,8 +159,7 @@ final class Dictation: ObservableObject {
     private func publish(_ p: DictationBridge.State.Phase, text: String? = nil) {
         phase = p
         if p == .failed { showListening = false }   // the microphone refused or wouldn't start: no screen to be stuck on
-        DictationBridge.write(.init(phase: p, id: request?.id, text: text, level: level,
-                                    alive: engine.isRunning ? Date().timeIntervalSince1970 : 0))
+        DictationBridge.write(.init(phase: p, id: request?.id, text: text, level: level))
         DictationBridge.post(DictationBridge.toKeyboard)
     }
 
