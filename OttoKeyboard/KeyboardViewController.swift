@@ -115,7 +115,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         }
         refreshContext()
         // Back from the app, possibly in a fresh process: pick up a dictation that finished meanwhile.
+        shown = true
+        handingOff = false
         dictationChanged()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        shown = false
+        // Put away mid-dictation: tell the app to let the mic go. Not when this keyboard is opening Otto to start one.
+        if handingOff { handingOff = false } else if model.dictation == .listening, let id = dictationID {
+            DictationBridge.write(.init(action: .cancel, id: id))
+            DictationBridge.post(DictationBridge.toApp)
+        }
     }
 
     override func viewDidLayoutSubviews() {
@@ -545,6 +557,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         set { UserDefaults.standard.set(newValue, forKey: "dictationID") }
     }
 
+    private var shown = false
+    /// Set while this keyboard is opening Otto to start a dictation, so going away for it doesn't cancel it.
+    private var handingOff = false
+
     private func toggleDictation() {
         guard hasFullAccess else { model.flash = "Needs Allow Full Access"; return }
         if model.dictation == .listening, let id = dictationID {
@@ -556,12 +572,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         dictationID = id
         DictationBridge.write(.init(action: .start, id: id, preceding: String(before.suffix(200)),
                                     langs: model.settings.languages.map(\.rawValue)))
-        if DictationBridge.readState().appIsWarm {
-            DictationBridge.post(DictationBridge.toApp)
-        } else {
-            // iOS won't let a backgrounded app turn the mic on: open it, as Raycast's keyboard does.
-            openContainingApp(DictationBridge.openURL)
-        }
+        // iOS won't let a backgrounded app turn the mic on: open it, as Raycast's keyboard does.
+        handingOff = true
+        openContainingApp(DictationBridge.openURL)
     }
 
     private func dictationChanged() {
@@ -586,6 +599,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         default:
             model.dictation = s.phase
         }
+        // On screen and listening: tell the app someone is still dictating, or it lets the mic go.
+        if shown, model.dictation == .listening { DictationBridge.post(DictationBridge.seen) }
     }
 
     /// Keyboards aren't given `open(_:)`, but the UIApplication at the end of the responder
