@@ -24,11 +24,17 @@ struct StudySet: Codable {
     /// Where you got to, kept on this phone only (a second device starts at the beginning).
     func progress(in d: UserDefaults = .standard) -> StudyProgress {
         let fresh = StudyProgress(size: [cards.count, quiz.count])
+        #if DEBUG
+        if Self.debugOpen != nil { return fresh }   // screenshots: each `-studyOpen` state starts clean
+        #endif
         guard let data = d.data(forKey: key), let p = try? JSONDecoder().decode(StudyProgress.self, from: data),
               p.size == fresh.size else { return fresh }   // counts that don't match would index past the end
         return p
     }
     func save(_ p: StudyProgress, in d: UserDefaults = .standard) {
+        #if DEBUG
+        if Self.debugOpen != nil { return }
+        #endif
         // ponytail: one small entry per set ever opened, never pruned; prune by age if it ever matters.
         d.set(try? JSONEncoder().encode(p), forKey: key)
     }

@@ -10,7 +10,8 @@ T=$(mktemp -d)/check.swift
   sed -n '/^struct StudySet: Codable/,/^}/p' Otto/Study.swift
   sed -n '/^struct StudyProgress: Codable/,/^}/p; /^struct CardsRun: Codable/,/^}/p; /^struct QuizRun: Codable/,/^}/p' Otto/Study.swift
   cat <<'SWIFT'
-let d = UserDefaults(suiteName: "study-check-\(UUID())")!
+let d = UserDefaults(suiteName: "dev.otto.study-check")!
+d.removePersistentDomain(forName: "dev.otto.study-check")
 let j = #"{"title":"Tiny","cards":[{"front":"1+1","back":"2"},{"front":"2+2","back":"4"}],"quiz":[{"q":"3+3?","options":["5","6"],"answer":1}]}"#
 let reordered = #"{ "quiz":[{"answer":1,"options":["5","6"],"q":"3+3?"}],  "cards":[{"back":"2","front":"1+1"},{"back":"4","front":"2+2"}], "title":"Tiny" }"#
 let edited = j.replacingOccurrences(of: #""4""#, with: #""5""#)
@@ -52,3 +53,4 @@ print("study progress ok")
 SWIFT
 } > "$T"
 swift "$T"
+defaults delete dev.otto.study-check >/dev/null 2>&1 || true   # the throwaway suite the check wrote
