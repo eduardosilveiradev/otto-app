@@ -94,6 +94,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         model.copyField = { [weak self] in self?.copyField() }
         model.toggleDictation = { [weak self] in self?.toggleDictation() }
         DictationBridge.observe(DictationBridge.toKeyboard) { [weak self] in self?.dictationChanged() }
+        DictationBridge.observe(KeyboardCode.changed) { [weak self] in self?.refreshSuggestions() }
         // SwiftUI changes the mode and the Otto state; the UIKit side follows once they've landed.
         DispatchQueue.global(qos: .utility).async { _ = Emoji.categories }   // first tap shouldn't pay for the Unicode scan
         watch = model.$mode.combineLatest(model.$otto).receive(on: DispatchQueue.main)
@@ -335,7 +336,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
             return
         }
         let w = currentWord
-        guard !w.isEmpty else { model.suggestions = []; return }
+        guard !w.isEmpty else { model.suggestions = liveCode().map { [$0] } ?? []; return }
         var out: [BoardModel.Suggestion] = [.init(text: w, literal: true)]
         if model.settings.autocorrect, !keptAsTyped.contains(w.lowercased()), let fix = lex.correction(for: w) {
             out.append(.init(text: matchCase(fix, w), primary: true))
@@ -344,6 +345,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
             out.append(.init(text: matchCase(c, w)))
         }
         model.suggestions = Array(out.prefix(3))
+    }
+
+    private var codeLapse: DispatchWorkItem?
+
+    /// The app's login code while it lasts, checked on every refresh and again the moment it lapses.
+    /// Only with Full Access: without it the keyboard can't clear a code it used, so it doesn't offer one.
+    private func liveCode() -> BoardModel.Suggestion? {
+        codeLapse?.cancel()
+        guard hasFullAccess, let c = KeyboardCode.current() else { return nil }
+        let lapse = DispatchWorkItem { [weak self] in self?.refreshSuggestions() }
+        codeLapse = lapse
+        DispatchQueue.main.asyncAfter(deadline: .now() + c.expires.timeIntervalSinceNow, execute: lapse)
+        return .init(text: c.sender.flatMap { $0.isEmpty ? nil : "Code from \($0)" } ?? "Verification code", primary: true, code: c.code)
     }
 
     private func matchCase(_ word: String, _ typed: String) -> String {
@@ -503,6 +517,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     }
 
     private func pick(_ s: BoardModel.Suggestion) {
+        // Used once: gone for the app and every keyboard before it lands, and never into clip history.
+        if let code = s.code { KeyboardCode.clear(code); insert(code); return }
         if let swipe = lastSwipe, before.hasSuffix(swipe.word) {
             for _ in swipe.word { textDocumentProxy.deleteBackward() }
             textDocumentProxy.insertText(s.text)
