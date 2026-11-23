@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 /// A study set Otto sends as a `<name>.study.json` attachment: cards to flip and a quiz,
 /// both written from the user's own textbook page. Finishing one texts Otto the result,
@@ -12,6 +13,31 @@ struct StudySet: Codable {
     let quiz: [Question]
 
     static func isStudy(_ f: RemoteFile) -> Bool { f.name.hasSuffix(".study.json") }
+
+    /// The set's identity: a hash of its content, so the same set sent again shares its progress
+    /// and an edited one starts fresh.
+    var key: String {
+        let e = JSONEncoder(); e.outputFormatting = .sortedKeys
+        return "otto.study." + SHA256.hash(data: (try? e.encode(self)) ?? Data()).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Where you got to, kept on this phone only (a second device starts at the beginning).
+    func progress(in d: UserDefaults = .standard) -> StudyProgress {
+        let fresh = StudyProgress(size: [cards.count, quiz.count])
+        #if DEBUG
+        if Self.debugOpen != nil { return fresh }   // screenshots: each `-studyOpen` state starts clean
+        #endif
+        guard let data = d.data(forKey: key), let p = try? JSONDecoder().decode(StudyProgress.self, from: data),
+              p.size == fresh.size else { return fresh }   // counts that don't match would index past the end
+        return p
+    }
+    func save(_ p: StudyProgress, in d: UserDefaults = .standard) {
+        #if DEBUG
+        if Self.debugOpen != nil { return }
+        #endif
+        // ponytail: one small entry per set ever opened, never pruned; prune by age if it ever matters.
+        d.set(try? JSONEncoder().encode(p), forKey: key)
+    }
 
     #if DEBUG
     /// For screenshots: `-studyThread` serves it, `-studyOpen cards|flipped|quiz` opens it on that pane.
@@ -42,15 +68,19 @@ struct StudyBubble: View {
     @State private var failed = false
     @State private var tries = 0
     @State private var open = false
+    @State private var progress = StudyProgress()
     /// The bubble grows into the set and shrinks back into place (the contact card's zoom).
     @Namespace private var zoom
 
     var body: some View {
-        Button { if set == nil { tries += 1 } else { open = true } } label: {
+        Button {
+            // Re-read: the same set sent twice is two bubbles, and the other one may have moved on.
+            if let set { progress = set.progress(); open = true } else { tries += 1 }
+        } label: {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
                     CardHead(symbol: "book", kind: String(localized: "Study set")) {
-                        if let set { Text(count(set)).font(size: 13, relativeTo: .footnote).lineLimit(1) }
+                        if let set { Text(hint(set)).font(size: 13, relativeTo: .footnote).lineLimit(1) }
                     }
                     Text(set?.title ?? (missing ? "No longer available" : "Study set"))
                         .font(size: 16, weight: .semibold, relativeTo: .callout).lineLimit(2).multilineTextAlignment(.leading).padding(.top, 6)
@@ -79,6 +109,7 @@ struct StudyBubble: View {
             do {
                 guard let d = try await store.backend.file(file.id) else { missing = true; return }
                 set = try? JSONDecoder().decode(StudySet.self, from: d)
+                if let set { progress = set.progress() }
                 failed = set == nil   // a file it can't read isn't gone either
                 #if DEBUG
                 open = set != nil && StudySet.debugOpen != nil
@@ -86,7 +117,17 @@ struct StudyBubble: View {
             } catch { failed = !Task.isCancelled }
         }
         .onChange(of: store.connected) { if store.connected && failed { tries += 1 } }
-        .fullScreenCover(isPresented: $open) { if let set { StudyView(set: set).navigationTransition(.zoom(sourceID: file.id, in: zoom)) } }
+        .fullScreenCover(isPresented: $open) { if let set { StudyView(set: set, progress: $progress).navigationTransition(.zoom(sourceID: file.id, in: zoom)) } }
+    }
+
+    /// Where you got to, once you've started; what's in it before that.
+    private func hint(_ s: StudySet) -> String {
+        let c = progress.cards, q = progress.quiz
+        let cards = c.seen == 0 ? nil : c.queue?.isEmpty == true ? "\(s.cards.count) of \(s.cards.count) known" : "card \(c.known.count + 1) of \(s.cards.count)"
+        let quiz = q.answered.isEmpty ? nil : q.at >= s.quiz.count
+            ? "quiz \(q.answered.filter { s.quiz[$0.key].answer == $0.value }.count)/\(s.quiz.count)"
+            : "question \(q.at + 1) of \(s.quiz.count)"
+        return (progress.mode == 1 ? quiz ?? cards : cards ?? quiz) ?? count(s)
     }
 
     private func count(_ s: StudySet) -> String {
@@ -99,38 +140,53 @@ struct StudyView: View {
     @Environment(OttoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let set: StudySet
-    @State private var mode = 0
-    @State private var cards = CardsRun()
-    @State private var quiz = QuizRun()
+    @Binding var progress: StudyProgress
+    @State private var confirmReset = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 if !set.cards.isEmpty && !set.quiz.isEmpty {
-                    Picker("", selection: $mode) { Text("Cards").tag(0); Text("Quiz").tag(1) }
+                    Picker("", selection: $progress.mode) { Text("Cards").tag(0); Text("Quiz").tag(1) }
                         .pickerStyle(.segmented).padding(.horizontal).padding(.bottom, 8)
                 }
-                if mode == 0 && !set.cards.isEmpty { CardsPane(cards: set.cards, run: $cards) }
-                else { QuizPane(quiz: set.quiz, run: $quiz) }
+                if progress.mode == 0 && !set.cards.isEmpty { CardsPane(cards: set.cards, run: $progress.cards) }
+                else { QuizPane(quiz: set.quiz, run: $progress.quiz) }
             }
             .navigationTitle(set.title).navigationBarTitleDisplayMode(.inline)
             #if DEBUG
             .onAppear {
-                if StudySet.debugOpen == "flipped" { cards.flipped = true }
-                if StudySet.debugOpen == "quiz" { mode = 1; quiz.answered[0] = 0 }
+                if StudySet.debugOpen == "flipped" { progress.cards.flipped = true }
+                if StudySet.debugOpen == "quiz" { progress.mode = 1; progress.quiz.answered[0] = 0 }
             }
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                // Up here, away from Again and Knew it, and it asks first: it's the one tap that loses your place.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Start over", systemImage: "arrow.counterclockwise") { confirmReset = true }
+                        .disabled(progress.isEmpty)
+                        .confirmationDialog("Start this set over?", isPresented: $confirmReset, titleVisibility: .visible) {
+                            Button("Start over", role: .destructive) { progress = StudyProgress(mode: progress.mode, size: progress.size) }
+                        } message: { Text("Your place in the cards and the quiz is cleared.") }
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { report(); dismiss() }.bold().disabled(cards.seen == 0 && quiz.answered.isEmpty)
+                    Button("Done") {
+                        // A finished set reopens on its result: Done again sends nothing new.
+                        let r = report()
+                        if r != progress.sent { store.send(r); progress.sent = r }
+                        dismiss()
+                    }.bold().disabled(progress.isEmpty)
                 }
             }
         }
+        // Saved on every change, so a swipe down or the app being killed loses nothing.
+        .onChange(of: progress) { set.save(progress) }
     }
 
     /// One line back to Otto: the score and exactly what to go over again.
-    private func report() {
+    private func report() -> String {
+        let cards = progress.cards, quiz = progress.quiz
         var parts: [String] = []
         if cards.seen > 0 { parts.append("cards \(cards.known.count)/\(set.cards.count)") }
         if !quiz.answered.isEmpty {
@@ -138,16 +194,29 @@ struct StudyView: View {
         }
         let weak = cards.missed.map { set.cards[$0].front }
             + quiz.answered.filter { set.quiz[$0.key].answer != $0.value }.keys.sorted().map { set.quiz[$0].q }
-        store.send("📚 \(set.title): \(parts.joined(separator: ", "))" + (weak.isEmpty ? "" : "\nto review: " + weak.joined(separator: " · ")))
+        return ("📚 \(set.title): \(parts.joined(separator: ", "))" + (weak.isEmpty ? "" : "\nto review: " + weak.joined(separator: " · ")))
     }
 }
 
-struct CardsRun {
+/// Everything about a set you'd want back after closing it. Which side of a card is up isn't kept.
+struct StudyProgress: Codable, Equatable {
+    var mode = 0
+    var cards = CardsRun()
+    var quiz = QuizRun()
+    /// The card and question counts it was saved against.
+    var size: [Int] = []
+    /// The last result Done sent to Otto.
+    var sent: String? = nil
+    var isEmpty: Bool { cards.seen == 0 && quiz.answered.isEmpty }
+}
+
+struct CardsRun: Codable, Equatable {
     var queue: [Int]? = nil
     var flipped = false
     var known: Set<Int> = []
     var missed: Set<Int> = []
     var seen: Int { known.count + missed.count }
+    private enum CodingKeys: String, CodingKey { case queue, known, missed }
 }
 
 /// Flip a card, then say whether you knew it. Missed cards come back three cards later
@@ -225,7 +294,7 @@ private struct CardsPane: View {
     }
 }
 
-struct QuizRun {
+struct QuizRun: Codable, Equatable {
     var at = 0
     var answered: [Int: Int] = [:]
 }
