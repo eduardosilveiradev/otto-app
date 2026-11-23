@@ -30,9 +30,11 @@ final class KeyboardView: UIView {
     var extraKeys: [String] = [] { didSet { if extraKeys != oldValue { rebuild() } } }
     var swipeEnabled = true
     var popupsEnabled = true
+    /// How likely each letter is to come next, 0...1 (the likeliest is 1); empty for no bias. Grows likely keys' tap zones.
+    var likely: [Character: CGFloat] = [:]
 
     private var keys: [KeyView] = []
-    private var rowFrames: [CGRect] = []
+    private var rows: [[KeyView]] = []
     private let trail = SwipeTrail()
 
     private let gap: CGFloat = 6, rowGap: CGFloat = 11, side: CGFloat = 3, top: CGFloat = 8
@@ -40,6 +42,9 @@ final class KeyboardView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         isMultipleTouchEnabled = true
+        // iOS drops a keyboard's touches on fully transparent pixels, so with the system style's clear backdrop
+        // every gap between keys was dead. A fill nobody can see makes the whole board take them.
+        backgroundColor = UIColor.black.withAlphaComponent(0.001)
         addSubview(trail)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -66,11 +71,10 @@ final class KeyboardView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         trail.frame = bounds
-        let rows = Dictionary(grouping: keys, by: \.row).sorted { $0.key < $1.key }.map(\.value)
+        rows = Dictionary(grouping: keys, by: \.row).sorted { $0.key < $1.key }.map(\.value)
         guard !rows.isEmpty else { return }
         let rowH = (bounds.height - top - 4 - rowGap * CGFloat(rows.count - 1)) / CGFloat(rows.count)
         let unit = (bounds.width - 2 * side - 9 * gap) / 10
-        rowFrames = []
         for (r, row) in rows.enumerated() {
             let y = top + CGFloat(r) * (rowH + rowGap)
             let charW = row.filter(\.isChar).reduce(0) { $0 + $1.def.width * unit }
@@ -83,7 +87,6 @@ final class KeyboardView: UIView {
                 k.frame = CGRect(x: x, y: y, width: w, height: rowH).integral
                 x += w + gap
             }
-            rowFrames.append(CGRect(x: 0, y: y - rowGap / 2, width: bounds.width, height: rowH + rowGap))
         }
     }
 
@@ -95,11 +98,12 @@ final class KeyboardView: UIView {
     }
     var unitWidth: CGFloat { keys.first(where: \.isChar)?.bounds.width ?? 32 }
 
-    /// The key under a point: the row by height, then the nearest key in it, so the gaps type too.
-    private func key(at p: CGPoint) -> KeyView? {
-        let r: Int
-        if let i = rowFrames.firstIndex(where: { p.y < $0.maxY }) { r = i } else { r = rowFrames.count - 1 }
-        return keys.filter { $0.row == r }.min { abs($0.frame.midX - p.x) - $0.frame.width / 2 < abs($1.frame.midX - p.x) - $1.frame.width / 2 }
+    /// The key a point means: the nearest one, so gaps, margins and the strips above and below the keys all type,
+    /// leaning toward letters likely to come next (see `Layout.hit`).
+    func key(at p: CGPoint, biased: Bool = true) -> KeyView? {
+        let lean = biased && page == .letters && !likely.isEmpty
+            ? rows.map { $0.map { k in k.isLetter ? likely[k.letter] ?? 0 : 0 } } : []
+        return Layout.hit(p, rows: rows.map { $0.map(\.frame) }, likely: lean).map { rows[$0.row][$0.key] }
     }
 
     // MARK: touches
@@ -113,19 +117,21 @@ final class KeyboardView: UIView {
         var timer: Timer?
         var lastX: CGFloat
         var repeats = 0
-        init(key: KeyView, at p: CGPoint) { self.key = key; path = [p]; start = p; lastX = p.x }
+        let time: TimeInterval
+        init(key: KeyView, at p: CGPoint, time: TimeInterval) { self.key = key; path = [p]; start = p; lastX = p.x; self.time = time }
     }
     private var tracks: [UITouch: Track] = [:]
     private var popup: KeyPopup?
     private var lastShiftTap: Date?
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        // A new finger lands while another is still down: the earlier tap is meant, fire it now (rollover).
-        for (t, tr) in tracks where tr.mode == .tap { fire(tr); tr.mode = .done; tracks[t] = tr }
-        for t in touches {
+        // A new finger lands while another is still down: the earlier tap is meant, fire it now (rollover),
+        // oldest first so two thumbs never swap letters.
+        for tr in tracks.values.filter({ $0.mode == .tap }).sorted(by: { $0.time < $1.time }) { fire(tr); tr.mode = .done }
+        for t in touches.sorted(by: { $0.timestamp < $1.timestamp }) {
             let p = t.location(in: self)
             guard let k = key(at: p) else { continue }
-            let tr = Track(key: k, at: p)
+            let tr = Track(key: k, at: p, time: t.timestamp)
             tracks[t] = tr
             delegate?.keyDown()
             k.pressed = true
@@ -187,7 +193,7 @@ final class KeyboardView: UIView {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        for t in touches {
+        for t in touches.sorted(by: { (tracks[$0]?.time ?? 0) < (tracks[$1]?.time ?? 0) }) {
             guard let tr = tracks.removeValue(forKey: t) else { continue }
             tr.timer?.invalidate()
             tr.key.pressed = false
@@ -284,6 +290,7 @@ final class KeyView: UIView {
 
     var isChar: Bool { if case .char = def.kind { true } else { false } }
     var isLetter: Bool { if case .char(let s) = def.kind { s.first?.isLetter == true } else { false } }
+    var letter: Character { if case .char(let s) = def.kind, let c = s.first { c } else { " " } }
     var pressed = false { didSet { paint() } }
     var dimmed = false { didSet { UIView.animate(withDuration: 0.15) { self.label.alpha = self.dimmed ? 0 : 1; self.icon.alpha = self.dimmed ? 0 : 1 } } }
 

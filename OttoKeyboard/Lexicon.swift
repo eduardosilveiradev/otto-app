@@ -15,6 +15,8 @@ final class Lexicon {
     private(set) var byWord: [String: Entry] = [:]          // folded form ("dont", "perche") → entry
     private var byEnds: [String: [Entry]] = [:]             // first+last key → entries, for swipes
     private var sorted: [String] = []                       // every word, for prefix completions
+    private var sortedRanks: [Int] = []                     // each sorted word's rank
+    private var short: [String: [Character: CGFloat]] = [:] // nextLetters for prefixes up to two letters, worked out once
     private var exact = Set<String>()                       // every word as spelled, marks included
     private let checker = UITextChecker()
 
@@ -36,7 +38,37 @@ final class Lexicon {
         for e in byWord.values where e.keys.count >= 2 {
             byEnds[String([e.keys.first!, e.keys.last!]), default: []].append(e)
         }
-        sorted = byWord.values.map(\.word).sorted()
+        let all = byWord.values.sorted { $0.word < $1.word }
+        sorted = all.map(\.word)
+        sortedRanks = all.map(\.rank)
+        // The long scans, a word's first two letters, read thousands of words: done here, off the main thread, not per key.
+        for p in Set(sorted.flatMap { ["", String($0.prefix(1)), String($0.prefix(2))] }) { short[p] = scanNext(p) }
+    }
+
+    /// How likely each letter key is to come next after `prefix`, the word typed so far, weighing the words that
+    /// continue it by how common they are; the likeliest is 1. Empty when no known word continues it, so a name or a
+    /// word the lists don't have gets no lean at all.
+    func nextLetters(after prefix: String) -> [Character: CGFloat] {
+        let p = prefix.lowercased()
+        return short[p] ?? scanNext(p)
+    }
+
+    private func scanNext(_ p: String) -> [Character: CGFloat] {
+        var w: [Character: CGFloat] = [:]
+        var i = lowerBound(p)
+        while i < sorted.count, sorted[i].hasPrefix(p) {
+            // Rank stands in for frequency (Zipf); +10 keeps the top few words from drowning the rest.
+            if let c = sorted[i].dropFirst(p.count).first, c != "'" { w[Layout.base(c), default: 0] += 1 / CGFloat(sortedRanks[i] + 10) }
+            i += 1
+        }
+        let top = w.values.max() ?? 0
+        return top > 0 ? w.mapValues { $0 / top } : [:]
+    }
+
+    private func lowerBound(_ p: String) -> Int {
+        var lo = 0, hi = sorted.count
+        while lo < hi { let mid = (lo + hi) / 2; if sorted[mid] < p { lo = mid + 1 } else { hi = mid } }
+        return lo
     }
 
     /// Lowercased, apostrophes dropped: what a word looks like typed without them.
@@ -64,10 +96,8 @@ final class Lexicon {
     func completions(_ prefix: String, limit: Int = 3) -> [String] {
         let p = prefix.lowercased()
         guard !p.isEmpty else { return [] }
-        var lo = 0, hi = sorted.count
-        while lo < hi { let mid = (lo + hi) / 2; if sorted[mid] < p { lo = mid + 1 } else { hi = mid } }
         var found: [Entry] = []
-        var i = lo
+        var i = lowerBound(p)
         while i < sorted.count, sorted[i].hasPrefix(p), found.count < 400 {
             if sorted[i] != p, let e = byWord[Self.fold(sorted[i])] { found.append(e) }
             i += 1
