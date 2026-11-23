@@ -21,16 +21,25 @@ enum DictationBridge {
         var id: String?
         var text: String?
         var level: Float = 0
-        /// Epoch seconds the app last said it was listening-ready. Stale means the
-        /// keyboard has to open the app to start, because iOS won't let a backgrounded
-        /// app turn the microphone on.
-        var alive: Double = 0
-
-        var appIsWarm: Bool { Date().timeIntervalSince1970 - alive < 4 }
     }
 
     static let toApp = "dev.otto.dictate.request"
     static let toKeyboard = "dev.otto.dictate.state"
+    /// The keyboard, on screen and listening, answers each of the app's heartbeats with this.
+    static let seen = "dev.otto.dictate.seen"
+
+    // ponytail: fixed limits; raise `longest` if real dictations run past it.
+    /// Longest a dictation records before the app finishes it by itself.
+    static let longest: TimeInterval = 600
+    /// How long a recording may go with neither the keyboard nor Otto in front of anyone (they're
+    /// back in the app they type in within a second or two; a keyboard that was killed never answers).
+    static let unseen: TimeInterval = 10
+
+    /// Whether the app should finish a recording without being asked: the mic stopped under it
+    /// (a call, Siri, a route change), it ran too long, or nobody has been looking at it.
+    static func shouldEnd(now: Date, started: Date, seen: Date, micRunning: Bool) -> Bool {
+        !micRunning || now.timeIntervalSince(started) > longest || now.timeIntervalSince(seen) > unseen
+    }
     static let openURL = URL(string: "otto://dictate")!
 
     static func write(_ r: Request) { put("request", r) }
