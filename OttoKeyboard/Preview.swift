@@ -35,6 +35,10 @@ extension KeyboardViewController {
                     }
                 }
             }
+            if c == "zones" {
+                // The tap zones as text, after the lexicon and the lean have landed.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in previewZones() }
+            }
             if c.hasPrefix("press:") {
                 let ch = String(c.dropFirst(6))
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in previewPress(ch) }
@@ -50,6 +54,29 @@ extension KeyboardViewController {
 }
 
 extension KeyboardView {
+    /// The key every point types, one character per 8×6pt cell across the whole board, without and with the lean
+    /// toward likely letters, and the cells the lean changed. Written to the keyboard's tmp/kbd-zones.txt.
+    func zoneMaps() -> String {
+        func glyph(_ k: KeyView?) -> String {
+            switch k?.def.kind {
+            case .char(let s)?: s
+            case .shift?: "^"; case .delete?: "<"; case .space?: "_"; case .ret?: ">"; case .page?: "#"
+            case .globe?: "@"; case .emoji?: ":"; case .otto?: "*"; case nil: "?"
+            }
+        }
+        func map(_ biased: Bool) -> [[String]] {
+            stride(from: CGFloat(3), to: bounds.height, by: 6).map { y in
+                stride(from: CGFloat(4), to: bounds.width, by: 8).map { x in glyph(key(at: CGPoint(x: x, y: y), biased: biased)) }
+            }
+        }
+        let plain = map(false), lean = map(true)
+        let diff = zip(plain, lean).map { zip($0, $1).map { $0 == $1 ? "." : $1 } }
+        let likely = self.likely.sorted { $0.value > $1.value }.prefix(6).map { "\($0.key) \(String(format: "%.2f", $0.value))" }
+        return "board \(Int(bounds.width))x\(Int(bounds.height))pt, one cell = 8x6pt\n\nno lean:\n" + plain.map { $0.joined() }.joined(separator: "\n")
+            + "\n\nlean (likeliest: \(likely.joined(separator: ", "))):\n" + lean.map { $0.joined() }.joined(separator: "\n")
+            + "\n\ncells the lean moved:\n" + diff.map { $0.joined() }.joined(separator: "\n") + "\n"
+    }
+
     func demoPress(_ ch: String) {
         guard let k = subviews.compactMap({ $0 as? KeyView }).first(where: { $0.def.kind == .char(ch) }) else { return }
         showPopup(for: k)

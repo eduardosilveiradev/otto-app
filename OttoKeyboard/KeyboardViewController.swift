@@ -151,6 +151,20 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
     func previewApplySettings() { applySettings() }
     func previewSwipe(_ word: String) { swiped(board.demoTrail(through: word)) }
     func previewPress(_ ch: String) { board.demoPress(ch) }
+    func previewZones() {
+        refreshLikely()
+        var out = board.zoneMaps()
+        // What the lean costs: building the word lists (off the main thread) and a lookup per key (on it).
+        let t0 = CACurrentMediaTime()
+        let all = Lexicon(langs: [.en, .it, .pt])
+        out += String(format: "Lexicon(en, it, pt): %.0f ms\n", (CACurrentMediaTime() - t0) * 1000)
+        for p in ["", "s", "co", "pre", "cons"] {
+            let t1 = CACurrentMediaTime()
+            _ = all.nextLetters(after: p)
+            out += "nextLetters(\"\(p)\"): \(String(format: "%.2f", (CACurrentMediaTime() - t1) * 1000)) ms\n"
+        }
+        try? out.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("kbd-zones.txt"), atomically: true, encoding: .utf8)
+    }
     #endif
 
     // MARK: settings and look
@@ -181,7 +195,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         layoutForModel()
     }
 
+    /// iOS 27 pads ~17pt above a third-party keyboard over plain text fields in portrait (Messages, Settings and
+    /// Contacts search, Otto's composer), but not over URL or web-search fields (Safari's address bar, Otto's server
+    /// field) nor in landscape. The bar's own inset on top of iOS's showed as an empty band; where iOS's isn't
+    /// known to be there (other keyboard types are untried), the bar keeps its inset, clear of the sheet's corners.
+    private var iOSPadsAbove: Bool {
+        !BoardModel.sheet || traitCollection.verticalSizeClass != .compact && (textDocumentProxy.keyboardType ?? .default) == .default
+    }
+
     private func layoutForModel() {
+        let inset: CGFloat = iOSPadsAbove ? 0 : 12
+        if model.topInset != inset { model.topInset = inset }
+        // Under iOS's strip the sheet's rounded top is above the view: rounding it too cut notches into a coloured style.
+        if BoardModel.sheet { view.layer.cornerRadius = iOSPadsAbove ? 0 : 34 }
         let newBar = model.barHeight, newHeight = model.barHeight + Self.keysHeight + model.extraHeight
         if newBar != barHeight.constant || newHeight != height.constant {
             barHeight.constant = newBar
@@ -245,6 +271,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         default: "return"
         }
         board.returnIsAccent = board.returnTitle != "return"
+        layoutForModel()   // another field may want the bar's own top inset, or not
         board.extraKeys = switch textDocumentProxy.keyboardType {
         case .emailAddress: ["@", "."]
         case .URL, .webSearch: ["."]
@@ -252,12 +279,27 @@ final class KeyboardViewController: UIInputViewController, KeyboardViewDelegate 
         }
         refreshClipboard()
         updateShift()
+        // Out of date the moment the text changes: a lean toward the letter just typed is worse than none.
+        board.likely = [:]
         // Suggestions run the lexicon and the spell checker; once per burst of keys is enough.
         guard !suggestionsQueued else { return }
         suggestionsQueued = true
-        DispatchQueue.main.async { [weak self] in self?.suggestionsQueued = false; self?.refreshSuggestions() }
+        DispatchQueue.main.async { [weak self] in self?.suggestionsQueued = false; self?.refreshSuggestions(); self?.refreshLikely() }
     }
     private var suggestionsQueued = false
+
+    /// Leans the tap zones toward the letters likely next in the word being typed, from the word lists on the
+    /// phone; nothing typed is kept. None where the text isn't words or can't be read.
+    private func refreshLikely() {
+        let t = textDocumentProxy
+        let words: Set<UIKeyboardType> = [.default, .asciiCapable, .twitter]
+        let notWords: Set<UITextContentType> = [.URL, .emailAddress, .username, .password, .newPassword, .oneTimeCode]
+        guard model.otto == .closed, let lex = lexicon, let ctx = t.documentContextBeforeInput,
+              words.contains(t.keyboardType ?? .default), t.isSecureTextEntry != true,
+              (t.textContentType ?? nil).map({ !notWords.contains($0) }) ?? true else { board.likely = [:]; return }
+        // A swiped word's space is still to come, so the next letter starts a word.
+        board.likely = lex.nextLetters(after: pendingSpace ? "" : String(ctx.reversed().prefix { $0.isLetter || $0 == "'" }.reversed()))
+    }
 
     private func updateShift() {
         guard board.shift != .locked else { return }
