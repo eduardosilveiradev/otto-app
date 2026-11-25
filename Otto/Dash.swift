@@ -32,7 +32,7 @@ struct DashMemory: Decodable {
     let graph: Graph
 }
 
-struct PersonCard: Decodable, Identifiable {
+struct PersonCard: Decodable, Identifiable, Hashable {
     struct Note: Decodable, Hashable { let at: String; let text: String }
     var id: String { name }
     let name: String; let relationship: String?; let city: String?; let timezone: String?; let org: String?

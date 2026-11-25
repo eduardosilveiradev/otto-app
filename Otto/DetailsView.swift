@@ -208,6 +208,7 @@ struct DetailsView: View {
             }
             // A door's page (Doors' "packages"), taken once, whether the card was just opened for it or already up.
             .onChange(of: store.openPage, initial: true) { _, page in if let page { screen = page; store.openPage = nil } }
+            .onChange(of: store.openPerson, initial: true) { _, name in if name != nil { screen = "People" } }
             .navigationDestination(item: $screen) { name in
                 switch name {
                 case "Loops": LoopsScreen()

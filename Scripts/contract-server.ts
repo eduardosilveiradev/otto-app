@@ -29,6 +29,8 @@
  * talk.screen is logged by size, never the picture. `noscreen` answers it as otto-core's talk.ts did before it knew
  * the frame, talk.error "unknown talk frame"; `noimage` takes `off` and refuses only a picture, so the refusal
  * lands in the middle of a turn.
+ *
+ * GET /app/dash/people lists made-up people, for iPhone Search.
  */
 const port = Number(process.argv[2] ?? 4599), delay = Number(process.argv[3] ?? 0), old = process.argv[4] === 'old', noscreen = process.argv[4] === 'noscreen', noimage = process.argv[4] === 'noimage'
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 23), ...a)
@@ -92,6 +94,9 @@ const memory = [
   { id: 'm1', store: 'durable', kind: 'preference', scope: 'me', name: 'coffee-order', description: 'Flat white, oat milk. No sugar.', updated: '2026-11-01T08:00:00Z', hits: 14, lastHitDays: 1 },
   { id: 'm2', store: 'durable', kind: 'fact', scope: 'me', name: 'office-wifi', description: 'Network: Studio-5G. Password in 1Password.', updated: '2026-09-02T12:00:00Z', hits: 0, badge: 'never' },
 ]
+const person = (name: string, relationship: string | null, org: string | null, city: string | null) =>
+  ({ name, relationship, city, timezone: null, org, notes: [{ at: '2026-11-02T09:00:00Z', text: 'Wants the deposit back by December.' }], inbound: 4, outbound: 2, lastContact: '2026-11-20T18:00:00Z', mentions: [] })
+const people = [person('Dana Reyes', 'landlord’s contact', 'Casa Lettings', 'Lisbon'), person('Tomás Oliveira', 'climbing partner', null, 'Porto'), person('Wren', null, null, null)]
 const frame = (a: Approval) => JSON.stringify({ type: 'approval', ...a })
 // The page Otto has open, for item 8: a grey picture, held or not.
 const PAGE = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA='
@@ -151,6 +156,7 @@ Bun.serve({
     }
     if (p === '/app/dash/rules') return Response.json({ rules: [...rules.values()] })
     if (p.startsWith('/app/dash/rules/') && req.method === 'DELETE') return Response.json({ revoked: rules.delete(decodeURIComponent(p.slice('/app/dash/rules/'.length))) })
+    if (p === '/app/dash/people') return Response.json({ cards: people })
     if (p === '/app/dash/memory') return Response.json({ items: memory, canForget: true, summary: { text: 'You work in design.', note: 'Rewritten nightly.' }, generatedAt: new Date().toISOString(), graph: { c: [], clusters: [] } })
     if (p === '/app/dash/memory/item') return Response.json({ body: 'Flat white, oat milk. No sugar.' })
     if (p === '/app/dash/memory/forget') { const { id } = await req.json() as { id: string }; const i = memory.findIndex(m => m.id === id); if (i >= 0) memory.splice(i, 1); log('forget', id, i >= 0); return Response.json({ ok: i >= 0 }) }

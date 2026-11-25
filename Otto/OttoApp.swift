@@ -1,5 +1,6 @@
 import ActivityKit
 import AudioToolbox
+import CoreSpotlight
 import MWDATCore
 import Network
 import SwiftUI
@@ -37,6 +38,7 @@ struct OttoApp: App {
         ScreenShare.clear(); DictationBridge.post(ScreenShare.stop)
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
+        if CommandLine.arguments.contains("-peopleSearchCheck") { Task { await PeopleSearch.check() } }
         // `-callActivity`: a call's Live Activity 83 seconds in, for screenshots of the Lock Screen and the Dynamic Island.
         if CommandLine.arguments.contains("-callActivity") {
             Task {
@@ -68,6 +70,10 @@ struct OttoApp: App {
                 guard url.query()?.contains("metaWearablesAction") == true else { return }
                 Task { _ = try? await Wearables.shared.handleUrl(url) }
             }
+            // Someone tapped in iPhone Search (PeopleSearch): their page, under People in the contact card.
+            .onContinueUserActivity(CSSearchableItemActionType) { a in
+                if let name = a.userInfo?[CSSearchableItemActivityIdentifier] as? String { Doors.open("person", person: name) }
+            }
             .modifier(DictationCover())
             .onChange(of: onboarded) { _, on in UserDefaults.standard.set(on, forKey: "onboarded") }
             // The Mac refused the token (LiveBackend): back to setup.
@@ -79,7 +85,7 @@ struct OttoApp: App {
 /// The ways in from outside the app (widgets, controls, the Action Button): Otto's thread, with talk mode
 /// (the "walkie" door, its old name, which placed widgets still use), a call or an approval put off with Later over it. Nothing before setup: there's no store yet.
 @MainActor enum Doors {
-    static func open(_ door: String) {
+    static func open(_ door: String, person: String? = nil) {
         LaunchMorph.skip()   // straight to where the door leads, not behind the launch
         // As OttoApp's @AppStorage reads it: unset means "paired already" if there's a server.
         // bool(forKey:) also takes a launch argument's "YES", which arrives as a string.
@@ -93,6 +99,7 @@ struct OttoApp: App {
         // One put off with Later comes back; one not yet answered is already up, over whatever is on screen.
         case "approval": if store.shownApproval == nil, let w = store.waitingApproval { store.reopenApproval(w.id) }
         case "packages": store.openPage = "Packages"
+        case "person": store.openPerson = person
         default: break
         }
     }
@@ -304,6 +311,8 @@ final class OttoStore {
     /// A contact-card page a door asked for ("Packages", from the Arriving today widget): Otto's thread opens the
     /// card and the card goes to the page, taking it once (DetailsView).
     var openPage: String?
+    /// A person tapped in iPhone Search, by name: the contact card opens on People, which opens them and clears it.
+    var openPerson: String?
     /// Memories you asked Otto to forget from their page, marked on their rows while they're still listed.
     var askedToForget: Set<String> = []
     /// Memories the Mac forgot at your word from their page: off the list at once, ahead of its next index.

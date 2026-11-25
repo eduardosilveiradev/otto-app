@@ -381,6 +381,8 @@ struct ChatView: View {
         .onChange(of: store.prefill) { _, words in if words != nil { showDetails = false } }
         // A door asked for one of the card's pages (the Arriving today widget's Packages): the card opens, and goes there.
         .onChange(of: store.openPage, initial: true) { _, page in if page != nil && thread.isOtto { showDetails = true } }
+        // A person tapped in iPhone Search: the card opens on them. Otto's thread only, so one card answers.
+        .onChange(of: store.openPerson, initial: true) { _, name in if name != nil && thread.isOtto { showDetails = true } }
         .fullScreenCover(isPresented: webCall) { CallView(context: callContext) }
         .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
             MediaViewerView(store: store).presentationBackground(.clear)

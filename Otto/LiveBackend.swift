@@ -155,7 +155,7 @@ final class LiveBackend: OttoBackend {
         let base = Self.origin(serverURL)
         pair = (base, token)
         desktopSync = DesktopSync(key: "otto.desktopSync.\(base.absoluteString)")
-        defer { sweepKept() }
+        defer { sweepKept(); PeopleSearch.keep(only: base) }
         (incoming, out) = AsyncStream.makeStream()
         (reactions, reacted) = AsyncStream.makeStream()
         (statuses, status) = AsyncStream.makeStream()
@@ -197,7 +197,7 @@ final class LiveBackend: OttoBackend {
     }
 
     static func fromDefaults() -> LiveBackend? {
-        guard let p = stored() else { return nil }
+        guard let p = stored() else { PeopleSearch.keep(only: nil); return nil }   // unpaired: no Mac's people stay in Search
         ShareDirect.save(serverURL: p.server.absoluteString, token: p.token)   // the share sheet's way in on builds without an app group
         return LiveBackend(serverURL: p.server, token: p.token)
     }
@@ -700,7 +700,9 @@ final class LiveBackend: OttoBackend {
         lock.withLock { dashFailures[path] = code.map { (200..<300).contains($0) ? nil : $0 } ?? 0 }
         // The Mac says it's gone: so is the copy kept here.
         if method == "GET", code == 404 || code == 410, let file = keptFile(path, query) { try? FileManager.default.removeItem(at: file) }
+        if code == 401 { PeopleSearch.clear() }   // this phone's token is revoked: unpaired
         guard let answer, let code, (200..<300).contains(code) else { return nil }
+        if method == "GET", path == "people", let p = try? JSONDecoder().decode(People.self, from: answer.0) { PeopleSearch.index(p.cards, from: base) }
         // A page that was read is kept, so it can still be shown (as old) with the Mac out of reach: see dashKept.
         // Readable only while the phone is unlocked: these are your memories, people and money. A change made
         // through these routes (a forget, a rule taken back) drops everything kept, so nothing shown later as
@@ -737,6 +739,7 @@ final class LiveBackend: OttoBackend {
 
     /// Everything kept, dropped: asked for when the owner forgets something, whichever way the forgetting goes.
     func dropKept() {
+        PeopleSearch.clear()   // back in Search the next time People is read
         if let folder = keptFile("", [])?.deletingLastPathComponent() { try? FileManager.default.removeItem(at: folder) }
     }
 
@@ -804,8 +807,9 @@ final class LiveBackend: OttoBackend {
         var req = URLRequest(url: c.url!, timeoutInterval: 15)   // history and the brief at launch wait on this: not the default minute
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if background { req.setValue("1", forHTTPHeaderField: "X-Otto-Background") }
-        guard let (data, resp) = try? await session.data(for: req),
-              let http = resp as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+        guard let (data, resp) = try? await session.data(for: req), let http = resp as? HTTPURLResponse else { return nil }
+        if http.statusCode == 401 { PeopleSearch.clear() }   // revoked on the Mac (history asks at every launch)
+        guard http.statusCode == 200 else { return nil }
         return (data, http)
     }
 
