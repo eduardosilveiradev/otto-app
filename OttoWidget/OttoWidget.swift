@@ -192,18 +192,18 @@ struct ArrivingDoor: View {
                 if lock { Image(systemName: "shippingbox.fill").imageScale(.small).accessibilityHidden(true) }
                 Text(parcels.isEmpty ? "Packages" : parcels.count > 2 ? "\(parcels.count) arriving today" : "Arriving today")
             }
-            .font(.headline).widgetAccentable()
+            .font(.headline).lineLimit(1).minimumScaleFactor(0.75).widgetAccentable()   // shrinks a little at the largest sizes before it's cut
             if parcels.isEmpty {
                 Text("Nothing arriving today").font(.subheadline).foregroundStyle(.secondary)
             } else if parcels.count == 1, let p = parcels.first {
                 Text(p.what).font(.subheadline).lineLimit(lock ? 1 : 2)
-                Text(p.out ? "\(p.carrier) · Out for delivery" : p.carrier).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(p.out ? "\(p.carrier) · Out for delivery" : p.carrier).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
             } else {
-                // One line each: the item gives way before its carrier does.
+                // One line each. Item and carrier share the width, so a long carrier ("Poste Italiane") can't squeeze the item out.
                 ForEach(parcels.prefix(2)) { p in
                     HStack(spacing: 0) {
                         Text(p.what).lineLimit(1)
-                        Text(" · \(p.carrier)").foregroundStyle(.secondary).lineLimit(1).layoutPriority(1)
+                        Text(" · \(p.carrier)").foregroundStyle(.secondary).lineLimit(1)
                     }
                     .font(.subheadline)
                 }
