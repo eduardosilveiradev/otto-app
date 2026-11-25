@@ -314,11 +314,11 @@ struct FlightName: View {
     private var name: some View { Label(flight.flight, systemImage: "airplane.departure").font(.headline) }
 }
 
-/// What flight status says, in the boarding pass's colours for a dark ground; a move says from when.
+/// What flight status says, in the boarding pass's colours for a dark ground.
 struct FlightStatus: View {
     let state: FlightActivityAttributes.ContentState
     var body: some View {
-        Text(state.was.map { "\(state.status), was \($0)" } ?? state.status)
+        Text(state.status)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(ink)
             .lineLimit(1)
@@ -344,7 +344,9 @@ struct FlightFacts: View {
             fact("Terminal", state.terminal)
             fact("Seat", state.seat)
             VStack(alignment: .trailing, spacing: 2) {
-                Text(FlightClock.counting(state, over: over) ? "Departs \(state.time)" : "Departs").font(.caption).foregroundStyle(.secondary)
+                // The banner's words: "09:25, was 08:45" when it moved.
+                Text(FlightClock.counting(state, over: over) ? state.was.map { "\(state.time), was \($0)" } ?? "Departs \(state.time)" : "Departs")
+                    .font(.caption).foregroundStyle(.secondary)
                 FlightClock(state: state, over: over).font(.title2.weight(.semibold))
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
