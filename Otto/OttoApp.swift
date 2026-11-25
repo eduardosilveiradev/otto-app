@@ -1219,6 +1219,7 @@ final class OttoStore {
         await catchUp(notify: true, background: true)
         await syncApprovals(background: true)
         await pips.backgroundCatchUp()
+        await GateWatch.shared.poll(backend)   // today's flight on the Lock Screen, with Keepalive off
         await reportHealth("refresh")
     }
 

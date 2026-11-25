@@ -59,7 +59,7 @@ struct ChatView: View {
     private var webCall: Binding<Bool> { Binding(get: { CallLauncher.shared.open }, set: { CallLauncher.shared.open = $0 }) }
     /// Calls Otto is placing for you; a live one shows as a banner under the header.
     @State private var calls = CallWatch()
-    @State private var gate = GateWatch()
+    @State private var gate = GateWatch.shared
     @State private var showGate = false
     @State private var openCall: DashCall?
     /// When the phone button's "hold for Call Otto or Talk" hint last showed; it comes back every two months.
