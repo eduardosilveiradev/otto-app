@@ -32,6 +32,11 @@ what Otto knows about your day.
   pass, memory (search, topics, the summary), people, money, trips, activity,
   status and paired devices. They read the server's `/app/dash/*` API with the
   app's own token.
+- People in iPhone Search: once the People page has loaded, type a name in
+  Search to see who that person is to you (relationship, where they work, their
+  city). Their notes and memories stay out of it. Tap the result to open their
+  page. Forgetting a memory takes them out until People loads again. So does a
+  token the Mac has revoked, or pairing with a different Mac
 - Web calls to Otto through [Vapi](https://vapi.ai), if you have it set up
 - Local notifications while the app is in the background
 - Talk mode: hands-free voice with Otto. You talk, a pause ends your turn,
@@ -127,7 +132,8 @@ to open the contact card on one of its pages, or `-details -checkServer` to open
 server fields and check them. For recording motion: `-faceBeat glance` or `-faceBeat cheer` (Otto's face
 does that on every idle beat), `-drowsy YES` or `NO` (the quiet-hours face, whatever the clock says),
 `-quickReply` (the sample backend answers a message in 1.5 s) and, with `-jobsThread`, `-jobsMerge`
-(the running job merges 8 s in).
+(the running job merges 8 s in). `-openPerson <name>` opens a person's page as a tap in iPhone Search
+does (`-openPersonAfter 5` waits that long first).
 
 A Release build with `OTHER_SWIFT_FLAGS='$(inherited) -DPERFDEMO'` also takes `-perfDemo`
 (sends, typing steps, tapbacks and replies in a loop, then prints how many frames ran late)

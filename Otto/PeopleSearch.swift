@@ -15,16 +15,21 @@ enum PeopleSearch {
 
     static func index(_ cards: [PersonCard], from server: URL) {
         UserDefaults.standard.set(server.absoluteString, forKey: from)   // before they go in, so a crash can't leave them unclaimed
-        let items = cards.map { c in
-            let a = CSSearchableItemAttributeSet(contentType: .contact)
-            a.title = c.name
-            a.contentDescription = [c.relationship, c.org, c.city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-            let item = CSSearchableItem(uniqueIdentifier: c.name, domainIdentifier: domain, attributeSet: a)
-            item.expirationDate = .distantFuture   // not the default month: they stay until the Mac's list or one of the above takes them out
-            return item
-        }
+        let items = cards.map { item($0.name, $0.relationship, $0.org, $0.city) }
         // Someone the Mac no longer lists leaves Search too.
         index.deleteSearchableItems(withDomainIdentifiers: [domain]) { _ in index.indexSearchableItems(items) }
+    }
+
+    /// One person's entry, from the four fields alone, so nothing else of theirs can reach Search
+    /// (Scripts/people-search-check.sh).
+    static func item(_ name: String, _ relationship: String?, _ org: String?, _ city: String?) -> CSSearchableItem {
+        let a = CSSearchableItemAttributeSet(contentType: .contact)
+        a.title = name
+        let about = [relationship, org, city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        a.contentDescription = about.isEmpty ? nil : about
+        let item = CSSearchableItem(uniqueIdentifier: name, domainIdentifier: domain, attributeSet: a)
+        item.expirationDate = .distantFuture   // not the default month: they stay until the Mac's list or one of the above takes them out
+        return item
     }
 
     static func clear() { index.deleteSearchableItems(withDomainIdentifiers: [domain]) }
@@ -33,57 +38,4 @@ enum PeopleSearch {
     static func keep(only server: URL?) {
         if let was = UserDefaults.standard.string(forKey: from), was != server?.absoluteString { clear() }
     }
-
-    #if DEBUG
-    /// `-peopleSearchCheck` (read with `simctl launch --console-pty`): what goes into Search, what never does,
-    /// and what takes it out, against this app's own Spotlight items. Ends with nothing of its own left there.
-    static func check() async {
-        func card(_ name: String, _ rel: String? = nil, _ org: String? = nil, _ city: String? = nil) -> PersonCard {
-            PersonCard(name: name, relationship: rel, city: city, timezone: nil, org: org,
-                       notes: [.init(at: "2026-11-01", text: "zebracorn deposit")], inbound: 0, outbound: 0, lastContact: nil, mentions: [])
-        }
-        func found(_ q: String) async -> [CSSearchableItem] {
-            let ctx = CSSearchQueryContext(); ctx.fetchAttributes = ["title", "contentDescription"]
-            let query = CSSearchQuery(queryString: "** == \"\(q)*\"cd", queryContext: ctx)
-            var all: [CSSearchableItem] = []
-            query.foundItemsHandler = { all += $0 }
-            await withCheckedContinuation { done in query.completionHandler = { _ in done.resume() }; query.start() }
-            return all
-        }
-        func settle() async { try? await Task.sleep(for: .seconds(1.5)) }
-        func expect(_ ok: Bool, _ what: String) { print("PEOPLESEARCH \(ok ? "PASS" : "FAIL") \(what)") }
-        let a = URL(string: "http://127.0.0.1:1")!
-        let long = String(repeating: "Bartholomew-", count: 12) + "Okonkwo"
-        index([card("Dana Reyes", "landlord’s contact", "Casa Lettings", "Lisbon"), card("Wren"), card("王小明", "colleague"), card(long)], from: a)
-        await settle()
-        let dana = await found("Dana")
-        expect(dana.count == 1 && dana.first?.attributeSet.contentDescription == "landlord’s contact · Casa Lettings · Lisbon", "name finds who they are to you")
-        expect(await found("landlord").count == 1, "relationship is searchable")
-        expect(await found("zebracorn").isEmpty, "a note's words never go in")
-        expect(await found("Wren").first?.attributeSet.contentDescription == "", "a name alone has no stray separators")
-        let (han, longName) = (await found("王小明"), await found("Bartholomew"))
-        expect(han.count == 1 && longName.count == 1, "non-Latin and very long names")
-        index([card("Wren")], from: a)
-        await settle()
-        let (gone, kept) = (await found("Dana"), await found("Wren"))
-        expect(gone.isEmpty && kept.count == 1, "a new list replaces the old one")
-        clear()
-        await settle()
-        expect(await found("Wren").isEmpty, "a forget or a 401 takes everyone out")
-        index([card("Wren")], from: a)
-        await settle()
-        keep(only: a)
-        await settle()
-        expect(await found("Wren").count == 1, "the same Mac at launch keeps them")
-        keep(only: URL(string: "http://127.0.0.1:2")!)
-        await settle()
-        expect(await found("Wren").isEmpty, "another Mac at launch takes them out")
-        index([card("Wren")], from: a)
-        await settle()
-        keep(only: nil)
-        await settle()
-        expect(await found("Wren").isEmpty, "no Mac at launch takes them out")
-        print("PEOPLESEARCH done")
-    }
-    #endif
 }
