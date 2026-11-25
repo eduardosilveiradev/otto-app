@@ -207,8 +207,9 @@ final class LiveBackend: OttoBackend {
             var m = r.kind == "terminal" ? Self.terminal(r.text, ts: r.ts)
             : r.dir == "in"
                 // Preserve the exact wire ID, including UUID casing from other devices.
-                ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date(), shared: r.shared,
-                          serverID: r.id, read: r.read)
+                // A voice note of yours from another device (the Mac) carries the server's copy of its audio.
+                ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date(), isVoice: r.voice != nil,
+                          shared: r.shared, serverID: r.id, read: r.read, audio: r.voice)
                 : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
                           buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
                           isVoice: r.voice != nil || r.voicePending == true, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
@@ -541,7 +542,8 @@ final class LiveBackend: OttoBackend {
         }
         // Yours, sent from somewhere other than this thread (the share sheet, the dashboard). Same id as /app/history gives it.
         if f.type == "echo", let text = f.text {
-            out.yield(Message(id: f.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: text, date: Self.date(f.ts) ?? Date(), shared: f.shared, serverID: f.id))
+            out.yield(Message(id: f.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: text, date: Self.date(f.ts) ?? Date(),
+                              isVoice: f.voice != nil, shared: f.shared, serverID: f.id, audio: f.voice))
             return
         }
         guard f.type == "message", let text = f.text else { return }

@@ -1300,6 +1300,8 @@ final class OttoStore {
             if let r = h.reaction, messages[i].from == .me { messages[i].reaction = r }
             if h.from == .me {
                 if messages[i].pending == true || messages[i].failed == true { messages[i].pending = nil; messages[i].failed = nil }
+                // A note from another device, kept as text before history said it was voice: it becomes one.
+                if h.isVoice { messages[i].isVoice = true; if messages[i].audio == nil { messages[i].audio = h.audio } }
                 if messages[i].isVoice && !h.text.isEmpty && h.text != "(voice message)" { messages[i].text = h.text }
                 if h.read == true { messages[i].read = true }
             } else if h.from == .otto {

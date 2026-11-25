@@ -19,7 +19,9 @@ parts = ['import Foundation', backend[backend.index('enum Sender:'):backend.inde
 parts += ['''
 struct DashTrigger: Codable {}
 struct RecordedCard: Codable {}
-struct OTPCode: Codable {}
+struct OTPCode: Codable { var code = "" }
+struct CallRecord: Codable {}
+enum KeyboardCode { static func clear(_ code: String) {} }
 struct GroupLink: Codable {}
 struct Card: Codable { var actions: [ActionButton]? }
 enum ImageStore { static func data(_ id: UUID) -> Data? { nil } }
@@ -106,7 +108,12 @@ final class HistoryDecoder {
     }
     static func date(_ s: String?) -> Date? { LiveBackend.date(s) }
     static func terminal(_ text: String, ts: String) -> Message { Message(from: .terminal, text: text) }
-''', live[wire_start:wire_end], method(live, 'history'), '}']
+''', live[wire_start:wire_end], method(live, 'history')]
+# The live echo frame's branch, exactly as handle() runs it.
+echo_start = live.index('        if f.type == "echo"')
+echo_end = live.index('\n        }', echo_start) + len('\n        }')
+parts += ['    func echo(_ data: Data, _ out: Sink) {\n        let f = try! JSONDecoder().decode(WireMessage.self, from: data)\n' + live[echo_start:echo_end] + '\n    }', '}',
+          'final class Sink { var got: [Message] = []; func yield(_ m: Message) { got.append(m) } }']
 parts += ['class VoiceDecoder { var response: Data?; func post(_ path: String, _ body: Data, query: [URLQueryItem]) async -> Data? { response }', method(live, 'sendVoice'), '}']
 pathlib.Path(sys.argv[1]).write_text('\n'.join(parts) + '\n')
 PY
@@ -214,6 +221,32 @@ cat >> "$T/check.swift" <<'SWIFT'
         assert(store.messages.count == 2)
         store.drop(["k"])
         assert(store.messages.map(\.wireID) == [reply.wireID])
+        // A voice note of yours from another device: history's `voice` object makes it a voice message
+        // with the server's copy of the audio; a row without one stays text, as before.
+        let mac = "6F1C2A3B-0000-4000-8000-00000000AAAA"
+        let spoken = try! JSONSerialization.data(withJSONObject: [
+            ["dir": "in", "text": "call the plumber", "ts": "2026-01-01T12:00:00Z", "id": mac, "voice": ["id": "f1", "name": "note.m4a", "kind": "audio"]],
+            ["dir": "in", "text": "typed", "ts": "2026-01-01T12:01:00Z", "id": "typed-1"],
+        ])
+        let both = await HistoryDecoder(spoken).history(background: false, limit: 50, since: nil) ?? []
+        assert(both.count == 2 && both[0].isVoice && both[0].audio?.id == "f1" && both[0].text == "call the plumber" && both[0].wireID == mac)
+        assert(!both[1].isVoice && both[1].audio == nil && both[1].text == "typed")
+        // The live echo frame: same, with and without the object.
+        let live = Sink()
+        let frames = HistoryDecoder(Data())
+        frames.echo(Data(#"{"type":"echo","id":"e1","text":"hi","ts":"2026-01-01T12:00:00Z","voice":{"id":"f2","name":"n.m4a","kind":"audio"}}"#.utf8), live)
+        frames.echo(Data(#"{"type":"echo","id":"e2","text":"hi","ts":"2026-01-01T12:00:00Z"}"#.utf8), live)
+        assert(live.got.count == 2 && live.got[0].isVoice && live.got[0].audio?.id == "f2" && live.got[0].wireID == "e1")
+        assert(!live.got[1].isVoice && live.got[1].audio == nil)
+        // A note already stored as text (from before the server said so) turns into voice on the merge;
+        // a typed one next to it is left alone.
+        VoiceStore.audio = nil
+        let stale = Message(id: UUID(uuidString: mac)!, from: .me, text: "call the plumber", serverID: mac)
+        store.messages = [stale, Message(from: .me, text: "typed", serverID: "typed-1")]
+        backend.rows = both
+        await store.catchUp(notify: false)
+        assert(store.messages.count == 2 && store.messages[0].isVoice && store.messages[0].audio?.id == "f1" && store.messages[0].text == "call the plumber")
+        assert(!store.messages[1].isVoice && store.messages[1].audio == nil)
         print("voice delivery checks passed")
     }
 }
