@@ -56,8 +56,9 @@ struct OttoApp: App {
             }
             .onOpenURL { url in
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
-                // The widgets: Otto's thread, talk mode (still at its walkie-talkie address), or an approval put off with Later.
-                if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval"].contains(door) { Doors.open(door); return }
+                // The widgets: Otto's thread, talk mode (still at its walkie-talkie address), an approval put off with Later,
+                // or the Packages page (Arriving today).
+                if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval", "packages"].contains(door) { Doors.open(door); return }
                 // A pairing link from the Camera's QR banner, AirDrop or a message. Anyone can make one, so it is
                 // only held here: onboarding and the main screen each ask, naming the Mac, before any of it is used.
                 if let link = PairingLink(url.absoluteString) { PairInbox.shared.link = link; return }
@@ -91,6 +92,7 @@ struct OttoApp: App {
         case "call": CallLauncher.shared.start()
         // One put off with Later comes back; one not yet answered is already up, over whatever is on screen.
         case "approval": if store.shownApproval == nil, let w = store.waitingApproval { store.reopenApproval(w.id) }
+        case "packages": store.openPage = "Packages"
         default: break
         }
     }
@@ -299,6 +301,9 @@ final class OttoStore {
     var lapsedApproval: ApprovalRequest?
     /// Words for Otto's composer from elsewhere in the app, taken by it once (ChatView).
     var prefill: String?
+    /// A contact-card page a door asked for ("Packages", from the Arriving today widget): Otto's thread opens the
+    /// card and the card goes to the page, taking it once (DetailsView).
+    var openPage: String?
     /// Memories you asked Otto to forget from their page, marked on their rows while they're still listed.
     var askedToForget: Set<String> = []
     /// Memories the Mac forgot at your word from their page: off the list at once, ahead of its next index.
@@ -502,6 +507,17 @@ final class OttoStore {
             if cut != noNetwork { noNetwork = cut }
             try? await Task.sleep(for: .seconds(1))
         }
+    }
+
+    /// The "Arriving today" widget, from the Mac's packages list: on coming to the front, on each background wake-up
+    /// and after Mark delivered. Never from sample data, which would look real on the Lock Screen.
+    /// ponytail: a package the Mac marks delivered shows until the app next runs or midnight; sooner needs a push (APNs).
+    func syncArriving() async {
+        guard !(backend is MockBackend), let list: DashPackages = await backend.dash("packages") else { return }
+        let arriving = list.arriving()
+        guard arriving != WidgetData.arriving else { return }
+        WidgetData.arriving = arriving
+        WidgetCenter.shared.reloadTimelines(ofKind: "dev.otto.arriving")
     }
 
     /// The Home Screen widget's line: the approval waiting on you, until the Mac would drop it.
@@ -1231,6 +1247,7 @@ final class OttoStore {
         UserDefaults.standard.set(Date(), forKey: "lastRefresh")
         await catchUp(notify: true, background: true)
         await syncApprovals(background: true)
+        await syncArriving()
         await pips.backgroundCatchUp()
         await GateWatch.shared.poll(backend)   // today's flight on the Lock Screen, with Keepalive off
         await reportHealth("refresh")
@@ -1259,7 +1276,7 @@ final class OttoStore {
     /// the fact that the server has it after all.
     /// Back in front: a socket iOS froze in the background looks alive but dropped what was sent into it
     /// (a tapback, an edit, a reply), and no reconnect means no catch-up. One history read fills it in.
-    func resync(probe: Bool = true) { Task { if probe { await backend.probe() }; await catchUp(notify: false) }; Task { await syncApprovals() } }
+    func resync(probe: Bool = true) { Task { if probe { await backend.probe() }; await catchUp(notify: false) }; Task { await syncApprovals() }; Task { await syncArriving() } }
 
     /// Otto deleted these (a live "delete" frame, or history on reconnect): out of the thread and the
     /// saved copy, with what pointed at them. An id that isn't here changes nothing.

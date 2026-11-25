@@ -84,6 +84,21 @@ struct DashPackages: Decodable {
     }
     /// Active first, then delivered in the last 30 days.
     let packages: [Package]
+
+    /// What the "Arriving today" widget shows on `now`'s day: out for delivery today, or due on exactly this day. Not a
+    /// window that only starts today (its out-for-delivery mail will say when it's today), nor one stuck with a problem.
+    func arriving(on now: Date = .now) -> WidgetData.Arriving {
+        let cal = Calendar.current
+        let day = now.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day()).prefix(10)
+        let today = packages.filter { p in
+            let out = p.status == "out_for_delivery"
+                && p.events.contains { $0.status == "out_for_delivery" && dashDate($0.at).map { cal.isDate($0, inSameDayAs: now) } == true }
+            let due = p.eta?.prefix(10) == day && (p.etaLatest ?? p.eta)?.prefix(10) == day && !["delivered", "exception"].contains(p.status)
+            return out || due
+        }
+        return .init(parcels: today.map { .init(id: $0.id, what: $0.item ?? $0.merchant ?? "A package", carrier: $0.carrierName, out: $0.status == "out_for_delivery") },
+                     until: cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) ?? now)
+    }
 }
 
 struct SourceStats: Decodable, Identifiable {

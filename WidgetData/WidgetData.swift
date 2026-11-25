@@ -18,6 +18,26 @@ enum WidgetData {
         get { suite?.data(forKey: "widgetAsk").flatMap { try? JSONDecoder().decode(Ask.self, from: $0) } }
         set { suite?.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: "widgetAsk") }
     }
+
+    /// Packages out for delivery or due today, for the "Arriving today" widget: what each is and who brings it.
+    /// Never a tracking number: these show on the Lock Screen. `until` is midnight, when the widget clears itself.
+    struct Arriving: Codable, Equatable {
+        struct Parcel: Codable, Equatable, Identifiable {
+            let id: String
+            let what: String
+            let carrier: String
+            /// On the van now, rather than only due today.
+            let out: Bool
+        }
+        let parcels: [Parcel]
+        let until: Date
+    }
+
+    /// Written by the app each time it reads the packages list (OttoStore.syncArriving).
+    static var arriving: Arriving? {
+        get { suite?.data(forKey: "widgetArriving").flatMap { try? JSONDecoder().decode(Arriving.self, from: $0) } }
+        set { suite?.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: "widgetArriving") }
+    }
 }
 
 /// A web call with Otto, on the Lock Screen and in the Dynamic Island while it lasts. The app starts and

@@ -249,6 +249,24 @@ enum ApprovalCheck {
         for _ in 0..<Pairing.refusalsToForget { fail(401) }
         assert(Pairing.setUp(d), "a pair saved since the refusal is kept")
         d.removePersistentDomain(forName: "otto.pairingCheck")
+        // Arriving today: out for delivery today or due on exactly this day; not yesterday's van, a window, a problem or
+        // one delivered. Cleared at midnight, and the tracking number never reaches the widget.
+        let noon = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 12))!
+        let at = noon.ISO8601Format(), before = noon.addingTimeInterval(-86_400).ISO8601Format()
+        func pkg(_ id: String, _ status: String, eta: String? = nil, late: String? = nil, outAt: String? = nil, item: String? = nil) -> String {
+            #"{"id":"\#(id)","carrier":"ups","carrierName":"UPS","tracking":"1Z999AA1","status":"\#(status)","updatedAt":"\#(at)""#
+                + (eta.map { #","eta":"\#($0)""# } ?? "") + (late.map { #","etaLatest":"\#($0)""# } ?? "") + (item.map { #","item":"\#($0)""# } ?? "")
+                + #","events":[\#(outAt.map { #"{"at":"\#($0)","status":"out_for_delivery","text":"Out"}"# } ?? "")]}"#
+        }
+        let parcels = try! JSONDecoder().decode(DashPackages.self, from: Data(("{\"packages\":[" + [
+            pkg("van", "out_for_delivery", outAt: at, item: "Lamp"), pkg("due", "in_transit", eta: "2026-11-25"),
+            pkg("old-van", "out_for_delivery", outAt: before), pkg("window", "in_transit", eta: "2026-11-25", late: "2026-11-27"),
+            pkg("stuck", "exception", eta: "2026-11-25"), pkg("done", "delivered", eta: "2026-11-25"),
+        ].joined(separator: ",") + "]}").utf8))
+        let today = parcels.arriving(on: noon)
+        assert(today.parcels.map(\.id) == ["van", "due"] && today.parcels.map(\.what) == ["Lamp", "A package"] && today.parcels.map(\.out) == [true, false], "arriving today")
+        assert(today.until == Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 26)) && parcels.arriving(on: today.until).parcels.isEmpty, "today only")
+        assert(!String(decoding: try! JSONEncoder().encode(today), as: UTF8.self).contains("1Z999"), "no tracking number")
         print("approval check ok")
         // An answer given with no socket never leaves the phone: it's said as that, and nothing is queued to
         // go out on the next connect (a stale yes then would be the worst of both).

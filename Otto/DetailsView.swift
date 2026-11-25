@@ -206,6 +206,8 @@ struct DetailsView: View {
                 let probe: DashHealth.Probe? = await store.backend.dash("health")
                 hasHealth = probe.map { $0.connected && $0.hidden != true } ?? false
             }
+            // A door's page (Doors' "packages"), taken once, whether the card was just opened for it or already up.
+            .onChange(of: store.openPage, initial: true) { _, page in if let page { screen = page; store.openPage = nil } }
             .navigationDestination(item: $screen) { name in
                 switch name {
                 case "Loops": LoopsScreen()

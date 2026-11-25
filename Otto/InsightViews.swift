@@ -668,7 +668,7 @@ struct PackagesList: View {
 
     private func markDelivered(_ id: String) async {
         let body = try? JSONSerialization.data(withJSONObject: ["id": id])
-        if await store.backend.dashData("POST", "packages/done", query: [], body: body) != nil { await reload() }
+        if await store.backend.dashData("POST", "packages/done", query: [], body: body) != nil { await reload(); await store.syncArriving() }
         else { canWrite = false }
     }
 }

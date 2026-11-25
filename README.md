@@ -43,10 +43,13 @@ what Otto knows about your day.
   Action Button, the Lock Screen widget or the Control Center control
 - Widgets: a small one for the Home Screen that opens the chat and shows an
   approval waiting on you, and a round one for the Lock Screen that opens talk
-  mode. A web call or a talk shows on the Lock Screen and in the Dynamic Island
-  while it lasts. So does a flight leaving today, with its gate, terminal, seat
-  and a countdown. It picks up any delay or gate change the app hears of, and
-  goes an hour after departure
+  mode. "Arriving today", on the Home Screen or the Lock Screen, shows a
+  package that's out for delivery or due today and who's bringing it, never
+  its tracking number. A tap opens Packages; it clears once the package is
+  marked delivered, or at midnight. A web call or a talk shows on the Lock
+  Screen and in the Dynamic Island while it lasts. So does a flight leaving
+  today, with its gate, terminal, seat and a countdown. It picks up any delay
+  or gate change the app hears of, and goes an hour after departure
 - An approval put off with Later waits over the composer with the time the
   Mac still holds it
 - PDFs: shared from any app, or from the composer's + menu; they go as
