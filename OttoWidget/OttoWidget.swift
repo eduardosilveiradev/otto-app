@@ -194,7 +194,7 @@ struct ArrivingDoor: View {
             }
             .font(.headline).lineLimit(1).minimumScaleFactor(0.75).widgetAccentable()   // shrinks a little at the largest sizes before it's cut
             if parcels.isEmpty {
-                Text("Nothing arriving today").font(.subheadline).foregroundStyle(.secondary)
+                Text("Nothing today").font(.subheadline).foregroundStyle(.secondary)
             } else if parcels.count == 1, let p = parcels.first {
                 Text(p.what).font(.subheadline).lineLimit(lock ? 1 : 2)
                 Text(p.out ? "\(p.carrier) · Out for delivery" : p.carrier).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
@@ -206,6 +206,8 @@ struct ArrivingDoor: View {
                         Text(" · \(p.carrier)").foregroundStyle(.secondary).lineLimit(1)
                     }
                     .font(.subheadline)
+                    // Read as "Desk lamp, UPS", whole, not the dot as a fragment of its own.
+                    .accessibilityElement(children: .ignore).accessibilityLabel("\(p.what), \(p.carrier)")
                 }
             }
         }
