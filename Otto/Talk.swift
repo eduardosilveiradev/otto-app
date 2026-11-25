@@ -1,6 +1,7 @@
 import ActivityKit
 import AppIntents
 import AVFoundation
+import CoreMotion
 import ReplayKit
 import SwiftUI
 import VoiceRingKit
@@ -1586,7 +1587,7 @@ struct TalkView: View {
     @Environment(OttoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-    /// Reduce Motion: the ring holds still on its own (VoiceRingKit reads it); here, changes cross-fade instead of moving.
+    /// Reduce Motion: the ring holds still on its own (VoiceRingKit reads it) and doesn't lean (LeaningRing); here, changes cross-fade instead of moving.
     @Environment(\.accessibilityReduceMotion) private var still
     @State private var session = TalkSession()
 
@@ -1652,8 +1653,7 @@ struct TalkView: View {
         default: (.idle, false)
         }
         let tap = session.tap, muted = session.muted, size: CGFloat = working ? 120 : 220
-        return VoiceRing(.mono, state: state, source: .level { muted ? 0 : Double(min(1, (otto ? tap.playing : tap.level) * 8)) },
-                         style: { var s = VoiceStyle(); s.theme = .dark; return s }(), size: size)
+        return LeaningRing(state: state, source: .level { muted ? 0 : Double(min(1, (otto ? tap.playing : tap.level) * 8)) }, size: size)
             .frame(width: size, height: size)
             .accessibilityElement(children: .ignore).accessibilityHidden(true)   // the caption under it says the same in words
     }
@@ -1841,6 +1841,170 @@ struct TalkView: View {
             }
             TalkButton(symbol: "xmark", label: "End", fill: .red, tint: .white) { session.end() }
         }
+    }
+}
+
+/// How far the ring leans from how the phone has turned: the talk's start is the centre, and as the screen turns
+/// away from you the ring leans back toward where you were. Pure, so `-approvalCheck` checks it.
+enum RingLean {
+    /// The turn that gives a clear lean (about three quarters of full); past it the lean saturates gently. Tune on a phone.
+    static let reach = 20.0 * .pi / 180
+    /// Seconds for the centre to catch up with how you hold the phone now (gyro drift, a shift in your seat). Tune on a phone.
+    static let settle = 20.0
+    /// How fast the ring travels to its lean and back, as VoiceRingKit's `leanSpeed` (1 settles in about 2 s). Tune on a phone.
+    static let speed = 2.5
+
+    /// `turn` (radians about gravity, counter-clockwise from above: the screen facing more to your right) as the ring's
+    /// direction, −1 left … 1 right. The ring leans the other way, back toward you.
+    static func direction(_ turn: Double) -> Double { -tanh(turn / reach) }
+
+    /// The turn from centre after `dt` seconds turning at `rate` rad/s, the centre easing toward the phone meanwhile.
+    static func step(_ turn: Double, rate: Double, dt: Double) -> Double { (turn + rate * dt) * exp(-dt / settle) }
+
+    /// The lean eased toward `goal` as VoiceRingKit eases its own: a critically damped spring, quicker out to a side than
+    /// back home (its `panIn` 2.5 and `panOut` 1.6, times `speed`). It sets off gently and never overshoots.
+    static func ease(_ pan: inout Double, _ velocity: inout Double, to goal: Double, dt: Double) {
+        let w = (abs(goal) > abs(pan) ? 2.5 : 1.6) * speed
+        velocity += (w * w * (goal - pan) - 2 * w * velocity) * dt
+        pan += velocity * dt
+    }
+}
+
+/// Talk's ring, leaning with the phone in every state, a voice or none. VoiceRingKit leans its ring only while it
+/// hears a voice, so this draws the ring through the package's own canvas with its `direction` left nil, and bends
+/// each frame with the package's own `leanFrame` (the drift, the near side drawn out, the press on the edge) from
+/// the phone's turn. Device motion runs only while the ring is on screen, the app is active and Reduce Motion is
+/// off; it needs no permission.
+private struct LeaningRing: View {
+    let state: VoiceState, source: VoiceSource, size: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var still
+    @Environment(\.scenePhase) private var scene
+    @State private var tilt = Tilt()
+
+    var body: some View {
+        let tilt = tilt
+        VoiceCanvas(resolve: { size in
+                        var preset = VoiceRing.preset(.mono, size: size)
+                        let draw = preset.frame, amounts = preset.lean, margin = preset.leanMargin
+                        preset.frame = { size, t, voice, opts in
+                            var frame = draw(size, t, voice, opts)
+                            MainActor.assumeIsolated { tilt.lean(&frame, size: size, amounts: amounts, margin: margin) }
+                            return frame
+                        }
+                        return preset
+                    },
+                    state: state, source: source, style: { var s = VoiceStyle(); s.theme = .dark; return s }(),
+                    mood: nil, direction: nil, size: size, colourful: false)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { tilt.box = $0 }
+            .onAppear(perform: sync)
+            .onDisappear { tilt.stop() }
+            .onChange(of: scene) { sync() }
+            .onChange(of: still) { sync() }
+    }
+
+    /// Back from the background, or Reduce Motion turned off: wherever the phone is now is the new centre.
+    private func sync() {
+        tilt.still = still
+        if scene == .active && !still { tilt.start() } else { tilt.stop() }
+    }
+
+    /// The phone's turn and the lean drawn from it. Main thread only: the canvas draws there.
+    @MainActor final class Tilt {
+        /// Where the phone's turn says to lean, −1 left … 1 right.
+        private(set) var direction = 0.0
+        var still = false
+        /// The ring's box on screen: the lean stops short of the window's edge, as the package's own does.
+        var box: CGRect?
+        /// Made on first start: SwiftUI builds a `Tilt` each time the talk screen redraws and keeps only the first.
+        private var motion: CMMotionManager?
+        private var turn = 0.0
+        private var last: TimeInterval?
+        private var pan = 0.0, velocity = 0.0, drawn: CFTimeInterval?, press = 0.0
+        private let bounce = EdgeBounce()
+        #if DEBUG
+        private var fake: Task<Void, Never>?
+        #endif
+
+        func start() {
+            #if DEBUG
+            NSLog("talk lean: on")
+            if let degrees = Self.fakeTurn { return startFake(degrees) }
+            #endif
+            let motion = motion ?? CMMotionManager()
+            self.motion = motion
+            guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
+            turn = 0; last = nil; direction = 0
+            motion.deviceMotionUpdateInterval = 1.0 / 30
+            motion.startDeviceMotionUpdates(to: .main) { [weak self] m, _ in
+                guard let m else { return }
+                MainActor.assumeIsolated { self?.read(m) }
+            }
+        }
+
+        func stop() {
+            motion?.stopDeviceMotionUpdates()
+            #if DEBUG
+            NSLog("talk lean: off")
+            fake?.cancel(); fake = nil
+            #endif
+        }
+
+        /// The turn about gravity, from the gyro: the same whether the phone stands upright or lies flat, with none of
+        /// Euler yaw's trouble when it stands upright. Tilting it sideways in your hand doesn't count.
+        private func read(_ m: CMDeviceMotion) {
+            let g = m.gravity, r = m.rotationRate, n = (g.x * g.x + g.y * g.y + g.z * g.z).squareRoot()
+            let dt = last.map { min(0.1, max(0, m.timestamp - $0)) } ?? 0
+            last = m.timestamp
+            guard n > 0.1 else { return }
+            turn = RingLean.step(turn, rate: -(r.x * g.x + r.y * g.y + r.z * g.z) / n, dt: dt)
+            direction = RingLean.direction(turn)
+        }
+
+        /// One drawn frame: the lean eased toward the phone's, then bent into the frame as VoiceRingKit bends it.
+        func lean(_ frame: inout OrbFrame, size: Double, amounts: LeanAmounts, margin: Double) {
+            let now = CACurrentMediaTime(), dt = min(0.05, max(0, now - (drawn ?? now)))
+            drawn = now
+            if still { pan = 0; velocity = 0; return }
+            RingLean.ease(&pan, &velocity, to: direction, dt: dt)
+            // The room to the window's edge, less the package's margin, as far as the canvas reaches past the box.
+            let reach = leanReach(amounts, size: size)
+            var bounds = (left: reach, right: reach)
+            if let box, let width = Self.windowWidth() {
+                bounds = (min(reach, max(0, Double(box.minX).rounded(.down) - margin)), min(reach, max(0, Double(width - box.maxX).rounded(.down) - margin)))
+            }
+            leanFrame(&frame, pan: pan, size: size, amounts: amounts, bounds: bounds, bounce: bounce.step(press: press, dt: dt))
+            press = frame.contact?.press ?? 0
+        }
+
+        private static func windowWidth() -> CGFloat? {
+            let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+            return (windows.first(where: \.isKeyWindow) ?? windows.first)?.bounds.width
+        }
+
+        #if DEBUG
+        /// `-talkLean <degrees>|sweep`: the simulator has no gyro. A fixed turn (30 leans left, −30 right), or a slow
+        /// sweep of ±30° every 8 s, fed in as the phone's turn.
+        static let fakeTurn: Double? = {
+            let a = ProcessInfo.processInfo.arguments
+            guard let i = a.firstIndex(of: "-talkLean"), a.indices.contains(i + 1) else { return nil }
+            return a[i + 1] == "sweep" ? .infinity : Double(a[i + 1])
+        }()
+
+        private func startFake(_ degrees: Double) {
+            guard degrees.isFinite else {
+                guard fake == nil else { return }
+                let from = Date.now
+                fake = Task { [weak self] in
+                    while !Task.isCancelled {
+                        self?.direction = RingLean.direction(30 * .pi / 180 * sin(2 * .pi * Date.now.timeIntervalSince(from) / 8))
+                        try? await Task.sleep(for: .milliseconds(33))
+                    }
+                }
+                return
+            }
+            direction = RingLean.direction(degrees * .pi / 180)
+        }
+        #endif
     }
 }
 

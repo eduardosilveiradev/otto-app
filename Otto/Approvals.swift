@@ -124,6 +124,22 @@ enum ApprovalCheck {
         assert(turns([(0.002, 1), (0.08, 0.25), (0.002, 1)], speaking: true).isEmpty && turns([(0.002, 1), (0.08, 0.5)], speaking: true) == [.start], "cutting in takes longer")
         assert(turns([(0.002, 1), (0.08, 0.5), (0.002, 0.5), (0.08, 0.5), (0.002, 1.5)]) == [.start, .end(send: true)], "a short breath doesn't end it")
         assert(turns([(0.002, 1), (0.03, 40)]).count <= 2 && turns([(0.002, 1), (0.03, 40)]) == turns([(0.002, 1), (0.03, 60)]), "a steady fan becomes the floor")
+        // Talk's ring: no lean straight on; back toward you as the screen turns to your right (counter-clockwise from
+        // above), clear by 20–30°, never past full. The centre catches up when the phone is held still, not mid-turn.
+        let deg = Double.pi / 180
+        assert(RingLean.direction(0) == 0 && RingLean.direction(10 * deg) < 0 && RingLean.direction(-10 * deg) == -RingLean.direction(10 * deg), "lean sign")
+        assert(RingLean.direction(20 * deg) < -0.7 && RingLean.direction(30 * deg) < -0.85 && RingLean.direction(.pi) >= -1, "lean range")
+        var turned = 0.0
+        for _ in 0..<30 { turned = RingLean.step(turned, rate: 25 * deg, dt: 1.0 / 30) }   // 25° in a second
+        assert(turned > 24 * deg, "a turn keeps its lean")
+        for _ in 0..<(90 * 30) { turned = RingLean.step(turned, rate: 0, dt: 1.0 / 30) }   // then held still for 90 s
+        assert(abs(RingLean.direction(turned)) < 0.05, "held still, it comes back to centre")
+        // The ring eases to its lean in about a second and home again, and never overshoots either way.
+        var pan = 0.0, velocity = 0.0, over = false
+        for _ in 0..<90 { RingLean.ease(&pan, &velocity, to: 1, dt: 1.0 / 60); over = over || pan > 1 }
+        assert(pan > 0.95 && !over, "out to a side")
+        for _ in 0..<120 { RingLean.ease(&pan, &velocity, to: 0, dt: 1.0 / 60); over = over || pan < 0 }
+        assert(pan < 0.02 && !over, "and home")
         // What talk says out loud. A text-only reply (the Mac's speech off: no voice, sent quiet because a desktop
         // was focused) is said in the phone's voice at once; one whose clip is on its way waits only a moment for
         // it; a reply the Mac tagged "chat" is still a reply; news isn't said.
