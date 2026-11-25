@@ -118,11 +118,26 @@ struct CardView: View {
 
     private func buttons(_ a: [ActionButton]) -> some View {
         ForEach(a) { b in
-            Button(b.label) { press(b) }
+            Button { press(b) } label: { b.tapLabel }
                 .font(.subheadline).tint(.actionInk)
                 .frame(minHeight: 44)
+                .accessibilityLabel(b.label).accessibilityHint(b.tapHint)
         }
     }
+}
+
+extension ActionButton {
+    /// The label with a mark for what a tap does, as on the Mac: a reply sends the label (↩ before it), a link opens
+    /// outside the app (its mark trails), a copy fills the clipboard. The mark is the label's own font, so it scales with
+    /// it, at 70% of the ink; a no-break space keeps it on the label's first or last word when the label wraps.
+    var tapLabel: Text {
+        let mark = { (symbol: String) in Text(Image(systemName: symbol)).foregroundStyle(Color.actionInk.opacity(0.7)) }
+        let words = Text(verbatim: label)
+        if url != nil { return Text("\(words)\u{00A0}\(mark("arrow.up.forward.square"))") }
+        return Text("\(mark(copy != nil ? "doc.on.doc" : "arrow.turn.down.left"))\u{00A0}\(words)")
+    }
+    /// What VoiceOver hears after the label: the mark is silent, so a link or a copy says what it does instead.
+    var tapHint: Text { url != nil ? Text("Opens in your browser") : copy != nil ? Text("Copies it") : Text(verbatim: "") }
 }
 
 private struct BlockView: View {
@@ -541,15 +556,33 @@ extension Card {
                            .text(.init(text: "Replacing the rim and spokes: €96, ready Friday.", style: nil)),
                            .text(.init(text: "Quote valid for 14 days.", style: "caption"))],
                   actions: [ActionButton(label: "Accept", data: "accept the bike shop quote"),
-                            ActionButton(label: "Website", data: nil, url: "https://example.com")])),
+                            ActionButton(label: "Website", data: nil, url: "https://example.com"),
+                            ActionButton(label: "Copy the quote", data: nil, copy: "Rim and spokes, €96, ready Friday")])),
             ("text", "anything i should know about the move", "one thing.",
              Card(blocks: [.text(.init(text: "The movers need the lift booked for Saturday morning. The building office closes at noon on Friday.", style: nil)),
                            .text(.init(text: "From the email on Tuesday.", style: "caption"))])),
+        ]
+        // Buttons under the bubble rather than on a card: one of each kind, then the labels that break layouts.
+        let buttons: [(String, String, String, [ActionButton])] = [
+            ("buttons", "where is the parcel", "Your DHL parcel is out for delivery, due between 14:00 and 16:00.",
+             [ActionButton(label: "Track it", data: nil, url: "https://example.com/track"),
+              ActionButton(label: "Copy tracking number", data: nil, copy: "JD014600006281234567"),
+              ActionButton(label: "Leave it with a neighbour", data: "leave the parcel with a neighbour")]),
+            ("buttons-short", "where’s dinner tonight", "Linden Café at 20:00, table for two.",
+             [ActionButton(label: "Map", data: nil, url: "https://example.com/map"),
+              ActionButton(label: "Address", data: nil, copy: "Linden Café, 12 Birch Ave"),
+              ActionButton(label: "Cancel it", data: "cancel dinner")]),
+            ("buttons-long", "can you move the dentist", "Thursday at 9:30 is free, or I can ask for a later slot.",
+             [ActionButton(label: "ok", data: "ok"),
+              ActionButton(label: "Move it to Thursday at 9:30 and tell the clinic I’ll bring the new insurance card with me", data: "move it"),
+              ActionButton(label: "اطلب موعدًا لاحقًا", data: "later")]),
         ]
         let keep = only.map { Set($0.split(separator: ",").map(String.init)) }
         let t = Date.now.addingTimeInterval(-600)
         return all.filter { keep?.contains($0.0) ?? true }.flatMap { _, ask, answer, card in
             [Message(from: .me, text: ask, date: t, read: true), Message(from: .otto, text: answer, date: t, card: card)]
+        } + buttons.filter { keep?.contains($0.0) ?? false }.flatMap { _, ask, answer, b in
+            [Message(from: .me, text: ask, date: t, read: true), Message(from: .otto, text: answer, date: t, buttons: b)]
         }
     }
 }
