@@ -170,6 +170,8 @@ private struct MainRoot: View {
                 // Face ID prompt also takes the app out of .active and back: a 2 s ping there shared the socket with
                 // the approval's own ack, and on a slow link could cut a healthy connection mid-answer.
                 if p == .active { store.sendShared(); Notifier.clearAll(); store.resync(probe: wasBackground); wasBackground = false; ApprovalPresenter.shared.sync(store) }
+                // Only the app in front may start a Live Activity: today's flight goes up as Otto comes back, not a poll later.
+                if p == .active { GateWatch.shared.syncActivity() }
                 if p == .background { wasBackground = true; store.flush(); Notifier.scheduleRefresh() }
                 Grace.update(background: p == .background)
                 Keepalive.update(background: p == .background)
