@@ -104,7 +104,7 @@ struct CardView: View {
             .padding(14)
             if !actions.isEmpty {
                 Divider()
-                // Plain blue text, like Otto's buttons under a bubble.
+                // Plain blue text along the card's foot; under a bubble they're pills (ActionPills).
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 20) { buttons(actions) }
                     VStack(alignment: .leading, spacing: 0) { buttons(actions) }
@@ -118,7 +118,7 @@ struct CardView: View {
 
     private func buttons(_ a: [ActionButton]) -> some View {
         ForEach(a) { b in
-            Button { press(b) } label: { b.tapLabel }
+            Button { press(b) } label: { b.tapLabel() }
                 .font(.subheadline).tint(.actionInk)
                 .frame(minHeight: 44)
                 .accessibilityLabel(b.label).accessibilityHint(b.tapHint)
@@ -127,17 +127,79 @@ struct CardView: View {
 }
 
 extension ActionButton {
-    /// The label with a mark for what a tap does, as on the Mac: a reply sends the label (↩ before it), a link opens
-    /// outside the app (its mark trails), a copy fills the clipboard. The mark is the label's own font, so it scales with
-    /// it, at 70% of the ink; a no-break space keeps it on the label's first or last word when the label wraps.
-    var tapLabel: Text {
-        let mark = { (symbol: String) in Text(Image(systemName: symbol)).foregroundStyle(Color.actionInk.opacity(0.7)) }
+    /// The label with a mark for what a tap does: a reply sends the label (↳ before it), a link opens outside the app
+    /// (its mark trails), a copy fills the clipboard. The mark is the label's own font, so it scales with it, in `ink`
+    /// (a card's 70% blue, a pill's text colour); a no-break space keeps it on the label's first or last word when it wraps.
+    func tapLabel(ink: Color = .actionInk.opacity(0.7)) -> Text {
+        let mark = { (symbol: String) in Text(Image(systemName: symbol)).foregroundStyle(ink) }
         let words = Text(verbatim: label)
         if url != nil { return Text("\(words)\u{00A0}\(mark("arrow.up.forward.square"))") }
-        return Text("\(mark(copy != nil ? "doc.on.doc" : "arrow.turn.down.left"))\u{00A0}\(words)")
+        return Text("\(mark(copy != nil ? "doc.on.doc" : "arrow.turn.down.right"))\u{00A0}\(words)")
     }
     /// What VoiceOver hears after the label: the mark is silent, so a link or a copy says what it does instead.
     var tapHint: Text { url != nil ? Text("Opens in your browser") : copy != nil ? Text("Copies it") : Text(verbatim: "") }
+}
+
+/// The buttons under a bubble (Otto's or a pip's): each its own pill on the grey one step off the page, with a
+/// hairline, wrapping to a new row when the next doesn't fit, left edge on the bubble's. Text colour, not blue:
+/// the mark says what a tap does. 44pt tall and 8pt apart, so the targets don't overlap.
+struct ActionPills: View {
+    let buttons: [ActionButton]
+    let press: (ActionButton) -> Void
+
+    var body: some View {
+        Wrap(spacing: 8) {
+            ForEach(buttons) { b in
+                Button { press(b) } label: {
+                    b.tapLabel(ink: .primary)
+                        .font(size: 16, relativeTo: .callout).foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 18).padding(.vertical, 8)
+                        .frame(minHeight: 44)
+                        // A fixed radius: a capsule round a label that wraps to three lines would balloon.
+                        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 22, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color(.separator), lineWidth: 1))
+                }
+                .buttonStyle(.press)
+                .accessibilityLabel(b.label.trimmingCharacters(in: .symbols.union(.whitespaces)))
+                .accessibilityHint(b.tapHint)
+            }
+        }
+    }
+}
+
+/// Left to right, a new row when the next one doesn't fit; one wider than the row gets the row and wraps its text.
+private struct Wrap: Layout {
+    var spacing: CGFloat
+
+    private func rows(_ width: CGFloat, _ subviews: Subviews) -> [[(Int, CGSize)]] {
+        var rows: [[(Int, CGSize)]] = [[]], x: CGFloat = 0
+        for (i, v) in subviews.enumerated() {
+            let s = v.sizeThatFits(.init(width: width, height: nil))
+            if x > 0, x + s.width > width { rows.append([]); x = 0 }
+            rows[rows.count - 1].append((i, s)); x += s.width + spacing
+        }
+        return rows
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let r = rows(proposal.width ?? .infinity, subviews)
+        let w = r.map { $0.reduce(0) { $0 + $1.1.width } + spacing * CGFloat($0.count - 1) }.max() ?? 0
+        let h = r.reduce(0) { $0 + ($1.map(\.1.height).max() ?? 0) } + spacing * CGFloat(r.count - 1)
+        return CGSize(width: w, height: h)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(bounds.width, subviews) {
+            var x = bounds.minX
+            for (i, s) in row {
+                subviews[i].place(at: CGPoint(x: x, y: y), proposal: .init(s))
+                x += s.width + spacing
+            }
+            y += (row.map(\.1.height).max() ?? 0) + spacing
+        }
+    }
 }
 
 private struct BlockView: View {
@@ -568,6 +630,8 @@ extension Card {
              [ActionButton(label: "Track it", data: nil, url: "https://example.com/track"),
               ActionButton(label: "Copy tracking number", data: nil, copy: "JD014600006281234567"),
               ActionButton(label: "Leave it with a neighbour", data: "leave the parcel with a neighbour")]),
+            ("buttons-yesno", "is the 7:40 train still on", "Yes, on time from platform 4. Want me to book the 18:10 back?",
+             [ActionButton(label: "Yes", data: "yes"), ActionButton(label: "No", data: "no")]),
             ("buttons-short", "where’s dinner tonight", "Linden Café at 20:00, table for two.",
              [ActionButton(label: "Map", data: nil, url: "https://example.com/map"),
               ActionButton(label: "Address", data: nil, copy: "Linden Café, 12 Birch Ave"),

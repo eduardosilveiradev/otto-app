@@ -130,6 +130,7 @@ shot chat cards-all 6 "Every card type (bottom of the thread)" $O -cardThread
 shot chat cards-mixed 6 "Mixed card: stat, bars, list, progress, actions" $O -cardThread mixed
 shot chat cards-table-timeline 6 "Table and timeline cards" $O -cardThread table,timeline
 shot chat cards-checklist-keyvalue 6 "Checklist and key-value cards" $O -cardThread checklist,keyvalue
+shot chat buttons-yesno 6 "Otto's buttons as pills: Yes and No, two replies in one row" $O -cardThread buttons-yesno
 shot chat buttons-kinds 6 "Otto's buttons: a link, a copy and a reply, each marked for what a tap does" $O -cardThread buttons,image
 shot chat buttons-short 6 "Otto's buttons in one row: a link, a copy and a reply with short labels" $O -cardThread buttons-short
 shot chat buttons-long 6 "Otto's buttons: \"ok\", a very long label and an Arabic one" $O -cardThread buttons-long
