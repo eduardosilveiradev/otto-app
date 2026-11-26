@@ -23,6 +23,8 @@ struct DetailsView: View {
     @State private var done: Set<Loop.ID> = []
     /// `-screen Money` opens straight onto a page, for screenshots.
     @State private var screen = UserDefaults.standard.string(forKey: "screen")
+    /// Someone tapped in iPhone Search: their page, over whatever the card is showing.
+    @State private var person: String?
     /// Set each time the address or token is submitted; the check under the token answers for it.
     @State private var submitted: UUID?
     @State private var serverCheck: ServerCheck?
@@ -208,6 +210,14 @@ struct DetailsView: View {
             }
             // A door's page (Doors' "packages"), taken once, whether the card was just opened for it or already up.
             .onChange(of: store.openPage, initial: true) { _, page in if let page { screen = page; store.openPage = nil } }
+            .onChange(of: store.openPerson, initial: true) { _, name in if let name { person = name; store.openPerson = nil } }
+            .navigationDestination(item: $person) { name in
+                Loaded(path: "people") { (p: People, _) in
+                    // Someone the Mac no longer lists: the People list instead.
+                    if let card = p.cards.first(where: { $0.name == name }) { PersonScreen(card: card) } else { PeopleScreen() }
+                }
+                .id(name)   // another tap while one is open: that person's own page, not the last one's memories
+            }
             .navigationDestination(item: $screen) { name in
                 switch name {
                 case "Loops": LoopsScreen()

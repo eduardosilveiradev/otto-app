@@ -295,7 +295,7 @@ func localTime(_ tz: TimeZone, _ date: Date = .now) -> String {
     return date.formatted(f)
 }
 
-private struct PersonScreen: View {
+struct PersonScreen: View {
     let card: PersonCard
     @Environment(OttoStore.self) private var store
     @State private var mentions: [MemoryItem] = []
