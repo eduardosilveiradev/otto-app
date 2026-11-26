@@ -8,6 +8,7 @@ import WidgetKit
 struct OttoWidgets: WidgetBundle {
     var body: some Widget {
         OttoChatWidget()
+        OttoArrivingWidget()
         OttoWalkieWidget()
         OttoWalkieControl()
         OttoCallActivity()
@@ -131,6 +132,87 @@ struct DoorLabel: ViewModifier {
         } else {
             content.accessibilityElement(children: .ignore).accessibilityLabel("Message Otto")
         }
+    }
+}
+
+struct ArrivingEntry: TimelineEntry {
+    let date: Date
+    var parcels: [WidgetData.Arriving.Parcel] = []
+}
+
+/// The app writes today's packages and reloads this; the timeline itself only has to clear them at midnight.
+struct ArrivingProvider: TimelineProvider {
+    /// For the widget gallery and the placeholder only.
+    private let sample = ArrivingEntry(date: .now, parcels: [.init(id: "sample", what: "Running shoes", carrier: "DHL", out: true)])
+    func placeholder(in context: Context) -> ArrivingEntry { sample }
+    func getSnapshot(in context: Context, completion: @escaping (ArrivingEntry) -> Void) {
+        let now = entry().0
+        completion(context.isPreview && now.parcels.isEmpty ? sample : now)
+    }
+    func getTimeline(in context: Context, completion: @escaping (Timeline<ArrivingEntry>) -> Void) {
+        let (now, until) = entry()
+        completion(Timeline(entries: until.map { [now, ArrivingEntry(date: $0)] } ?? [now], policy: .never))
+    }
+    private func entry() -> (ArrivingEntry, Date?) {
+        guard let a = WidgetData.arriving, a.until > .now, !a.parcels.isEmpty else { return (ArrivingEntry(date: .now), nil) }
+        return (ArrivingEntry(date: .now, parcels: a.parcels), a.until)
+    }
+}
+
+struct OttoArrivingWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "dev.otto.arriving", provider: ArrivingProvider()) { entry in
+            ArrivingDoor(parcels: entry.parcels)
+                .containerBackground(.background, for: .widget)
+                .widgetURL(URL(string: "otto://packages"))
+        }
+        .configurationDisplayName("Arriving today")
+        .description("Shows a package that’s out for delivery or due today, and its carrier.")
+        .supportedFamilies([.systemSmall, .accessoryRectangular])
+    }
+}
+
+/// What's coming today and who brings it; a tap opens Packages, where Mark delivered is. Tangerine marks a day
+/// with something to stay in for. Item names show while the phone is locked (that glance is the point), tracking
+/// numbers never: the app doesn't hand them over.
+struct ArrivingDoor: View {
+    let parcels: [WidgetData.Arriving.Parcel]
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        let lock = family == .accessoryRectangular
+        VStack(alignment: .leading, spacing: lock ? 1 : 2) {
+            if !lock {
+                Image(systemName: "shippingbox.fill").font(.title2)
+                    .foregroundStyle(parcels.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.tangerine))
+                    .widgetAccentable().accessibilityHidden(true)
+                Spacer(minLength: 6)
+            }
+            HStack(spacing: 4) {
+                if lock { Image(systemName: "shippingbox.fill").imageScale(.small).accessibilityHidden(true) }
+                Text(parcels.isEmpty ? "Packages" : parcels.count > 2 ? "\(parcels.count) arriving today" : "Arriving today")
+            }
+            .font(.headline).lineLimit(1).minimumScaleFactor(0.75).widgetAccentable()   // shrinks a little at the largest sizes before it's cut
+            if parcels.isEmpty {
+                Text("Nothing today").font(.subheadline).foregroundStyle(.secondary)
+            } else if parcels.count == 1, let p = parcels.first {
+                Text(p.what).font(.subheadline).lineLimit(lock ? 1 : 2)
+                Text(p.out ? "\(p.carrier) · Out for delivery" : p.carrier).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
+            } else {
+                // One line each. Item and carrier share the width, so a long carrier ("Poste Italiane") can't squeeze the item out.
+                ForEach(parcels.prefix(2)) { p in
+                    HStack(spacing: 0) {
+                        Text(p.what).lineLimit(1)
+                        Text(" · \(p.carrier)").foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .font(.subheadline)
+                    // Read as "Desk lamp, UPS", whole, not the dot as a fragment of its own.
+                    .accessibilityElement(children: .ignore).accessibilityLabel("\(p.what), \(p.carrier)")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: lock ? nil : .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 

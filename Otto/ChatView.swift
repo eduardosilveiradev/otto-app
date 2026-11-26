@@ -379,6 +379,8 @@ struct ChatView: View {
         // The contact card zooms out of the header's face (CardZoom, on the face below).
         // Something elsewhere put words in the composer (a memory's Correct): the card steps aside for them.
         .onChange(of: store.prefill) { _, words in if words != nil { showDetails = false } }
+        // A door asked for one of the card's pages (the Arriving today widget's Packages): the card opens, and goes there.
+        .onChange(of: store.openPage, initial: true) { _, page in if page != nil && thread.isOtto { showDetails = true } }
         .fullScreenCover(isPresented: webCall) { CallView(context: callContext) }
         .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
             MediaViewerView(store: store).presentationBackground(.clear)
