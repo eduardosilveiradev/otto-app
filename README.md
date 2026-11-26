@@ -134,7 +134,7 @@ server fields and check them. For recording motion: `-faceBeat glance` or `-face
 does that on every idle beat), `-drowsy YES` or `NO` (the quiet-hours face, whatever the clock says),
 `-quickReply` (the sample backend answers a message in 1.5 s) and, with `-jobsThread`, `-jobsMerge`
 (the running job merges 8 s in). `-openPerson <name>` opens a person's page as a tap in iPhone Search
-does (`-openPersonAfter 5` waits that long first).
+does (`-openPersonAfter 5` waits that long first; `-openPerson "A|B"` opens one, then the other).
 
 A Release build with `OTHER_SWIFT_FLAGS='$(inherited) -DPERFDEMO'` also takes `-perfDemo`
 (sends, typing steps, tapbacks and replies in a loop, then prints how many frames ran late)

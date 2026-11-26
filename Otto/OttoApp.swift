@@ -38,9 +38,14 @@ struct OttoApp: App {
         ScreenShare.clear(); DictationBridge.post(ScreenShare.stop)
         #if DEBUG
         if CommandLine.arguments.contains("-onboarding") { UserDefaults.standard.set(false, forKey: "onboarded") }
-        // `-openPerson <name>` (with `-openPersonAfter <seconds>`): as if they'd been tapped in iPhone Search.
-        if let name = UserDefaults.standard.string(forKey: "openPerson") {
-            Task { try? await Task.sleep(for: .seconds(UserDefaults.standard.double(forKey: "openPersonAfter"))); Doors.open("person", person: name) }
+        // `-openPerson <name>` (`A|B`: one, then the other; `-openPersonAfter <seconds>` before each): as if tapped in iPhone Search.
+        if let names = UserDefaults.standard.string(forKey: "openPerson") {
+            Task {
+                for name in names.split(separator: "|") {
+                    try? await Task.sleep(for: .seconds(UserDefaults.standard.double(forKey: "openPersonAfter")))
+                    Doors.open("person", person: String(name))
+                }
+            }
         }
         // `-callActivity`: a call's Live Activity 83 seconds in, for screenshots of the Lock Screen and the Dynamic Island.
         if CommandLine.arguments.contains("-callActivity") {
