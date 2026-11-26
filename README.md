@@ -35,8 +35,9 @@ what Otto knows about your day.
 - People in iPhone Search: once the People page has loaded, type a name in
   Search to see who that person is to you (relationship, where they work, their
   city). Their notes and memories stay out of it. Tap the result to open their
-  page. Forgetting a memory takes them out until People loads again. So does a
-  token the Mac has revoked, or pairing with a different Mac
+  page. They leave Search when you forget a memory (until People loads again),
+  when the Mac revokes this phone's token, and when the app is paired with
+  another Mac or none
 - Web calls to Otto through [Vapi](https://vapi.ai), if you have it set up
 - Local notifications while the app is in the background
 - Talk mode: hands-free voice with Otto. You talk, a pause ends your turn,

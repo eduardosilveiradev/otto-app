@@ -23,12 +23,13 @@ enum PeopleSearch {
     /// One person's entry, from the four fields alone, so nothing else of theirs can reach Search
     /// (Scripts/people-search-check.sh).
     static func item(_ name: String, _ relationship: String?, _ org: String?, _ city: String?) -> CSSearchableItem {
-        let a = CSSearchableItemAttributeSet(contentType: .contact)
+        let a = CSSearchableItemAttributeSet(contentType: .text)
         a.title = name
         let about = [relationship, org, city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         a.contentDescription = about.isEmpty ? nil : about
         let item = CSSearchableItem(uniqueIdentifier: name, domainIdentifier: domain, attributeSet: a)
-        item.expirationDate = .distantFuture   // not the default month: they stay until the Mac's list or one of the above takes them out
+        // A year, not the default month: People isn't opened every month, and a name shouldn't drop out of Search for that.
+        item.expirationDate = .now.addingTimeInterval(365 * 24 * 3600)
         return item
     }
 
