@@ -12,6 +12,7 @@ struct OttoWidgets: WidgetBundle {
         OttoWalkieControl()
         OttoCallActivity()
         OttoTalkActivity()
+        OttoFlightActivity()
     }
 }
 
@@ -234,6 +235,150 @@ struct OttoTalkActivity: Widget {
                 OttoFace(size: 22)
             }
             .widgetURL(URL(string: "otto://walkie"))
+        }
+    }
+}
+
+/// Today's flight: the gate, terminal, seat and time to departure, with what flight status says, kept current by
+/// the app (GateWatch). Dark in either appearance, as the call and the talk are. A tap opens the thread, whose
+/// banner holds the pass.
+struct OttoFlightActivity: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: FlightActivityAttributes.self) { context in
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    FlightName(flight: context.attributes)
+                    Spacer(minLength: 8)
+                    FlightStatus(state: context.state).layoutPriority(1)
+                }
+                FlightFacts(state: context.state, over: context.isStale)
+            }
+            .padding(16)
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)   // inside the Lock Screen's 160pt
+            .environment(\.colorScheme, .dark)
+            .activityBackgroundTint(.black)
+            .activitySystemActionForegroundColor(.white)
+            .widgetURL(URL(string: "otto://chat"))
+        } dynamicIsland: { context in
+            DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) { FlightName(flight: context.attributes, stacked: true) }
+                DynamicIslandExpandedRegion(.trailing) { FlightStatus(state: context.state) }
+                DynamicIslandExpandedRegion(.bottom) { FlightFacts(state: context.state, over: context.isStale).padding(.top, 8) }
+            } compactLeading: {
+                HStack(spacing: 4) {
+                    Image(systemName: "airplane")
+                    if let gate = context.state.gate { Text(gate).fontWeight(.semibold) }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(context.state.gate.map { "Gate \($0)" } ?? "Flight \(context.attributes.flight)")
+            } compactTrailing: {
+                FlightClock(state: context.state, over: context.isStale).frame(maxWidth: 56)
+            } minimal: {
+                Image(systemName: "airplane").accessibilityLabel("Flight \(context.attributes.flight)")
+            }
+            .widgetURL(URL(string: "otto://chat"))
+        }
+    }
+}
+
+/// "TA 482  SFO → JFK", or the two on their own lines in the island's narrow corner.
+struct FlightName: View {
+    let flight: FlightActivityAttributes
+    var stacked = false
+    private var route: String? {
+        guard let from = flight.from, let to = flight.to else { return flight.from ?? flight.to }
+        return "\(from) → \(to)"
+    }
+    var body: some View {
+        Group {
+            if stacked {
+                VStack(alignment: .leading, spacing: 2) {
+                    name
+                    if let route { Text(route).font(.caption).foregroundStyle(.secondary) }
+                }
+            } else {
+                // Beside a long status the route gives way, not the flight number.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        name
+                        if let route { Text(route).font(.subheadline).foregroundStyle(.secondary) }
+                    }
+                    name
+                }
+            }
+        }
+        .lineLimit(1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(["Flight \(flight.flight)", flight.from.flatMap { f in flight.to.map { "\(f) to \($0)" } }].compactMap { $0 }.joined(separator: ", "))
+    }
+    private var name: some View { Label(flight.flight, systemImage: "airplane.departure").font(.headline) }
+}
+
+/// What flight status says, in the boarding pass's colours for a dark ground.
+struct FlightStatus: View {
+    let state: FlightActivityAttributes.ContentState
+    var body: some View {
+        Text(state.status)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(ink)
+            .lineLimit(1)
+    }
+    private var ink: Color {
+        switch state.tone {
+        case .ok: Color(red: 0.447, green: 0.839, blue: 0.690)    // #72D6B0
+        case .late: .tangerine                                     // a delay needs you
+        case .bad: Color(red: 0.976, green: 0.439, blue: 0.400)   // #F97066
+        case .quiet: .secondary
+        }
+    }
+}
+
+/// Gate, terminal and seat, and the time to departure.
+struct FlightFacts: View {
+    let state: FlightActivityAttributes.ContentState
+    /// Past departure (the content's stale date): the time, not a countdown.
+    let over: Bool
+    var body: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 20) {
+            fact("Gate", state.gate)
+            fact("Terminal", state.terminal)
+            fact("Seat", state.seat)
+            VStack(alignment: .trailing, spacing: 2) {
+                // The banner's words: "09:25, was 08:45" when it moved.
+                Text(FlightClock.counting(state, over: over) ? state.was.map { "\(state.time), was \($0)" } ?? "Departs \(state.time)" : "Departs")
+                    .font(.caption).foregroundStyle(.secondary)
+                FlightClock(state: state, over: over).font(.title2.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .accessibilityElement(children: .combine)
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+    }
+
+    private func fact(_ title: String, _ value: String?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value ?? "—").font(.title2.weight(.semibold))
+        }
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(value.map { "\(title) \($0)" } ?? "\(title) not known yet")
+    }
+}
+
+/// The countdown to departure, kept by the system; once it's gone (or the flight's cancelled), the time instead.
+struct FlightClock: View {
+    let state: FlightActivityAttributes.ContentState
+    let over: Bool
+    static func counting(_ s: FlightActivityAttributes.ContentState, over: Bool) -> Bool { !over && s.tone != .bad }
+    var body: some View {
+        if Self.counting(state, over: over) {
+            // From no later than the end: a range past its end would trap if the view draws after departure.
+            Text(timerInterval: min(.now, state.departs)...state.departs, countsDown: true)
+                .monospacedDigit().multilineTextAlignment(.trailing)
+        } else {
+            Text(state.time).monospacedDigit()
         }
     }
 }

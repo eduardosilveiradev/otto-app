@@ -44,7 +44,9 @@ what Otto knows about your day.
 - Widgets: a small one for the Home Screen that opens the chat and shows an
   approval waiting on you, and a round one for the Lock Screen that opens talk
   mode. A web call or a talk shows on the Lock Screen and in the Dynamic Island
-  while it lasts
+  while it lasts. So does a flight leaving today, with its gate, terminal, seat
+  and a countdown. It picks up any delay or gate change the app hears of, and
+  goes an hour after departure
 - An approval put off with Later waits over the composer with the time the
   Mac still holds it
 - PDFs: shared from any app, or from the composer's + menu; they go as

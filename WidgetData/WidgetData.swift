@@ -74,6 +74,33 @@ struct TalkActivityAttributes: ActivityAttributes {
     }
 }
 
+/// Today's flight on the Lock Screen and in the Dynamic Island: the flight-day card (GateWatch) cut down to what
+/// a locked phone may show. Never the booking reference or the pass picture.
+struct FlightActivityAttributes: ActivityAttributes {
+    /// The card's key: a different flight gets its own.
+    let key: String
+    /// "TA 482", and the airport codes when known.
+    let flight: String
+    var from: String?
+    var to: String?
+
+    struct ContentState: Codable, Hashable {
+        /// Departure, estimated when known: what the countdown counts to.
+        var departs: Date
+        /// The same as wall clock at the airport ("09:25"), and the booked one when it moved.
+        var time: String
+        var was: String?
+        var gate: String?
+        var terminal: String?
+        var seat: String?
+        /// The boarding pass's badge ("Delayed", "Cancelled") and its colour.
+        var status: String
+        var tone: Tone
+    }
+
+    enum Tone: String, Codable, Hashable { case ok, late, bad, quiet }
+}
+
 /// The talk's own buttons on its Live Activity, run in the app (the app points `run` at the talk).
 struct MuteOttoTalk: LiveActivityIntent {
     static let title: LocalizedStringResource = "Mute or unmute the talk with Otto"

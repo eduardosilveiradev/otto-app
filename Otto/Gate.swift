@@ -1,3 +1,4 @@
+import ActivityKit
 import SwiftUI
 import PhotosUI
 
@@ -45,6 +46,9 @@ struct GateReply: Decodable { let card: GateCard? }
 /// there at the gate with no signal. The server only ever adds to what's known.
 @MainActor @Observable
 final class GateWatch {
+    /// One for the app: the thread's banner reads it and the background refresh polls it.
+    static let shared = GateWatch()
+
     private(set) var card: GateCard?
     private(set) var fetchedAt: Date?
     private(set) var pass: UIImage?
@@ -73,11 +77,19 @@ final class GateWatch {
 
     func run(_ backend: OttoBackend) async {
         while !Task.isCancelled {
-            let reply = await backend.gate()
-            if let reply { apply(reply.card) }
+            let reply = await poll(backend)
             let soon = card?.departure.map { $0.timeIntervalSinceNow < 3 * 3600 } ?? false
             try? await Task.sleep(for: reply == nil || soon ? .seconds(60) : .seconds(300))
         }
+    }
+
+    /// One read of the card, then the Lock Screen brought in line with it (also when the Mac didn't answer,
+    /// so the activity still goes an hour after departure).
+    @discardableResult func poll(_ backend: OttoBackend) async -> GateReply? {
+        let reply = await backend.gate()
+        if let reply { apply(reply.card) }
+        syncActivity()
+        return reply
     }
 
     private func apply(_ next: GateCard?) {
@@ -104,6 +116,58 @@ final class GateWatch {
     func removePass() {
         if let c = card { try? FileManager.default.removeItem(at: passFile(c.key)) }
         pass = nil
+    }
+}
+
+// MARK: - On the Lock Screen
+
+/// What the Lock Screen does with a card leaving at `departs`, given whether its activity is up (`live`) and
+/// whether one was already started for it. It starts on the day, before departure and at most 8 hours ahead
+/// (iOS ends a Live Activity after 8 hours, so an earlier start would freeze before the gate is known). One
+/// swiped away stays away. At departure it is ended, kept on screen until an hour after, as the banner is.
+enum LockScreenStep: Equatable {
+    case start, update, leave(at: Date), none
+
+    static func next(departs d: Date, live: Bool, started: Bool, now: Date) -> LockScreenStep {
+        if live { return now < d ? .update : .leave(at: d.addingTimeInterval(3600)) }
+        let soon = now < d && d.timeIntervalSince(now) <= 8 * 3600
+        return !started && soon && Calendar.current.isDate(d, inSameDayAs: now) ? .start : .none
+    }
+}
+
+extension GateWatch {
+    /// ponytail: updates come from this app's polls (Keepalive keeps them going while locked, else the
+    /// background refresh); asleep past departure, it lingers until the next poll. A server push would fix both.
+    func syncActivity(now: Date = .now) {
+        let card = visible(at: now), all = Activity<FlightActivityAttributes>.activities
+        for a in all where a.attributes.key != card?.key { Task { await a.end(nil, dismissalPolicy: .immediate) } }
+        guard let card, let d = card.departure else { return }
+        let live = all.first { $0.attributes.key == card.key && [.active, .stale].contains($0.activityState) }
+        let content = ActivityContent(state: FlightActivityAttributes.ContentState(card, departs: d), staleDate: d)
+        let started = UserDefaults.standard.string(forKey: "flightActivity") == card.key
+        switch LockScreenStep.next(departs: d, live: live != nil, started: started, now: now) {
+        case .start:
+            guard ActivityAuthorizationInfo().areActivitiesEnabled,
+                  (try? Activity.request(attributes: FlightActivityAttributes(card), content: content)) != nil else { return }
+            UserDefaults.standard.set(card.key, forKey: "flightActivity")
+        case .update:
+            if let live, live.content.state != content.state { Task { await live.update(content) } }
+        case .leave(let at):
+            if let live { Task { await live.end(content, dismissalPolicy: .after(at)) } }
+        case .none: break
+        }
+    }
+}
+
+extension FlightActivityAttributes {
+    init(_ c: GateCard) { self.init(key: c.key, flight: c.flightLabel, from: c.from, to: c.to) }
+}
+
+extension FlightActivityAttributes.ContentState {
+    init(_ c: GateCard, departs: Date) {
+        let s = GateStatus(c)
+        self.init(departs: departs, time: c.departsEst ?? c.departs, was: c.departsEst == nil ? nil : c.departs,
+                  gate: c.gate, terminal: c.terminal, seat: c.seat, status: s.label, tone: s.tone)
     }
 }
 
@@ -160,7 +224,7 @@ struct GateBanner: View {
 
 /// The badge: what flight status says, or "Scheduled" when nothing live is known.
 struct GateStatus: Equatable {
-    enum Tone { case ok, late, bad, quiet }
+    typealias Tone = FlightActivityAttributes.Tone
     let label: String
     let tone: Tone
 
