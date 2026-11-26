@@ -4,6 +4,8 @@ import VisionKit
 
 /// The contact card: what Otto knows about today, and the few settings there are.
 struct DetailsView: View {
+    /// The header's face, so the one zooming in is the one that was there.
+    var look: FaceLook? = nil
     @Environment(OttoStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     // Server URL and token persist (LiveBackend.fromDefaults reads them at launch).
@@ -53,7 +55,8 @@ struct DetailsView: View {
                 Group {
                 Section {
                     VStack(spacing: 8) {
-                        OttoAvatar(size: 78, asleep: store.asleep, pokeable: true)   // a tap: a hop and a smile, nothing else
+                        OttoAvatar(size: 78, asleep: store.asleep, pokeable: true, look: look)   // a tap: a hop and a smile, nothing else
+                            .background(CardZoom.Mark())
                         Text("Otto").font(.title2.weight(.semibold))
                         // isLive isn't observable, so re-read it every second while the sheet is open.
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
@@ -261,6 +264,7 @@ struct DetailsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .containerBackground(.clear, for: .navigation)   // the glass behind is CardZoom's
             .task {
                 #if DEBUG
                 // `-pasteLink <otto://pair…>`: as if a pairing link had just been pasted into the address, for screenshots.
@@ -455,6 +459,137 @@ struct DetailsView: View {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Opens the contact card from the header's face, Messages-style: the face moves and grows into the card's own as the
+/// card zooms open around it, and shrinks back into the header on close (a swipe down too, which can be let go of to
+/// stay). UIKit's zoom grows the whole card out of its source's rect, so the source is a stand-in the card's shape,
+/// scaled and placed so the card's face starts exactly on the header's (SwiftUI's zoom can't be given one, and UIKit's
+/// alignment rect didn't line them up). The header's face fades as the card's comes in over it, and fades back in under
+/// the closing card for the card's to land on: where they hand over, the two are the same look in the same place,
+/// breathing on the same clock (FaceUIView.phase). Reduce Motion: a cross-fade.
+struct CardZoom: UIViewRepresentable {
+    let open: Bool
+    let look: FaceLook
+    let store: OttoStore
+    /// Whether the header shows its face: not while the card is up.
+    let face: (Bool) -> Void
+    /// The card has gone, or couldn't come up.
+    let closed: () -> Void
+
+    func makeUIView(context: Context) -> Seat { let s = Seat(); s.isUserInteractionEnabled = false; return s }   // the tap is the header button's
+    func updateUIView(_ seat: Seat, context: Context) {
+        seat.face = face
+        seat.closed = closed
+        seat.card?.rootView = card
+        seat.want(open ? card : nil)
+    }
+    private var card: AnyView {
+        AnyView(DetailsView(look: look).environment(store).background {
+            // Liquid Glass over the thread, as Messages does, with a wash in both modes so the thread's bubbles don't
+            // show through as smudges.
+            Color.clear.glassEffect(.regular, in: .rect)
+                .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor.black.withAlphaComponent(0.6) : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
+                .ignoresSafeArea()
+        })
+    }
+
+    /// Behind the card's face: where the header's face lines up.
+    struct Mark: UIViewRepresentable {
+        func makeUIView(context: Context) -> UIView { let v = UIView(); v.isUserInteractionEnabled = false; CardZoom.mark = v; return v }
+        func updateUIView(_ v: UIView, context: Context) {}
+    }
+    @MainActor fileprivate static weak var mark: UIView?
+
+    /// Behind the header's face: the zoom's source, and what presents the card.
+    final class Seat: UIView {
+        var face: (Bool) -> Void = { _ in }
+        var closed: () -> Void = {}
+        fileprivate(set) var card: Host?
+        private var wanted: AnyView?
+
+        func want(_ view: AnyView?) { wanted = view; sync() }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            DispatchQueue.main.async { self.sync() }   // `-details`: the thread has to be up before anything goes over it
+        }
+
+        private func sync() {
+            if let wanted, card == nil, window != nil, let from = owner {
+                // Something else is up already (a sheet): no card, and the header gets its face back.
+                if from.presentedViewController == nil { present(wanted, from: from) } else { DispatchQueue.main.async(execute: closed) }
+            }
+            else if wanted == nil, let card, card.presentingViewController != nil, !card.isBeingDismissed {
+                // Mid-zoom in: it turns back once it lands.
+                if let t = card.transitionCoordinator { t.animate(alongsideTransition: nil) { [weak self] _ in self?.sync() } }
+                else { card.dismiss(animated: true) }
+            }
+        }
+
+        private var owner: UIViewController? {
+            var r: UIResponder? = self
+            while let n = r?.next { if let vc = n as? UIViewController { return vc }; r = n }
+            return nil
+        }
+
+        private func present(_ view: AnyView, from: UIViewController) {
+            let host = Host(rootView: view)
+            host.view.backgroundColor = .clear
+            host.face = { [weak self] in self?.face($0) }
+            host.gone = { [weak self] in self?.card = nil; self?.closed() }
+            if UIAccessibility.isReduceMotionEnabled {
+                host.modalTransitionStyle = .crossDissolve
+                DispatchQueue.main.async { self.face(false) }   // not inside the view update that asked for the card
+            } else {
+                host.preferredTransition = .zoom { [weak self] ctx in
+                    guard let self else { return nil }
+                    // Asked for as the zoom starts, both ways. On the way in, the header's face goes only now, so there's no gap.
+                    if !ctx.zoomedViewController.isBeingDismissed { self.face(false) }
+                    return self.source(for: ctx.zoomedViewController.view)
+                }
+            }
+            host.modalPresentationStyle = .overFullScreen   // after the zoom, which sets its own: the thread stays under the glass
+            card = host
+            from.present(host, animated: true)
+        }
+
+        /// The card's shape at the header face's size, placed so the card's face lies on it. This face itself when the
+        /// card's isn't where it opened (scrolled off, or under a pushed page): the card shrinks into it whole.
+        private func source(for card: UIView) -> UIView {
+            card.layoutIfNeeded()   // on the way in it hasn't been yet
+            guard let mark = CardZoom.mark, mark.window != nil, !mark.bounds.isEmpty else { return self }
+            let face = mark.convert(mark.bounds, to: card)
+            guard card.bounds.contains(face) else { return self }
+            let k = bounds.width / face.width
+            stand.frame = CGRect(x: -face.minX * k, y: -face.minY * k, width: card.bounds.width * k, height: card.bounds.height * k)
+            return stand
+        }
+        private lazy var stand: UIView = { let v = UIView(); v.isUserInteractionEnabled = false; addSubview(v); return v }()
+    }
+
+    /// The card. The header's face comes back under it as it closes: from the start for Back, and for a swipe down only
+    /// once it's let go to close (while the finger holds the card, its face is the only one).
+    final class Host: UIHostingController<AnyView> {
+        var face: (Bool) -> Void = { _ in }
+        var gone: () -> Void = {}
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            guard isBeingDismissed else { return }
+            if let t = transitionCoordinator, t.isInteractive {
+                t.notifyWhenInteractionChanges { [weak self] c in if !c.isCancelled { self?.face(true) } }
+            } else {
+                face(true)
+            }
+        }
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            face(false)
+        }
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            if isBeingDismissed { gone() }
         }
     }
 }

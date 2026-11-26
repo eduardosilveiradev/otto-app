@@ -48,7 +48,8 @@ extension OttoStore: ChatThread {
 struct ChatView: View {
     @Environment(OttoStore.self) private var store
     @State private var showDetails = ProcessInfo.processInfo.arguments.contains("-details")
-    @Namespace private var card
+    /// The contact card is coming up or up: the header's face is in it (CardZoom).
+    @State private var cardUp = false
     /// The live browser tile, opened full screen.
     @State private var browserOpen = ProcessInfo.processInfo.arguments.contains("-browserOpen")
     /// Otto's Chrome tile, in its own thread and only while the server can be heard (a stale one would mislead).
@@ -375,21 +376,9 @@ struct ChatView: View {
                 .transition(.opacity)
             }
         }
-        // Messages opens the contact card by zooming it out of the header, glass over the blurred
-        // thread, edge to edge (measured off a screen recording), and closes it back into the header.
+        // The contact card zooms out of the header's face (CardZoom, on the face below).
         // Something elsewhere put words in the composer (a memory's Correct): the card steps aside for them.
         .onChange(of: store.prefill) { _, words in if words != nil { showDetails = false } }
-        .fullScreenCover(isPresented: $showDetails) {
-            DetailsView()
-                .navigationTransition(.zoom(sourceID: "card", in: card))
-                .presentationBackground {
-                    // Liquid Glass over the thread, as Messages does, with a wash in both modes so the
-                    // thread's bubbles and the header's face don't show through as smudges.
-                    Color.clear.glassEffect(.regular, in: .rect)
-                        .overlay(Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor.black.withAlphaComponent(0.6) : UIColor.systemGroupedBackground.withAlphaComponent(0.55) }))
-                        .ignoresSafeArea()
-                }
-        }
         .fullScreenCover(isPresented: webCall) { CallView(context: callContext) }
         .fullScreenCover(isPresented: Binding(get: { MediaViewer.shared.start != nil }, set: { if !$0 { MediaViewer.shared.start = nil } })) {
             MediaViewerView(store: store).presentationBackground(.clear)
@@ -749,17 +738,26 @@ struct ChatView: View {
             .liftedTitle()
         } else if pipsOn {
             Button { showDetails = true } label: {
-                HeaderTitle(name: "Otto", status: offline) { FaceView(look: ottoLook, size: 68, live: true, joys: joys).frame(width: 68, height: 68).hop(hops: hops, joys: joys, size: 68, roomAbove: false).launchSeat() }
+                HeaderTitle(name: "Otto", status: offline) { FaceView(look: ottoLook, size: 68, live: true, joys: joys).frame(width: 68, height: 68).hop(hops: hops, joys: joys, size: 68, roomAbove: false).launchSeat().background(cardZoom) }
             }
             .buttonStyle(.press)
             .liftedTitle()
-            .matchedTransitionSource(id: "card", in: card)
         } else {
             Button { showDetails = true } label: {
-                HeaderTitle(name: "Otto", status: offline) { OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, hops: hops, joys: joys, roomAbove: false).launchSeat() }
+                HeaderTitle(name: "Otto", status: offline) { OttoAvatar(size: 60, thinking: store.ottoTyping, asleep: store.asleep, hops: hops, joys: joys, roomAbove: false).launchSeat().background(cardZoom) }
             }
             .buttonStyle(.press)
-            .matchedTransitionSource(id: "card", in: card)
+        }
+    }
+
+    /// The contact card, zoomed out of the face it sits behind, wearing the face the header shows.
+    private var cardZoom: CardZoom {
+        CardZoom(open: showDetails, look: pipsOn ? ottoLook : .otto.with(store.asleep ? .asleep : store.ottoTyping ? .working : .rest), store: store) { on in
+            // Out quickly as the card's face comes in over it; back in under the closing card, arriving as its face lands.
+            withAnimation(on ? .easeIn(duration: 0.3) : .easeOut(duration: 0.12)) { cardUp = !on }
+        } closed: {
+            cardUp = false
+            showDetails = false
         }
     }
 
@@ -857,8 +855,8 @@ struct ChatView: View {
                 }
             }
             // Hidden while the contact card is up, so the header's face doesn't show through its glass as a
-            // second, blurred Otto; it's back as the card zooms closed.
-            title.tint(.primary).opacity(showDetails ? 0 : 1)
+            // second, blurred Otto; it's back under the card as it closes, for the card's face to land on.
+            title.tint(.primary).opacity(cardUp ? 0 : 1)
                 // The pull-downs' way in for VoiceOver and Full Keyboard Access.
                 .accessibilityAction(named: "Search messages", openSearch)
         }

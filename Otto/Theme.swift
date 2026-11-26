@@ -14,11 +14,13 @@ struct OttoAvatar: View {
     var pokeable = false
     /// Off where there's no room above it (the header, right under the status bar): the beat pops in place instead of hopping.
     var roomAbove = true
+    /// Wins over `thinking` and `asleep`: the contact card wears whatever face the header has.
+    var look: FaceLook? = nil
     @State private var pokes = 0
 
     var body: some View {
         // Small faces play cached frames; large ones render live, for the eye transitions.
-        FaceView(look: .otto.with(asleep ? .asleep : thinking ? .working : .rest), size: size, live: size > 32, joys: joys + pokes)
+        FaceView(look: look ?? .otto.with(asleep ? .asleep : thinking ? .working : .rest), size: size, live: size > 32, joys: joys + pokes)
             .frame(width: size, height: size)
             .hop(hops: hops, joys: joys + pokes, size: size, roomAbove: roomAbove)
             .contentShape(.circle)
