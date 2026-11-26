@@ -63,6 +63,20 @@ struct DashMoney: Decodable {
     let records: [Row]; let byCurrency: [Total]; let byMonth: [Month]; let byCategory: [Category]
 }
 
+/// Outside DashMoney's body: Scripts/money-check.sh lifts that struct into a script without WidgetData.
+extension DashMoney {
+    /// What "This month's spending" shows, from the page read for `now`'s month: the server's totals, the most used
+    /// currency first, and its top category (byCategory comes in that currency, largest first). No charge goes over.
+    func spending(on now: Date = .now) -> WidgetData.Spending {
+        .init(totals: byCurrency.map { .init(currency: $0.currency, total: $0.total) },
+              top: byCategory.first.map { .init(category: $0.category.prefix(1).uppercased() + $0.category.dropFirst(), total: $0.total) },   // "Eating out"
+              until: Calendar.current.dateInterval(of: .month, for: now)?.end ?? now)
+    }
+}
+
+/// "2026-11", the money page's month filter, for the month `now` is in here.
+func monthKey(_ now: Date = .now) -> String { now.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month()) }
+
 struct DashTrips: Decodable {
     struct Zoned: Decodable { let local: String; let zone: String? }
     struct Segment: Decodable {

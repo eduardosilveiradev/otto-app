@@ -38,6 +38,28 @@ enum WidgetData {
         get { suite?.data(forKey: "widgetArriving").flatMap { try? JSONDecoder().decode(Arriving.self, from: $0) } }
         set { suite?.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: "widgetArriving") }
     }
+
+    /// This month's spending, for its widget: the total per currency, the most used first, and the category with the
+    /// most in that one. Never a charge, and never currencies added together. `until` is the next month's start.
+    struct Spending: Codable, Equatable {
+        struct Total: Codable, Equatable {
+            let currency: String
+            let total: Double
+        }
+        struct Top: Codable, Equatable {
+            let category: String
+            let total: Double
+        }
+        let totals: [Total]
+        let top: Top?
+        let until: Date
+    }
+
+    /// Written by the app each time it reads the month's money page (OttoStore.syncSpending).
+    static var spending: Spending? {
+        get { suite?.data(forKey: "widgetSpending").flatMap { try? JSONDecoder().decode(Spending.self, from: $0) } }
+        set { suite?.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: "widgetSpending") }
+    }
 }
 
 /// A web call with Otto, on the Lock Screen and in the Dynamic Island while it lasts. The app starts and

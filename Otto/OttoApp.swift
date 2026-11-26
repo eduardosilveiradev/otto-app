@@ -67,8 +67,8 @@ struct OttoApp: App {
             .onOpenURL { url in
                 if url.host == "dictate" { Dictation.shared.openedFromKeyboard(); return }
                 // The widgets: Otto's thread, talk mode (still at its walkie-talkie address), an approval put off with Later,
-                // or the Packages page (Arriving today).
-                if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval", "packages"].contains(door) { Doors.open(door); return }
+                // the Packages page (Arriving today) or Money on this month (This month's spending).
+                if url.scheme == "otto", let door = url.host, ["chat", "walkie", "approval", "packages", "money"].contains(door) { Doors.open(door); return }
                 // A pairing link from the Camera's QR banner, AirDrop or a message. Anyone can make one, so it is
                 // only held here: onboarding and the main screen each ask, naming the Mac, before any of it is used.
                 if let link = PairingLink(url.absoluteString) { PairInbox.shared.link = link; return }
@@ -108,6 +108,7 @@ struct OttoApp: App {
         case "approval": if store.shownApproval == nil, let w = store.waitingApproval { store.reopenApproval(w.id) }
         case "packages": store.openPage = "Packages"
         case "person": store.openPerson = person
+        case "money": store.openPage = "Money this month"
         default: break
         }
     }
@@ -535,6 +536,16 @@ final class OttoStore {
         guard arriving != WidgetData.arriving else { return }
         WidgetData.arriving = arriving
         WidgetCenter.shared.reloadTimelines(ofKind: "dev.otto.arriving")
+    }
+
+    /// The "This month's spending" widget, from the Mac's money page for this month: when the arriving one syncs, and
+    /// when Otto records a charge. Never from sample data, as above.
+    func syncSpending() async {
+        guard !(backend is MockBackend), let m: DashMoney = await backend.dash("money", query: ["month": monthKey()]) else { return }
+        let spending = m.spending()
+        guard spending != WidgetData.spending else { return }
+        WidgetData.spending = spending
+        WidgetCenter.shared.reloadTimelines(ofKind: "dev.otto.spending")
     }
 
     /// The Home Screen widget's line: the approval waiting on you, until the Mac would drop it.
@@ -1089,6 +1100,7 @@ final class OttoStore {
             }
             messages.append(m)
             reconcileDesktop()
+            if m.recorded?.contains(where: { $0.kind == "money" }) == true { Task { await syncSpending() } }   // a charge Otto just wrote down
             if let otp = m.otp { otpDrawer = m; offerToKeyboard(otp, sent: m.date) }
             if !foreground && m.from == .otto && m.quiet != true && backend.desktopSync?.snapshot.read.contains(m.wireID) != true { Notifier.shared.post(m) }
         }
@@ -1265,6 +1277,7 @@ final class OttoStore {
         await catchUp(notify: true, background: true)
         await syncApprovals(background: true)
         await syncArriving()
+        await syncSpending()
         await pips.backgroundCatchUp()
         await GateWatch.shared.poll(backend)   // today's flight on the Lock Screen, with Keepalive off
         await reportHealth("refresh")
@@ -1293,7 +1306,7 @@ final class OttoStore {
     /// the fact that the server has it after all.
     /// Back in front: a socket iOS froze in the background looks alive but dropped what was sent into it
     /// (a tapback, an edit, a reply), and no reconnect means no catch-up. One history read fills it in.
-    func resync(probe: Bool = true) { Task { if probe { await backend.probe() }; await catchUp(notify: false) }; Task { await syncApprovals() }; Task { await syncArriving() } }
+    func resync(probe: Bool = true) { Task { if probe { await backend.probe() }; await catchUp(notify: false) }; Task { await syncApprovals() }; Task { await syncArriving(); await syncSpending() } }
 
     /// Otto deleted these (a live "delete" frame, or history on reconnect): out of the thread and the
     /// saved copy, with what pointed at them. An id that isn't here changes nothing.
