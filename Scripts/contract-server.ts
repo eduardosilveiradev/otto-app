@@ -10,6 +10,8 @@
  * `-onboarded YES -serverURL http://127.0.0.1:<port> -serverToken t`. Every request and frame is logged.
  *
  *   curl -X POST 'localhost:<port>/test/raise?kind=cal'      raise an approval that offers scopes (kind=draft: an email)
+ *   curl -X POST 'localhost:<port>/test/revoke?token=t'      revoke a token as `apptokens.ts revoke` does: its sockets close with 4401,
+ *                                                            and it gets a 401 from then on (token `revoked` always does)
  *   curl -X POST 'localhost:<port>/test/settle?id=a-cal'     settle it as the Mac would
  *   add &quiet=1 to either to send no socket frame, so only GET /app/approvals can tell the phone
  *   curl -X POST 'localhost:<port>/test/browser'             show a page Otto is stuck on, that it will hand over
@@ -78,6 +80,7 @@ async function speak(ws: any, turn: string) {
   }
   ws.send(JSON.stringify({ type: 'talk.done', turn }))
 }
+const revoked = new Set(['revoked'])
 const expires = () => new Date(Date.now() + 24 * 60_000).toISOString()
 type Approval = Record<string, unknown> & { id: string }
 const approvals = new Map<string, Approval>()
@@ -107,6 +110,14 @@ Bun.serve({
     const u = new URL(req.url), p = u.pathname
     if (p !== '/app') log(req.method, p + u.search, req.headers.get('x-otto-background') ? '(background)' : '')
     if (Date.now() < downUntil && !p.startsWith('/test/')) return new Response('down', { status: 503 })   // out of reach
+    // A revoked device: every /app request, the socket's handshake too, gets otto/server.ts's bare 401.
+    const token = req.headers.get('authorization')?.replace(/^Bearer /, '') ?? ''
+    if (p.startsWith('/app') && revoked.has(token)) { log('401', p); return new Response(null, { status: 401 }) }
+    if (p === '/test/revoke') {
+      const t = u.searchParams.get('token') ?? ''; revoked.add(t)
+      for (const ws of sockets) if (ws.data?.token === t) ws.close(4401, 'token revoked')
+      return Response.json({ revoked: t })
+    }
     if (p === '/app/voice' && req.method === 'POST' && !old) {
       const id = u.searchParams.get('id') ?? crypto.randomUUID()
       await req.arrayBuffer()
@@ -114,7 +125,7 @@ Bun.serve({
       if (takeIn(id, 'note')) setTimeout(() => answer(id), 1500)
       return Response.json({ text: 'Why is the sky blue?' })
     }
-    if (p === '/app') { await Bun.sleep(delay); return server.upgrade(req) ? undefined : new Response('upgrade failed', { status: 400 }) }
+    if (p === '/app') { await Bun.sleep(delay); return server.upgrade(req, { data: { token } }) ? undefined : new Response('upgrade failed', { status: 400 }) }
     if (p === '/test/raise') {
       const a = demo(u.searchParams.get('kind') ?? 'cal'); approvals.set(a.id, a); alerted.delete(a.id)
       if (u.searchParams.get('quiet') !== '1') for (const ws of sockets) ws.send(frame(a))

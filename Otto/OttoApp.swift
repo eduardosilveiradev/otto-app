@@ -8,8 +8,10 @@ import WidgetKit
 
 @main
 struct OttoApp: App {
-    /// Already paired means already set up: an install from before onboarding existed skips it.
-    @AppStorage("onboarded") private var onboarded = UserDefaults.standard.string(forKey: "serverURL")?.isEmpty == false
+    /// Already paired means already set up: an install from before onboarding existed skips it. Read once `init` has
+    /// run (its DEBUG arguments write it), saved on every change. State, not @AppStorage: at the App level that re-ran
+    /// the body for one flip and not the next, so setup finished after the Mac refused the token stayed on its last page.
+    @State private var onboarded: Bool
 
     init() {
         #if DEBUG
@@ -43,6 +45,7 @@ struct OttoApp: App {
             }
         }
         #endif
+        _onboarded = State(initialValue: Pairing.setUp())
     }
 
     var body: some Scene {
@@ -65,6 +68,9 @@ struct OttoApp: App {
                 Task { _ = try? await Wearables.shared.handleUrl(url) }
             }
             .modifier(DictationCover())
+            .onChange(of: onboarded) { _, on in UserDefaults.standard.set(on, forKey: "onboarded") }
+            // The Mac refused the token (LiveBackend): back to setup.
+            .onReceive(NotificationCenter.default.publisher(for: Pairing.forgotten)) { _ in onboarded = false }
         }
     }
 }
@@ -162,7 +168,9 @@ private struct MainRoot: View {
             } message: { Text(paired?.message ?? "") }
             .environment(store)
             // Notifications are asked for once, in onboarding, where "Not now" stays not now.
-            .task { await store.start() }
+            // Not tied to this view: it goes and comes back when the Mac refuses the token and setup runs again,
+            // and the store's readers outlive it (a second reader of one AsyncStream traps). start() runs once.
+            .task { Task { await store.start() } }
             .onChange(of: phase, initial: true) { _, p in
                 if store.foreground && p != .active { store.pips.leftApp() }
                 store.foreground = p == .active
@@ -531,7 +539,10 @@ final class OttoStore {
         return held.compactMap { kept.contains($0.id) ? $0 : fresh[$0.id] } + pending.filter { !had.contains($0.id) && !decided.contains($0.id) }
     }
 
+    @ObservationIgnored private var started = false
     func start() async {
+        guard !started else { return }
+        started = true
         #if PERFDEMO
         if ProcessInfo.processInfo.arguments.contains("-perfConnect") { Task { await perfConnect() } }
         #endif
