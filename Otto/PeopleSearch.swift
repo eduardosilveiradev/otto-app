@@ -4,8 +4,8 @@ import UniformTypeIdentifiers
 /// Otto's people in iPhone Search: type a name, see who they are to you. Each read of the Mac's people list
 /// (GET /app/dash/people) replaces what's there with each person's name, relationship, organisation and city,
 /// and nothing else of theirs: no notes, memories, money or email. A tap opens their page (OttoApp).
-/// LiveBackend takes them out again on a forget, when the Mac stops taking this phone's token (401), and at
-/// launch when the app is now paired with another Mac or none.
+/// LiveBackend takes them out again on a forget, when the Mac stops taking this phone's token (a 401, or the
+/// refusals that unpair the phone), and at launch when the app is now paired with another Mac or none.
 enum PeopleSearch {
     private static let domain = "people"
     /// The Mac whose people may be in Search. Never cleared: a launch on any other pairing clears Search again,

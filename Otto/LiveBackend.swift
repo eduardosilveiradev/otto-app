@@ -479,7 +479,7 @@ final class LiveBackend: OttoBackend {
                 // pair is saved. Anything else (no network, a Mac asleep or out of reach, a timeout) only waits for the next try.
                 if refusals >= Pairing.refusalsToForget {
                     let gone = lock.withLock { pair }
-                    await MainActor.run { if Pairing.forget(token: gone.token) { NotificationCenter.default.post(name: Pairing.forgotten, object: nil) } }
+                    await MainActor.run { if Pairing.forget(token: gone.token) { PeopleSearch.clear(); NotificationCenter.default.post(name: Pairing.forgotten, object: nil) } }
                     while !Task.isCancelled {
                         try? await Task.sleep(for: .seconds(2))
                         guard let s = LiveBackend.stored() else { continue }
