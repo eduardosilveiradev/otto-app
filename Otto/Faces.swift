@@ -439,8 +439,10 @@ final class FaceUIView: UIView {
     private var liveLayer: LiveFaceLayer?
     private var shown: (look: FaceLook, size: CGFloat, live: Bool, drift: Bool)?
     private var frames: FaceFrames?
-    /// Fixed once, so a face doesn't jump to a new moment in its blink when it's reconfigured.
-    private let phase = Double.random(in: 0...5)
+    /// Where the loops are: read off the clock, so a face that's reconfigured or mounted again carries on where it was,
+    /// and two faces of one look (the header's Otto and the contact card's, handed over in the zoom) move as one.
+    /// Different looks keep their own offsets, so a row of faces doesn't breathe in step.
+    private var phase: Double { CACurrentMediaTime() + Double(UInt(bitPattern: shown?.look.with(.rest).hashValue ?? 0) % 500) / 100 }
     var ring: UIColor = .systemBackground { didSet { if ring != oldValue { paint() } } }
 
     override init(frame: CGRect) {
