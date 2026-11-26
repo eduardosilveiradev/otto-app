@@ -94,9 +94,9 @@ const memory = [
   { id: 'm1', store: 'durable', kind: 'preference', scope: 'me', name: 'coffee-order', description: 'Flat white, oat milk. No sugar.', updated: '2026-11-01T08:00:00Z', hits: 14, lastHitDays: 1 },
   { id: 'm2', store: 'durable', kind: 'fact', scope: 'me', name: 'office-wifi', description: 'Network: Studio-5G. Password in 1Password.', updated: '2026-09-02T12:00:00Z', hits: 0, badge: 'never' },
 ]
-const person = (name: string, relationship: string | null, org: string | null, city: string | null) =>
-  ({ name, relationship, city, timezone: null, org, notes: [{ at: '2026-11-02T09:00:00Z', text: 'Wants the deposit back by December.' }], inbound: 4, outbound: 2, lastContact: '2026-11-20T18:00:00Z', mentions: [] })
-const people = [person('Odalys Fenwright', 'landlord’s contact', 'Casa Lettings', 'Lisbon'), person('Bruno Kestelmann', 'climbing partner', null, 'Porto'), person('Wren', null, null, null)]
+const person = (name: string, relationship: string | null, org: string | null, city: string | null, mentions: number[] = []) =>
+  ({ name, relationship, city, timezone: null, org, notes: [{ at: '2026-11-02T09:00:00Z', text: 'Wants the deposit back by December.' }], inbound: 4, outbound: 2, lastContact: '2026-11-20T18:00:00Z', mentions })
+const people = [person('Odalys Fenwright', 'landlord’s contact', 'Casa Lettings', 'Lisbon', [1]), person('Bruno Kestelmann', 'climbing partner', null, 'Porto'), person('Wren', null, null, null)]
 const frame = (a: Approval) => JSON.stringify({ type: 'approval', ...a })
 // The page Otto has open, for item 8: a grey picture, held or not.
 const PAGE = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA='

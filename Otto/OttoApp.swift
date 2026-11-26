@@ -314,7 +314,7 @@ final class OttoStore {
     /// A contact-card page a door asked for ("Packages", from the Arriving today widget): Otto's thread opens the
     /// card and the card goes to the page, taking it once (DetailsView).
     var openPage: String?
-    /// A person tapped in iPhone Search, by name: the contact card opens on People, which opens them and clears it.
+    /// A person tapped in iPhone Search, by name: the contact card opens on their page, and clears it.
     var openPerson: String?
     /// Memories you asked Otto to forget from their page, marked on their rows while they're still listed.
     var askedToForget: Set<String> = []

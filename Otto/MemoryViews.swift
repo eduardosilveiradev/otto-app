@@ -259,9 +259,6 @@ struct MemoryDetailScreen: View {
 
 struct PeopleScreen: View {
     @State private var query = ""
-    @Environment(OttoStore.self) private var store
-    /// The one tapped in iPhone Search; someone the Mac no longer lists leaves you on the list.
-    @State private var opened: PersonCard?
     var body: some View {
         let q = query   // by value, or typing wouldn't redraw the list
         Loaded(path: "people") { (p: People, reload) in
@@ -286,13 +283,7 @@ struct PeopleScreen: View {
             .emptyState(p.cards.isEmpty, "Nobody yet", systemImage: "person.2", "Tell Otto who someone is and they show up here.")
             .searchable(if: !p.cards.isEmpty, text: $query, prompt: "Search people")
             .refreshable { await reload() }
-            .onChange(of: store.openPerson, initial: true) { _, name in
-                guard let name else { return }
-                opened = p.cards.first { $0.name == name }
-                store.openPerson = nil
-            }
         }
-        .navigationDestination(item: $opened) { PersonScreen(card: $0) }
         .navigationTitle("People").navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -304,7 +295,7 @@ func localTime(_ tz: TimeZone, _ date: Date = .now) -> String {
     return date.formatted(f)
 }
 
-private struct PersonScreen: View {
+struct PersonScreen: View {
     let card: PersonCard
     @Environment(OttoStore.self) private var store
     @State private var mentions: [MemoryItem] = []
