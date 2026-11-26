@@ -101,7 +101,7 @@ struct Message: Identifiable, Codable {
     var replyGone: Bool? = nil
     /// Photos and files Otto sent, fetched on demand with `OttoBackend.file`.
     var files: [RemoteFile]? = nil
-    /// Otto's spoken version of `text`.
+    /// Otto's spoken version of `text`, or the server's copy of a voice note of yours sent from another device.
     var audio: RemoteFile? = nil
     /// Which notification stack it belongs to ("chat", or the topic of something Otto raised
     /// on its own), and "timeSensitive" when it shouldn't wait. See `Notifier.post`.
