@@ -267,6 +267,17 @@ enum ApprovalCheck {
         assert(today.parcels.map(\.id) == ["van", "due"] && today.parcels.map(\.what) == ["Lamp", "A package"] && today.parcels.map(\.out) == [true, false], "arriving today")
         assert(today.until == Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 26)) && parcels.arriving(on: today.until).parcels.isEmpty, "today only")
         assert(!String(decoding: try! JSONEncoder().encode(today), as: UTF8.self).contains("1Z999"), "no tracking number")
+        // This month's spending: the totals as the page gives them (the most used currency first), its top category in
+        // sentence case, until the next month's first day; no charge reaches the widget.
+        let money = try! JSONDecoder().decode(DashMoney.self, from: Data(#"""
+            {"records":[{"id":"r1","merchant":"Corner Bistro","amount":48.5,"currency":"EUR","date":"2026-11-24","category":"eating out"}],
+             "byCurrency":[{"currency":"EUR","total":48.5,"count":1},{"currency":"USD","total":20,"count":1}],"byMonth":[],
+             "byCategory":[{"category":"eating out","total":48.5,"count":1}]}
+            """#.utf8))
+        let spent = money.spending(on: noon)
+        assert(spent.totals == [.init(currency: "EUR", total: 48.5), .init(currency: "USD", total: 20)] && spent.top == .init(category: "Eating out", total: 48.5), "spending")
+        assert(spent.until == Calendar.current.date(from: DateComponents(year: 2026, month: 12, day: 1)) && monthKey(noon) == "2026-11", "this month")
+        assert(!String(decoding: try! JSONEncoder().encode(spent), as: UTF8.self).contains("Bistro"), "no charge")
         print("approval check ok")
         // An answer given with no socket never leaves the phone: it's said as that, and nothing is queued to
         // go out on the next connect (a stale yes then would be the worst of both).

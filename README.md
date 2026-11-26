@@ -52,7 +52,11 @@ what Otto knows about your day.
   mode. "Arriving today", on the Home Screen or the Lock Screen, shows a
   package that's out for delivery or due today and who's bringing it, never
   its tracking number. A tap opens Packages; it clears once the package is
-  marked delivered, or at midnight. A web call or a talk shows on the Lock
+  marked delivered, or at midnight. "This month's spending", a small one for
+  the Home Screen, shows what you've spent so far this month: the total in the
+  currency you use most, the others under it, and the category with the most.
+  It never adds currencies together or shows a single charge, and a tap opens
+  Money on this month. A web call or a talk shows on the Lock
   Screen and in the Dynamic Island while it lasts. So does a flight leaving
   today, with its gate, terminal, seat and a countdown. It picks up any delay
   or gate change the app hears of, and goes an hour after departure

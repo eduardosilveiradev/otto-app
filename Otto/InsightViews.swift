@@ -133,6 +133,9 @@ struct MoneyScreen: View {
     @State private var currency: String?
     @State private var category: String?
 
+    /// On one month ("2026-11"), as the spending widget opens it; the card's row opens it on all time.
+    init(month: String? = nil) { _month = State(initialValue: month) }
+
     private var query: [String: String] {
         var q: [String: String] = [:]
         q["month"] = month; q["currency"] = currency; q["category"] = category

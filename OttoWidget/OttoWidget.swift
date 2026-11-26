@@ -9,6 +9,7 @@ struct OttoWidgets: WidgetBundle {
     var body: some Widget {
         OttoChatWidget()
         OttoArrivingWidget()
+        OttoSpendingWidget()
         OttoWalkieWidget()
         OttoWalkieControl()
         OttoCallActivity()
@@ -212,6 +213,92 @@ struct ArrivingDoor: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: lock ? nil : .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct SpendingEntry: TimelineEntry {
+    let date: Date
+    /// Nil until the app has read this month's money page: not known, which isn't nothing spent.
+    var spending: WidgetData.Spending? = nil
+}
+
+/// The app writes the month's totals and reloads this; the timeline itself only has to drop them when the month ends.
+struct SpendingProvider: TimelineProvider {
+    /// For the widget gallery and the placeholder only.
+    private let sample = SpendingEntry(date: .now, spending: .init(totals: [.init(currency: "EUR", total: 1234.50), .init(currency: "USD", total: 86)],
+                                                                   top: .init(category: "Eating out", total: 312.40), until: .distantFuture))
+    func placeholder(in context: Context) -> SpendingEntry { sample }
+    func getSnapshot(in context: Context, completion: @escaping (SpendingEntry) -> Void) {
+        let now = entry()
+        completion(context.isPreview && now.spending == nil ? sample : now)
+    }
+    func getTimeline(in context: Context, completion: @escaping (Timeline<SpendingEntry>) -> Void) {
+        let now = entry()
+        completion(Timeline(entries: now.spending.map { [now, SpendingEntry(date: $0.until)] } ?? [now], policy: .never))
+    }
+    private func entry() -> SpendingEntry {
+        SpendingEntry(date: .now, spending: WidgetData.spending.flatMap { $0.until > .now ? $0 : nil })
+    }
+}
+
+struct OttoSpendingWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "dev.otto.spending", provider: SpendingProvider()) { entry in
+            SpendingDoor(entry: entry)
+                .containerBackground(.background, for: .widget)
+                .widgetURL(URL(string: "otto://money"))
+        }
+        .configurationDisplayName("This month’s spending")
+        .description("Shows what you’ve spent so far this month in each currency, and the category with the most.")
+        .supportedFamilies([.systemSmall])
+    }
+}
+
+/// The month so far: the main currency's total, any others under it as Money writes them, and the category with the
+/// most in the main one. A tap opens Money on this month. The amounts are hidden while the phone is locked (StandBy),
+/// as an approval's are. No tangerine: nothing here needs you.
+struct SpendingDoor: View {
+    let entry: SpendingEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            let month = entry.date.formatted(.dateTime.month(.wide))
+            ViewThatFits(in: .horizontal) {
+                Text("Spent in \(month)")
+                Text(month)   // the largest text sizes
+            }
+            .font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+            if let s = entry.spending, let main = s.totals.first {
+                Text(main.total, format: .currency(code: main.currency))
+                    .font(.title.weight(.semibold)).monospacedDigit()
+                    .lineLimit(1).minimumScaleFactor(0.5).widgetAccentable().privacySensitive()
+                    .layoutPriority(2)   // the total keeps its size; the line under it gives way
+                let others = s.totals.dropFirst().map { $0.total.formatted(.currency(code: $0.currency)) }
+                if let first = others.first {
+                    // All of them, else the first and how many more, else only how many (the largest text sizes):
+                    // whichever fits the room left, never an amount cut in half. Money has them all.
+                    ViewThatFits(in: .vertical) {
+                        Text("plus " + others.joined(separator: ", "))
+                        if others.count > 1 { Text("plus \(first) and \(others.count - 1) more") }
+                        Text("plus \(others.count) more").lineLimit(1)
+                    }
+                    .font(.footnote).foregroundStyle(.secondary).privacySensitive()
+                    .layoutPriority(1)   // the room before the gap below takes it
+                }
+                Spacer(minLength: 6)
+                if let top = s.top {
+                    Text(top.category).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                    Text(top.total, format: .currency(code: main.currency))
+                        .font(.subheadline.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75).privacySensitive()
+                }
+            } else {
+                // Read, and nothing yet; or not read since the month began, which a tap (the app coming to the front) fixes.
+                Text(entry.spending == nil ? "Tap to update" : "Nothing yet").font(.subheadline)
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 }
