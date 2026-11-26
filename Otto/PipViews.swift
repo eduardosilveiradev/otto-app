@@ -778,12 +778,7 @@ struct ActivityLine: View {
                 .padding(.horizontal, 14).padding(.vertical, 12)
                 .background(BubbleShape(mine: false, tail: true).fill(.incomingBubble))
                 let buttons = Message.actionButtons(member.buttons)
-                if !buttons.isEmpty {
-                    HStack(spacing: 16) {
-                        ForEach(buttons) { b in Button { press(b) } label: { Text(b.label).hitSlop() }.font(size: 15, relativeTo: .subheadline).tint(.actionInk) }
-                    }
-                    .padding(.leading, 12)
-                }
+                if !buttons.isEmpty { ActionPills(buttons: buttons, press: press) }
             }
             Spacer(minLength: 41)
         }

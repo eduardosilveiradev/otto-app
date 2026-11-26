@@ -1885,22 +1885,9 @@ private struct Row: View {
                     .multilineTextAlignment(.trailing).padding(.trailing, 4)
             }
 
-            // Otto's buttons read as suggested replies: plain blue text, no chrome.
-            // A draft keeps its buttons inside its card.
+            // Otto's buttons, as pills under the bubble. A draft keeps its buttons inside its card.
             if !message.buttons.isEmpty, message.draft == nil {
-                let buttons = ForEach(message.buttons) { b in
-                    Button { press(b) } label: { b.tapLabel.multilineTextAlignment(.leading).hitSlop() }
-                        .font(size: 15, relativeTo: .subheadline).tint(.actionInk)
-                        .accessibilityLabel(b.label.trimmingCharacters(in: .symbols.union(.whitespaces)))
-                        .accessibilityHint(b.tapHint)
-                }
-                // In a row while they fit; otherwise one per line, as a card's actions stack. 24pt apart there, so each
-                // 44pt hitSlop ends where the next one starts.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 16) { buttons }
-                    VStack(alignment: .leading, spacing: 24) { buttons }
-                }
-                .padding(.leading, 12)
+                ActionPills(buttons: message.buttons, press: press)
             }
 
             if message.pending == true && !thread.connected {
