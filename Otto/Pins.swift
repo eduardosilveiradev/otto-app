@@ -14,8 +14,15 @@ extension Pin {
 
     /// A picture of what it holds, when the phone has one: your photo, or one of Otto's already downloaded.
     @MainActor static func thumbnail(_ m: Message) -> UIImage? {
-        Thumbs.image(for: m) ?? m.files?.first { $0.kind == "image" }.flatMap { MediaCache.data[$0.id] }.flatMap(UIImage.init(data:))
+        if let mine = Thumbs.image(for: m) { return mine }
+        guard let f = m.files?.first(where: { $0.kind == "image" }) else { return nil }
+        if let hit = decoded.object(forKey: f.id as NSString) { return hit }
+        guard let img = MediaCache.data[f.id].flatMap(UIImage.init(data:)) else { return nil }
+        decoded.setObject(img, forKey: f.id as NSString)
+        return img
     }
+    /// Decoded once: the strip is drawn on every pass of the header.
+    private static let decoded = NSCache<NSString, UIImage>()
 
     static func symbol(_ m: Message) -> String {
         if m.isVoice || m.audio != nil { return "waveform" }
@@ -37,6 +44,9 @@ struct PinProblem {
 
 extension OttoStore {
     func showPins(_ list: [Pin]) {
+        // Every connect and every return to the app reads the list again: unchanged, nothing redraws.
+        func key(_ l: [Pin]) -> [String] { l.map { "\($0.id)|\($0.pinnedAt.timeIntervalSince1970)|\($0.message.text)" } }
+        guard key(list) != key(pins) else { return }
         withAnimation(UIAccessibility.isReduceMotionEnabled ? .easeOut(duration: 0.2) : .snappy) { pins = list }
     }
 

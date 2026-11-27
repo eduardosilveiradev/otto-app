@@ -52,7 +52,7 @@ const dropAt = process.env.TALK_DROP, downFor = Number(process.env.TALK_DOWN ?? 
 let downUntil = 0, dropped = false
 const rows: Record<string, unknown>[] = [   // the thread since start, as /app/history serves it
   { dir: 'out', text: 'Morning. Two things today: the dentist at 16:00 and the boiler man between 9 and 11.', ts: new Date(Date.now() - 3600_000).toISOString(), id: 'h1' },
-  { dir: 'out', text: '', ts: new Date(Date.now() - 3500_000).toISOString(), id: 'h2', card: { title: 'This week', blocks: [{ type: 'progress', value: 0.6, label: '3 of 5 workouts' }] } },
+  { dir: 'out', text: '', ts: new Date(Date.now() - 3500_000).toISOString(), id: 'h2', card: { title: 'This week', blocks: [{ type: 'progress', value: 0.6, label: '3 of 5 workouts' }], actions: [{ label: 'Log a workout', data: 'log a workout' }] } },
 ]
 type Pin = { id: string; pinnedAt: string; message: Record<string, unknown> }
 let pins: Pin[] = [], showoffUntil = 0
