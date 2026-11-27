@@ -138,6 +138,12 @@ shot chat cards-image-text 6 "Image and text cards" $O -cardThread image,text
 shot chat schedule-recorded 6 "Schedule chip, recorded chips (money, loop, memory, place, calendar write), wallet passes" $O -scheduleThread
 shot chat long-bubbles 6 "Long wrapping bubbles, links, terminal line" $O -seedThread
 shot chat thinking 6 "Otto typing with its live status line" $O -demoThread -thinking
+shot chat pins-one 6 "One pinned message: the strip under the header, no count" $O -demoThread -pins one
+shot chat pins-many 6 "The Mac's 20 pins: the newest in the strip, the count beside it" $O -demoThread -pins many
+shot chat pins-worst 6 "Pins at their worst: a long unbroken newest pin over the thread" $O -demoThread -pins worst
+shot chat pins-list 6 "The pins sheet: 20, newest first" $O -demoThread -pins many -pinsOpen all
+shot chat pins-list-worst 6 "The pins sheet: long text, a photo, a PDF and a card the thread no longer has" $O -demoThread -pins worst -pinsOpen all
+shot chat pins-detail 6 "A pin the thread no longer has, from the Mac's copy (here a long unbroken one)" $O -demoThread -pins worst -pinsOpen one
 shot chat thinking-todos 6 "Typing bubble with a to-do list" $O -demoThread -thinking -todos
 shot chat spinner-think 6 "Thinking mark, think (Wobble): a plain Thinking step" $O -demoThread -thinking -thinkingStatus Thinking
 shot chat spinner-look 6 "Thinking mark, look (Mull): reading a file" $O -demoThread -thinking -thinkingStatus "Reading ChatView.swift"

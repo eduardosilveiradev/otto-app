@@ -31,6 +31,12 @@
  * lands in the middle of a turn.
  *
  * GET /app/dash/people lists made-up people, for iPhone Search.
+ *
+ * Pins as otto-core's pins.ts keeps them: GET /app/pins, POST /app/pins and /app/pins/unpin {id} (404 for an id history
+ * hasn't got), and the whole list as a "pins" frame to every app on each change and on every connect. Your messages go
+ * into history, so they can be pinned too.
+ *   curl -X POST 'localhost:<port>/test/pin?id=h2'            pin (or /test/unpin) as the Mac would, from another device
+ *   curl -X POST 'localhost:<port>/test/showoff?seconds=20'    show-off mode for 20 s: pins go empty, and come back with no frame
  */
 const port = Number(process.argv[2] ?? 4599), delay = Number(process.argv[3] ?? 0), old = process.argv[4] === 'old', noscreen = process.argv[4] === 'noscreen', noimage = process.argv[4] === 'noimage'
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 23), ...a)
@@ -44,7 +50,26 @@ const talks = new Map<unknown, Talk>()
 const answerText = process.env.TALK_TEXT ?? 'Sunlight is a mix of every colour. The air scatters blue light much more than red.'
 const dropAt = process.env.TALK_DROP, downFor = Number(process.env.TALK_DOWN ?? 7) * 1000
 let downUntil = 0, dropped = false
-const rows: Record<string, unknown>[] = []   // the thread since start, as /app/history serves it
+const rows: Record<string, unknown>[] = [   // the thread since start, as /app/history serves it
+  { dir: 'out', text: 'Morning. Two things today: the dentist at 16:00 and the boiler man between 9 and 11.', ts: new Date(Date.now() - 3600_000).toISOString(), id: 'h1' },
+  { dir: 'out', text: '', ts: new Date(Date.now() - 3500_000).toISOString(), id: 'h2', card: { title: 'This week', blocks: [{ type: 'progress', value: 0.6, label: '3 of 5 workouts' }] } },
+]
+type Pin = { id: string; pinnedAt: string; message: Record<string, unknown> }
+let pins: Pin[] = [], showoffUntil = 0
+const visiblePins = () => Date.now() < showoffUntil ? [] : pins
+const pinsFrame = () => JSON.stringify({ type: 'pins', pins: visiblePins() })
+/** POST /app/pins and /app/pins/unpin, as otto/http.ts's appPin: the list, or the status it refuses with. */
+function setPin(id: unknown, on: boolean): Pin[] | number {
+  if (typeof id !== 'string' || !id) return 400
+  const row = rows.findLast(r => r.id === id)
+  if (on && !row) return 404
+  const at = pins.findIndex(p => p.id === id)
+  if (on) pins = at >= 0 ? pins.map(p => p.id === id ? { ...p, message: row! } : p) : [...pins, { id, pinnedAt: new Date().toISOString(), message: row! }].slice(-20)
+  else pins = pins.filter(p => p.id !== id)
+  log(on ? 'pin' : 'unpin', id, '->', pins.length)
+  for (const ws of sockets) ws.send(pinsFrame())
+  return visiblePins()
+}
 const taken = new Map<string, string>()   // what Otto took in, by id: one per thing you said
 function takeIn(id: string, how: string): boolean {
   if (taken.has(id)) { log(`deduped ${how} ${id} (already in by ${taken.get(id)})`); return false }
@@ -139,7 +164,18 @@ Bun.serve({
       return Response.json(a)
     }
     if (p === '/test/settle') { const id = u.searchParams.get('id')!; approvals.delete(id); if (u.searchParams.get('quiet') !== '1') for (const ws of sockets) ws.send(JSON.stringify({ type: 'approval_done', id })); return Response.json({ ok: true }) }
-    if (p === '/app/history') return Response.json([{ dir: 'out', text: 'Morning. Two things today: the dentist at 16:00 and the boiler man between 9 and 11.', ts: new Date(Date.now() - 3600_000).toISOString(), id: 'h1' }, ...rows])
+    if (p === '/app/history') return Response.json(rows)
+    if (p === '/app/pins' && req.method === 'GET') return Response.json({ pins: visiblePins() })
+    if ((p === '/app/pins' || p === '/app/pins/unpin') && req.method === 'POST') {
+      const r = setPin(((await req.json().catch(() => ({}))) as { id?: unknown }).id, p === '/app/pins')
+      return typeof r === 'number' ? new Response(null, { status: r }) : Response.json({ pins: r })
+    }
+    if (p === '/test/pin' || p === '/test/unpin') { const r = setPin(u.searchParams.get('id'), p === '/test/pin'); return Response.json({ pins: r }) }
+    if (p === '/test/showoff') {
+      showoffUntil = Date.now() + Number(u.searchParams.get('seconds') ?? 20) * 1000
+      for (const ws of sockets) { ws.send(JSON.stringify({ type: 'showoff', on: true, until: new Date(showoffUntil).toISOString() })); ws.send(pinsFrame()) }
+      return Response.json({ until: new Date(showoffUntil).toISOString() })
+    }
     if (p === '/app/brief') return Response.json({ asOf: new Date().toISOString(), events: [], inbox: [], bulk: 0, loops: [], triggers: [] })
     if (p === '/app/settings') return Response.json({ toggles: [] })
     if (old) return new Response('not found', { status: 404 })
@@ -165,7 +201,8 @@ Bun.serve({
   websocket: {
     open(ws) {
       sockets.add(ws); log('socket open')
-      ws.send(JSON.stringify({ type: 'hello', acks: true, ...(old ? {} : { alerts: ['approval'], stop: true }) }))
+      ws.send(JSON.stringify({ type: 'hello', acks: true, ...(old ? {} : { alerts: ['approval'], stop: true }), ...(Date.now() < showoffUntil ? { showoff: { until: new Date(showoffUntil).toISOString() } } : {}) }))
+      ws.send(pinsFrame())
       for (const a of approvals.values()) ws.send(frame(a))
       if (browsing && !old) ws.send(browserFrame())
     },
@@ -216,6 +253,7 @@ Bun.serve({
           return
         }
         if (f.type === 'approval_alerted') { alerted.add(f.id); return }
+        if (f.type === 'message' && typeof f.id === 'string') rows.push({ dir: 'in', text: f.text ?? '', ts: new Date().toISOString(), id: f.id })
         if (f.type === 'stop') {
           // The turn ends: typing off, and a word in the thread about where it got to.
           for (const s of sockets) { s.send(JSON.stringify({ type: 'typing', on: false })); s.send(JSON.stringify({ type: 'todos', items: [] })) }

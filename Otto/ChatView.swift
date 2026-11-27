@@ -130,6 +130,8 @@ struct ChatView: View {
     @State private var pinnedAtSwipe = false
     /// The quote jump in flight; a second tap replaces it, so an old one can't end the new flash early.
     @State private var jumping: Task<Void, Never>?
+    /// The pins sheet (Pins.swift).
+    @State private var pinSheet: PinSheet?
 
     /// Search: pulled down past the top of the thread (or on the header), as in Messages and Mail.
     /// Open while `ui.searching`, which the composer reads too.
@@ -215,6 +217,11 @@ struct ChatView: View {
         }
     }
     @Environment(\.accessibilityReduceMotion) private var still
+
+    /// The strip's pin: to it in the thread, lit up as a quote's is; one the thread no longer has opens on its own page.
+    private func openPin(_ p: Pin) {
+        if let m = thread.messages.first(where: { $0.wireID == p.id }) { jump(to: m.id) } else { pinSheet = .one(p.id) }
+    }
 
     /// Every scroll the thread makes goes through here, so none of them can jump or ignore the system's setting:
     /// - in one step under Reduce Motion, or while a burst of rows lands at once (a catch-up);
@@ -308,6 +315,7 @@ struct ChatView: View {
         }
         .modifier(ThreadSeen(pips: store.pips, thread: thread) { await jumpToMatch() })
         .modifier(Beats(thread: thread, jobs: store.jobs, hops: $hops, joys: $joys))
+        .modifier(PinsPresenter(sheet: $pinSheet, messages: thread.isOtto ? messages : [], jump: jump))
         .task(id: store.connected) { if thread.isOtto { await gate.run(store.backend) } }
         .sheet(isPresented: $showGate) { GateSheet(watch: gate) }
         // `-openGate`: open the boarding pass as soon as there is one, for screenshots.
@@ -692,6 +700,11 @@ struct ChatView: View {
                 SearchBar(query: $query, focused: $searchFocused, close: { closeSearch() })
                     .transition(still ? .opacity : .move(edge: .top).combined(with: .opacity))
             }
+            if thread.isOtto, !ui.searching, let latest = store.pins.last {
+                PinnedStrip(pin: latest, count: store.pins.count, local: thread.messages.first { $0.wireID == latest.id },
+                            open: { openPin(latest) }, list: { pinSheet = .all }, unpin: { store.unpin(latest.id) })
+                    .transition(still ? .opacity : .move(edge: .top).combined(with: .opacity))
+            }
             if thread.isOtto, let live = calls.live {
                 CallBanner(call: live) { openCall = live }
                     .transition(still ? .opacity : .move(edge: .top).combined(with: .opacity))
@@ -703,6 +716,7 @@ struct ChatView: View {
         }
         .animation(.snappy, value: calls.live?.id)
         .animation(.snappy, value: gate.card?.key)
+        .animation(still ? .easeOut(duration: 0.2) : .snappy, value: store.pins.isEmpty)
         // The thread fades out under the bar, as in Messages: the soft scroll edge alone blurs only up by the
         // status bar, so bubbles read sharp behind the face and the banners. Solid under the bar, then a 40pt
         // fade below it, longer than a line of text so the line there fades instead of looking sliced.
@@ -1653,6 +1667,12 @@ private struct Row: View {
     }
     /// Otto's transport has tapbacks and quoted replies; the conversation API has neither.
     private var canAnswer: Bool { thread.isOtto && !message.isConversation }
+    /// Pin or Unpin: Otto's thread only, and only once the Mac has the message (it pins from its history).
+    private var pinChoice: PinChoice? {
+        guard canAnswer, message.pending != true, message.failed != true, message.call == nil, message.from != .terminal else { return nil }
+        let id = message.wireID, pinned = store.pins.contains { $0.id == id }
+        return PinChoice(pinned: pinned) { [store, message] in if pinned { store.unpin(id) } else { store.pin(message) } }
+    }
     private func react(_ e: String) {
         guard !mine, canAnswer else { return }
         thread.react(e, on: message.id); reacted += 1
@@ -1686,6 +1706,7 @@ private struct Row: View {
     /// combined element, so they're here too.
     private var spokenExtras: [(String, () -> Void)] {
         var a: [(String, () -> Void)] = [("Select Text", { selecting = true })]
+        if let p = pinChoice { a.insert((p.label, p.toggle), at: 0) }
         if !mine, message.why != nil { a.append(("Why this?", { whyShown = true })) }
         if let url = firstLink { a.append(("Open Link", { openURL(url) })) }
         return a
@@ -1699,6 +1720,7 @@ private struct Row: View {
     @ViewBuilder private var bubbleMenu: some View {
         Self.palette(message, react: react)
         if canAnswer { Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply) }
+        if let p = pinChoice { p.button }
         Button("Copy", systemImage: "doc.on.doc", action: copyText)
         Button("Select Text", systemImage: "selection.pin.in.out") { selecting = true }
         if !mine, message.why != nil {
@@ -1761,12 +1783,12 @@ private struct Row: View {
                     .onTapGesture { MediaViewer.shared.start = message.id.uuidString }
                     .accessibilityLabel(mine ? "You: photo" : "\(name(of: message)): photo")
                     .accessibilityAddTraits([.isImage, .isButton])
-                    .modifier(Reactable(message: message, badge: !textShown, reactor: reactor, react: react, reply: reply, copy: { UIPasteboard.general.image = img }))
+                    .modifier(Reactable(message: message, badge: !textShown, reactor: reactor, react: react, reply: reply, pin: pinChoice, copy: { UIPasteboard.general.image = img }))
             }
             ForEach(Array((message.files ?? []).enumerated()), id: \.element.id) { i, f in
                 Group { if StudySet.isStudy(f) { StudyBubble(file: f) } else { RemoteFileView(file: f, passNumber: passNumber(f)) } }
                     .modifier(Reactable(message: message, badge: !textShown && Thumbs.image(for: message) == nil && i == 0, reactor: reactor, react: react, reply: reply,
-                                        copy: f.kind == "image" ? { if let d = MediaCache.data[f.id], let img = UIImage(data: d) { UIPasteboard.general.image = img } } : nil))
+                                        pin: pinChoice, copy: f.kind == "image" ? { if let d = MediaCache.data[f.id], let img = UIImage(data: d) { UIPasteboard.general.image = img } } : nil))
             }
             if textShown {
             VStack(alignment: .leading, spacing: 8) {
@@ -1842,7 +1864,9 @@ private struct Row: View {
             }
             if let g = message.groupLink { GroupLinkBubble(group: g) { store.pips.open(g.id) } }
             if !mine, let card = message.card, !card.shown.isEmpty {
-                CardView(card: card, press: press)
+                // A card with no bubble over it carries the message's menu (Pin, and the rest a bubble has).
+                if textShown || Thumbs.image(for: message) != nil || !(message.files ?? []).isEmpty { CardView(card: card, press: press) }
+                else { CardView(card: card, press: press).modifier(Reactable(message: message, badge: true, reactor: reactor, react: react, reply: reply, pin: pinChoice)) }
             }
             if !mine, let ids = message.jobs, !ids.isEmpty {
                 // Each coding job this message started, as the Mac has it now. One it hasn't told us about
@@ -1869,6 +1893,7 @@ private struct Row: View {
                         // Part of the same message, so the same tapbacks and Reply as its bubble.
                         Self.palette(message, react: react)
                         Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
+                        if let p = pinChoice { p.button }
                         if let url = Self.previewURL(message) {
                             Button("Open Link", systemImage: "safari") { openURL(url) }
                             Button("Copy Link", systemImage: "link") { UIPasteboard.general.url = url }
@@ -1877,9 +1902,9 @@ private struct Row: View {
                     }
                     // A bare link is only this card: it carries the message's actions for VoiceOver too.
                     .modifier(SpokenActions(message: message, label: nil, reactor: reactor, react: react, reply: reply,
-                                            copy: nil, extra: Self.previewURL(message).map { url in
+                                            copy: nil, extra: (pinChoice.map { [($0.label, $0.toggle)] } ?? []) + (Self.previewURL(message).map { url in
                                                 [("Copy Link", { UIPasteboard.general.url = url }), ("Share Link", { sharing = url })]
-                                            } ?? [], enabled: !textShown))
+                                            } ?? []), enabled: !textShown))
             }
             // What you said, under your voice note; Otto's sits inside its bubble.
             if mine, message.isVoice, !message.text.isEmpty {
@@ -2089,7 +2114,7 @@ private struct QuoteLabel: LabelStyle {
 /// A photo, video or file Otto sent. Photos and videos show inline and open in the media viewer, a Wallet pass opens
 /// Add to Wallet, anything else opens in Quick Look.
 /// A photo or video holds its place in a still box while its bytes download.
-private struct RemoteFileView: View {
+struct RemoteFileView: View {
     @Environment(OttoStore.self) private var store
     let file: RemoteFile
     /// Its number among the message's passes, when there's more than one.
@@ -2509,6 +2534,7 @@ private struct Reactable: ViewModifier {
     let reactor: String
     let react: (String) -> Void
     let reply: () -> Void
+    var pin: PinChoice? = nil
     /// A photo copies as the picture; other files have nothing to copy.
     var copy: (() -> Void)? = nil
     func body(content: Content) -> some View {
@@ -2523,10 +2549,12 @@ private struct Reactable: ViewModifier {
             .contextMenu {
                 Row.palette(message, react: react)
                 Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
+                if let pin { pin.button }
                 if let copy { Button("Copy", systemImage: "doc.on.doc", action: copy) }
             }
             // The message's own actions once (where the tapback sits); a photo's Copy on every photo.
-            .modifier(SpokenActions(message: message, label: nil, reactor: reactor, react: react, reply: reply, copy: copy, extra: [], enabled: badge))
+            .modifier(SpokenActions(message: message, label: nil, reactor: reactor, react: react, reply: reply, copy: copy,
+                                    extra: pin.map { [($0.label, $0.toggle)] } ?? [], enabled: badge))
     }
 }
 
@@ -3330,8 +3358,14 @@ final class VoiceRecorder {
     func cancel() { if let url = stop() { try? FileManager.default.removeItem(at: url) } }
 }
 
+/// The bubble's words and summary, for the pins strip and sheet (Pins.swift).
+extension Pin {
+    static func summary(_ m: Message) -> String { Row.summary(m) }
+    static func linked(_ s: String) -> AttributedString { Row.linked(s) }
+}
+
 /// Decoded photos, so scrolling past one doesn't re-decode its JPEG on every frame.
-private enum Thumbs {
+enum Thumbs {
     static let cache = NSCache<NSUUID, UIImage>()
     static func image(for m: Message) -> UIImage? {
         guard m.isPhoto else { return nil }

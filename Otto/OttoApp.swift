@@ -270,6 +270,11 @@ final class OttoStore {
     func sawHelpers() {
         for h in helpers where h.state == .failed { Task { await backend.seen(helper: h.id) } }
     }
+    /// Pinned messages, oldest first, as the Mac last listed them; the strip over the thread shows the newest (Pins.swift).
+    /// Memory only: show-off mode empties them, and a copy saved here could put them on a shared screen.
+    var pins: [Pin] = []
+    /// Pinning or unpinning didn't take: the thread says why, once.
+    var pinProblem: PinProblem?
     /// What Otto is doing in Chrome: the tile over the thinking orb. Memory only, like the frames
     /// it comes from; the picture is decoded once here, not on every pass of the thread.
     var browser: LiveBrowser?
@@ -969,6 +974,7 @@ final class OttoStore {
                 : [TodoItem(text: "Book the boiler service", status: .pending),
                    TodoItem(text: "Drafting the reply to the landlord", status: .in_progress)]
         }
+        seedPins()
         #endif
         // Anything the server has that's newer than what's saved here, e.g. replies
         // that landed while the app was closed.
@@ -995,6 +1001,7 @@ final class OttoStore {
         Task { for await items in backend.openTodoLists { openTodos = items } }
         Task { for await list in backend.jobLists { jobs.set(list) } }
         Task { for await list in backend.helperLists { showHelpers(list) } }
+        Task { for await list in backend.pinLists { showPins(list) } }
         Task { for await tile in backend.browserTiles { browser = tile.map { LiveBrowser(tile: $0, shot: $0.image.flatMap(UIImage.init(data:))) } } }
         Task {
             for await items in backend.todoLists {
@@ -1306,7 +1313,7 @@ final class OttoStore {
     /// the fact that the server has it after all.
     /// Back in front: a socket iOS froze in the background looks alive but dropped what was sent into it
     /// (a tapback, an edit, a reply), and no reconnect means no catch-up. One history read fills it in.
-    func resync(probe: Bool = true) { Task { if probe { await backend.probe() }; await catchUp(notify: false) }; Task { await syncApprovals() }; Task { await syncArriving(); await syncSpending() } }
+    func resync(probe: Bool = true) { Task { if probe { await backend.probe() }; await catchUp(notify: false) }; Task { await syncApprovals() }; Task { await syncArriving(); await syncSpending() }; Task { await rereadPins() } }
 
     /// Otto deleted these (a live "delete" frame, or history on reconnect): out of the thread and the
     /// saved copy, with what pointed at them. An id that isn't here changes nothing.

@@ -16,6 +16,11 @@ what Otto knows about your day.
 - Text, photos and voice notes to Otto; Otto's replies, photos, files and
   spoken replies back
 - Swipe to reply, long-press for tapbacks, double-tap for a quick ❤️
+- Pinned messages: touch and hold a message and tap Pin. The newest pin
+  sits in a strip under Otto's name; tap it to go to the message (or, once
+  the thread no longer has it, to open the Mac's copy with its card and
+  files). With more than one, the count beside it lists them all. Pins are
+  the same on the phone and the Mac, up to 20, and show-off mode hides them
 - A live status line in the typing bubble while Otto works, and
   Delivered / Read receipts
 - Otto's one-tap buttons
@@ -139,6 +144,9 @@ does that on every idle beat), `-drowsy YES` or `NO` (the quiet-hours face, what
 `-quickReply` (the sample backend answers a message in 1.5 s) and, with `-jobsThread`, `-jobsMerge`
 (the running job merges 8 s in). `-openPerson <name>` opens a person's page as a tap in iPhone Search
 does (`-openPersonAfter 5` waits that long first; `-openPerson "A|B"` opens one, then the other).
+`-pins one|many|worst` pins messages of the thread a seed laid out (`many` is the Mac's 20; `worst` adds a
+long unbroken newest pin and a photo, a card and a PDF the thread no longer has), and `-pinsOpen all` or
+`-pinsOpen one` opens the list or the newest pin's page.
 
 A Release build with `OTHER_SWIFT_FLAGS='$(inherited) -DPERFDEMO'` also takes `-perfDemo`
 (sends, typing steps, tapbacks and replies in a loop, then prints how many frames ran late)
