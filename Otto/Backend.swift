@@ -170,6 +170,14 @@ extension [Message] {
     }
 }
 
+/// A message of Otto's thread kept at hand, the same on every device (otto-core's pins.ts). `id` is the
+/// message's wireID; `message` is the Mac's copy of it as it read when pinned, which outlives history.
+struct Pin: Identifiable {
+    let id: String
+    let pinnedAt: Date
+    let message: Message
+}
+
 struct RemoteFile: Codable, Hashable {
     let id: String
     let name: String
@@ -347,6 +355,20 @@ protocol OttoBackend: AnyObject {
     var helperLists: AsyncStream<[Helper]> { get }
     /// A stopped helper has been seen: the Mac lets it go.
     func seen(helper id: String) async
+    /// Pinned messages, oldest first, whole each time: the socket's "pins" frame, on every connect and after
+    /// every change from any device (the Mac's too).
+    var pinLists: AsyncStream<[Pin]> { get }
+    /// `id` nil reads the list (GET /app/pins); otherwise pins (`on`) or unpins that message.
+    /// The list as the Mac now has it, or why not.
+    func pins(_ id: String?, on: Bool) async -> PinOutcome
+}
+
+enum PinOutcome {
+    case done([Pin])
+    /// The Mac's history has no such message (a 404): it never reached the Mac, or is too old to pin.
+    case unknown
+    /// No answer, or one that can't be read.
+    case failed
 }
 
 struct PipResponse { let status: Int; let data: Data }
@@ -387,6 +409,8 @@ extension OttoBackend {
     func jobs() async -> [CodeJob]? { nil }
     var helperLists: AsyncStream<[Helper]> { AsyncStream { _ in } }
     func seen(helper id: String) async {}
+    var pinLists: AsyncStream<[Pin]> { AsyncStream { _ in } }
+    func pins(_ id: String?, on: Bool) async -> PinOutcome { .failed }
     func jobAction(_ verb: JobVerb, id: String, text: String?) async -> JobOutcome { .failed(String(localized: "This is sample data: there’s no Mac to tell.")) }
     func pipRequest(_ method: String, _ path: String, query: [URLQueryItem], body: Data?) async -> PipResponse? { nil }
 }

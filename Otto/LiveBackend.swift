@@ -50,6 +50,9 @@ import Foundation
 ///                   A done one leaves 6 s after it ended; a failed one stays until we send {"type":"helpers.seen","id"} (Helpers.swift)
 ///                  {"type":"voice","id":"<id>","voice":{"id","name","kind"}|null}   the spoken version of a message
 ///                   that came with "voicePending":true (we connect with ?voiceLater=1); null = none coming
+///                  {"type":"pins","pins":[{"id","pinnedAt":"<ISO>","message":<its history row as it read when pinned>}]}   the
+///                   pinned messages, oldest first, at most 20, whole: on every connect (empty too) and after every change from any
+///                   device. Empty while show-off mode is live; the hello's "showoff":{"until"} says when to read GET /app/pins again
 ///   talk mode, on the same socket (otto-core's otto/talk.ts has the whole protocol; Talk.swift speaks it):
 ///     app -> otto  {"type":"talk.start"}, {"type":"talk.audio","audio":"<base64 16 kHz mono s16le, ≤ 200 ms>"},
 ///                  {"type":"talk.end"} (the phone's pause), {"type":"talk.cut"} (you talked over Otto), {"type":"talk.stop"}
@@ -67,6 +70,8 @@ import Foundation
 ///   POST <server>/app/ask     {"id","text","via":"siri"|"here","place"?} -> {"reply"?:{"id","text","buttons"}}  (Siri; waits for Otto's first reply)
 ///   POST <server>/app/photo?snap=1&id=<uuid>  JPEG body -> the same answer, for the Snap intent
 ///   POST <server>/app/health  JSON {notifications, backgroundRefresh, keepAwake, shareConfigured, lastRefresh?, build, version, ios, reason} -> 204
+///   GET  <server>/app/pins      {"pins":[…]} as the frame; POST /app/pins {"id"} pins a message (404: history has no such id),
+///                   POST /app/pins/unpin {"id"} unpins it; both answer {"pins"} and send every app the frame
 ///   <server>/app/dash/*         the web dashboard's API (otto/dash-types.ts), same token
 final class LiveBackend: OttoBackend {
     let name = "Otto server"
@@ -84,6 +89,7 @@ final class LiveBackend: OttoBackend {
     let browserTiles: AsyncStream<BrowserTile?>
     let jobLists: AsyncStream<[CodeJob]>
     let helperLists: AsyncStream<[Helper]>
+    let pinLists: AsyncStream<[Pin]>
     let desktopSync: DesktopSync?
     let reads: AsyncStream<[String]>
     let typing: AsyncStream<Bool>
@@ -107,6 +113,9 @@ final class LiveBackend: OttoBackend {
     private let browserOut: AsyncStream<BrowserTile?>.Continuation
     private let jobsOut: AsyncStream<[CodeJob]>.Continuation
     private let helpersOut: AsyncStream<[Helper]>.Continuation
+    private let pinsOut: AsyncStream<[Pin]>.Continuation
+    /// Show-off mode ends on its own with no frame: the pins are read again then.
+    private var showoffEnd: Task<Void, Never>?
     private let readIDs: AsyncStream<[String]>.Continuation
     private let typingOn: AsyncStream<Bool>.Continuation
     private let approvalOut: AsyncStream<ApprovalUpdate>.Continuation
@@ -164,6 +173,7 @@ final class LiveBackend: OttoBackend {
         (browserTiles, browserOut) = AsyncStream.makeStream()
         (jobLists, jobsOut) = AsyncStream.makeStream()
         (helperLists, helpersOut) = AsyncStream.makeStream()
+        (pinLists, pinsOut) = AsyncStream.makeStream()
         (reads, readIDs) = AsyncStream.makeStream()
         (typing, typingOn) = AsyncStream.makeStream()
         (approvalUpdates, approvalOut) = AsyncStream.makeStream()
@@ -175,7 +185,7 @@ final class LiveBackend: OttoBackend {
         loop = Task { [weak self] in await self?.run() }
     }
 
-    deinit { loop?.cancel(); socket?.cancel(with: .goingAway, reason: nil); wsSession.invalidateAndCancel() }
+    deinit { loop?.cancel(); showoffEnd?.cancel(); socket?.cancel(with: .goingAway, reason: nil); wsSession.invalidateAndCancel() }
 
     private static func origin(_ url: URL) -> URL {
         var c = URLComponents(url: url, resolvingAgainstBaseURL: false)!
@@ -215,22 +225,66 @@ final class LiveBackend: OttoBackend {
         }
         // Ids make the merge exact: yours come back under the UUID this phone sent them with.
         // One of yours without an id (written before they had one) can't be matched, so it's left out.
-        return rows.filter { $0.dir != "in" || $0.id != nil || $0.kind == "terminal" }.map { r in
-            var m = r.kind == "terminal" ? Self.terminal(r.text, ts: r.ts)
-            : r.dir == "in"
-                // Preserve the exact wire ID, including UUID casing from other devices.
-                // A voice note of yours from another device (the Mac) carries the server's copy of its audio.
-                ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: Self.date(r.ts) ?? Date(), isVoice: r.voice != nil,
-                          shared: r.shared, serverID: r.id, read: r.read, audio: r.voice)
-                : Message(from: .otto, text: r.text, date: Self.date(r.ts) ?? Date(),
-                          buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
-                          isVoice: r.voice != nil || r.voicePending == true, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
-                          thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled, recorded: r.recorded, card: r.card,
-                          jobs: r.jobs ?? r.job.map { [$0] }, quiet: r.quiet)
-            m.reaction = r.reaction
-            if r.kind == "edit" || r.kind == "reaction" { m.patch = r.kind }
-            return m
-        } + gone
+        return rows.filter { $0.dir != "in" || $0.id != nil || $0.kind == "terminal" }.map(Self.message) + gone
+    }
+
+    /// One /app/history row as a message; a pin's copy is one of these too.
+    private static func message(_ r: WireHistory) -> Message {
+        var m = r.kind == "terminal" ? terminal(r.text, ts: r.ts)
+        : r.dir == "in"
+            // Preserve the exact wire ID, including UUID casing from other devices.
+            // A voice note of yours from another device (the Mac) carries the server's copy of its audio.
+            ? Message(id: r.id.flatMap(UUID.init(uuidString:)) ?? UUID(), from: .me, text: r.text, date: date(r.ts) ?? Date(), isVoice: r.voice != nil,
+                      shared: r.shared, serverID: r.id, read: r.read, audio: r.voice)
+            : Message(from: .otto, text: r.text, date: date(r.ts) ?? Date(),
+                      buttons: (r.buttons ?? []).map { ActionButton(label: $0.label, data: $0.data, url: $0.url, copy: $0.copy) },
+                      isVoice: r.voice != nil || r.voicePending == true, serverID: r.id, replyTo: r.reply_to, files: r.files, audio: r.voice,
+                      thread: r.thread, level: r.level, src: r.src, why: r.why, scheduled: r.scheduled, recorded: r.recorded, card: r.card,
+                      jobs: r.jobs ?? r.job.map { [$0] }, quiet: r.quiet)
+        m.reaction = r.reaction
+        if r.kind == "edit" || r.kind == "reaction" { m.patch = r.kind }
+        return m
+    }
+
+    /// The pins of a frame or an answer. One that doesn't read is left out rather than losing them all;
+    /// nil only when the list itself doesn't, so a bad frame never reads as "none pinned".
+    static func pins(from data: Data) -> [Pin]? {
+        struct One: Decodable {
+            let pin: Pin?
+            init(from d: Decoder) throws {
+                struct Wire: Decodable { let id: String; let pinnedAt: String; let message: WireHistory }
+                pin = (try? Wire(from: d)).flatMap { w in LiveBackend.date(w.pinnedAt).map { Pin(id: w.id, pinnedAt: $0, message: LiveBackend.message(w.message)) } }
+            }
+        }
+        struct List: Decodable { let pins: [One] }
+        return (try? JSONDecoder().decode(List.self, from: data))?.pins.compactMap(\.pin)
+    }
+
+    func pins(_ id: String?, on: Bool) async -> PinOutcome {
+        var req = URLRequest(url: base.appending(path: id == nil ? "app/pins" : on ? "app/pins" : "app/pins/unpin"), timeoutInterval: 15)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let id {
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: ["id": id])
+        }
+        guard let (data, resp) = try? await session.data(for: req), let code = (resp as? HTTPURLResponse)?.statusCode else { return .failed }
+        if code == 404 && id != nil && on { return .unknown }
+        guard code == 200, let list = Self.pins(from: data) else { return .failed }
+        return .done(list)
+    }
+
+    /// Show-off mode is on until `until`: past it the Mac sends no frame, so the pins are read again then.
+    private func rereadPins(after until: String?) {
+        guard let end = Self.date(until), end > .now else { return }
+        lock.withLock {
+            showoffEnd?.cancel()
+            showoffEnd = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(end.timeIntervalSinceNow + 2))
+                guard !Task.isCancelled, let self, case .done(let list) = await pins(nil, on: false) else { return }
+                pinsOut.yield(list)
+            }
+        }
     }
 
     /// Straight onto the open socket, no outbox: the store keeps unsent messages
@@ -479,6 +533,7 @@ final class LiveBackend: OttoBackend {
                 // pair is saved. Anything else (no network, a Mac asleep or out of reach, a timeout) only waits for the next try.
                 if refusals >= Pairing.refusalsToForget {
                     let gone = lock.withLock { pair }
+                    pinsOut.yield([])   // that Mac's pins go with its token
                     await MainActor.run { if Pairing.forget(token: gone.token) { PeopleSearch.clear(); NotificationCenter.default.post(name: Pairing.forgotten, object: nil) } }
                     while !Task.isCancelled {
                         try? await Task.sleep(for: .seconds(2))
@@ -543,10 +598,15 @@ final class LiveBackend: OttoBackend {
             // The coding jobs, whole: on connect when the Mac has them, and whenever one changes.
             if k.type == "helpers" { if let f = try? JSONDecoder().decode(HelperFrame.self, from: data) { helpersOut.yield(f.helpers) }; return }
             if k.type == "jobs" { if let w = try? JSONDecoder().decode(CodeJobs.self, from: data) { jobsOut.yield(w.jobs) }; return }
+            if k.type == "pins" { if let list = Self.pins(from: data) { pinsOut.yield(list) }; return }
+            // Show-off mode, turned on or off from any device: it ends on its own at `until`, with no frame.
+            struct Showoff: Decodable { let until: String? }
+            if k.type == "showoff" { rereadPins(after: (try? JSONDecoder().decode(Showoff.self, from: data))?.until); return }
             if k.type == "hello" {
-                struct Hello: Decodable { let alerts: [String]?; let stop: Bool? }
+                struct Hello: Decodable { let alerts: [String]?; let stop: Bool?; let showoff: Showoff? }
                 let hello = try? JSONDecoder().decode(Hello.self, from: data)
                 lock.withLock { acksOn = true; appAlerts = Set(hello?.alerts ?? []); canStopTurn = hello?.stop == true }
+                rereadPins(after: hello?.showoff?.until)
                 return
             }
             if k.type == "reminders" {
